@@ -1,0 +1,186 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/Hoosk/motoko/internal/provider"
+	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tools"
+)
+
+const maxToolIterations = 4
+
+type Result struct {
+	Assistant  string
+	Steps      []Step
+	Usage      provider.Usage
+	AgentLabel string
+	Duration   time.Duration
+	Context    ContextSnapshot
+}
+
+type ContextSnapshot struct {
+	Signals          string
+	Semantic         string
+	RelevantFiles    string
+	RelevantSnippets string
+}
+
+type Step struct {
+	Kind    string
+	Title   string
+	Content string
+}
+
+type Agent struct {
+	provider provider.Client
+	tools    *tools.Registry
+	debug    bool
+}
+
+type StreamEvent struct {
+	Kind    string
+	Content string
+}
+
+func New(p provider.Client, toolsRegistry *tools.Registry) *Agent {
+	return &Agent{provider: p, tools: toolsRegistry}
+}
+
+func (a *Agent) SetDebug(enabled bool) {
+	a.debug = enabled
+}
+
+func (a *Agent) Configured() bool {
+	return a != nil && a.provider != nil && a.provider.Configured() && a.tools != nil
+}
+
+func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string) (Result, error) {
+	return a.run(ctx, info, userInput, nil)
+}
+
+func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInput string, onEvent func(StreamEvent) error) (Result, error) {
+	return a.run(ctx, info, userInput, onEvent)
+}
+
+func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, onEvent func(StreamEvent) error) (Result, error) {
+	if !a.Configured() {
+		return Result{}, fmt.Errorf("agente no configurado")
+	}
+	startedAt := time.Now()
+
+	messages := []provider.Message{{Role: "user", Content: userInput}}
+	steps := []Step{{Kind: "user", Title: "prompt", Content: userInput}}
+	totalUsage := provider.Usage{}
+	seenToolCalls := make(map[string]struct{})
+	contextSnapshot := ContextSnapshot{
+		Signals:          info.SignalSummary(),
+		Semantic:         info.SemanticSummary,
+		RelevantFiles:    info.RelevantFilesSummary(),
+		RelevantSnippets: info.RelevantSnippetsSummary(),
+	}
+
+	for i := 0; i < maxToolIterations; i++ {
+		resp, err := a.complete(ctx, info, messages, onEvent)
+		if err != nil {
+			return Result{}, err
+		}
+		totalUsage.InputTokens += resp.Usage.InputTokens
+		totalUsage.OutputTokens += resp.Usage.OutputTokens
+		totalUsage.TotalTokens += resp.Usage.TotalTokens
+		if a.debug {
+			steps = append(steps, Step{Kind: "debug", Title: "provider", Content: fmt.Sprintf("completion %d tokens in:%d out:%d total:%d", i+1, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)})
+		}
+
+		if resp.ToolCall == nil {
+			message := strings.TrimSpace(resp.Message)
+			if message == "" {
+				message = "No tengo una respuesta util todavia."
+			}
+			steps = append(steps, Step{Kind: "assistant", Title: "answer", Content: message})
+			return Result{Assistant: message, Steps: steps, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot}, nil
+		}
+
+		toolName := strings.TrimSpace(resp.ToolCall.Name)
+		toolInput := strings.TrimSpace(resp.ToolCall.Input)
+		toolKey := toolName + "\x00" + toolInput
+		if _, seen := seenToolCalls[toolKey]; seen {
+			return Result{}, fmt.Errorf("ciclo de tool detectado: %s %s", toolName, toolInput)
+		}
+		seenToolCalls[toolKey] = struct{}{}
+		steps = append(steps, Step{Kind: "tool", Title: toolName, Content: toolInput})
+
+		result, err := a.tools.Run(ctx, toolName, toolInput)
+		if err != nil {
+			errText := fmt.Sprintf("tool error: %v", err)
+			steps = append(steps, Step{Kind: "error", Title: toolName, Content: errText})
+			messages = append(messages,
+				provider.Message{Role: "assistant", Content: fmt.Sprintf("Voy a usar la tool %s.", toolName)},
+				provider.Message{Role: "user", Content: errText},
+			)
+			continue
+		}
+
+		toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
+		steps = append(steps, Step{Kind: "output", Title: toolName, Content: toolOutput})
+		messages = append(messages,
+			provider.Message{Role: "assistant", Content: fmt.Sprintf("Voy a usar la tool %s con esta entrada:\n%s", toolName, toolInput)},
+			provider.Message{Role: "user", Content: fmt.Sprintf("Resultado de %s:\n%s", toolName, toolOutput)},
+		)
+	}
+
+	return Result{}, fmt.Errorf("se alcanzo el maximo de iteraciones de tools")
+}
+
+func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.Message, onEvent func(StreamEvent) error) (provider.Response, error) {
+	if onEvent == nil {
+		return a.provider.Complete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()))
+	}
+	return a.provider.StreamComplete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()), func(delta string) error {
+		if strings.TrimSpace(delta) == "" {
+			return nil
+		}
+		return onEvent(StreamEvent{Kind: "assistant_delta", Content: delta})
+	})
+}
+
+func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec) string {
+	var lines []string
+	lines = append(lines,
+		"Eres Motoko, un coding agent terminal. Debes responder en JSON con una de estas dos formas:",
+		`{"message":"tu respuesta final"}`,
+		`{"tool_name":"read","tool_input":"README.md 1 120"}`,
+		"Usa herramientas cuando necesites contexto adicional antes de responder.",
+		"No inventes archivos ni salidas.",
+		"Si usas una tool, pide solo una cada vez.",
+		fmt.Sprintf("Workspace: %s", info.Workspace),
+		fmt.Sprintf("Path: %s", info.Path),
+		fmt.Sprintf("Git: %s", info.GitSummary()),
+		fmt.Sprintf("Signals: %s", info.SignalSummary()),
+		fmt.Sprintf("Semantic: %s", info.SemanticSummary),
+		"Relevant files:",
+		info.RelevantFilesSummary(),
+		"Relevant snippets:",
+		info.RelevantSnippetsSummary(),
+		"Tools disponibles:",
+	)
+	for _, spec := range specs {
+		lines = append(lines, fmt.Sprintf("- %s: %s | uso: %s", spec.Name, spec.Summary, spec.Usage))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func toolDefinitions(specs []tools.Spec) []provider.ToolDefinition {
+	result := make([]provider.ToolDefinition, 0, len(specs))
+	for _, spec := range specs {
+		result = append(result, provider.ToolDefinition{
+			Name:        spec.Name,
+			Description: spec.Summary,
+			InputHint:   spec.Usage,
+		})
+	}
+	return result
+}

@@ -1,0 +1,687 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
+	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tools"
+)
+
+type Mode string
+
+const (
+	ModePlan  Mode = "plan"
+	ModeBuild Mode = "build"
+)
+
+type InputMode string
+
+const (
+	InputModeChat  InputMode = "chat"
+	InputModeShell InputMode = "shell"
+)
+
+type EntryKind string
+
+const (
+	EntryUser      EntryKind = "user"
+	EntryAssistant EntryKind = "assistant"
+	EntrySystem    EntryKind = "system"
+	EntryCommand   EntryKind = "command"
+	EntryOutput    EntryKind = "output"
+	EntryError     EntryKind = "error"
+)
+
+type Entry struct {
+	Kind EntryKind
+	Text string
+}
+
+type ActionType string
+
+const (
+	ActionShell ActionType = "shell"
+	ActionAgent ActionType = "agent"
+)
+
+type Action struct {
+	Type         ActionType
+	ShellCommand string
+	AgentPrompt  string
+}
+
+type Response struct {
+	Entries []Entry
+	Action  *Action
+	Clear   bool
+	Signal  string
+}
+
+type pendingShell struct {
+	Command string
+}
+
+type Runtime struct {
+	mode      Mode
+	inputMode InputMode
+	pending   *pendingShell
+	tools     *tools.Registry
+	agent     *agent.Agent
+	config    *config.AppConfig
+	debug     bool
+	semantic  *semantic.Index
+}
+
+type AgentStreamEvent struct {
+	Kind    string
+	Content string
+}
+
+func NewRuntime() *Runtime {
+	toolsRegistry := tools.NewRegistry()
+	cfg, _ := config.Load()
+	if cfg == nil {
+		cfg = &config.AppConfig{}
+	}
+
+	r := &Runtime{
+		mode:      ModePlan,
+		inputMode: InputModeChat,
+		tools:     toolsRegistry,
+		config:    cfg,
+		semantic:  semantic.NewIndex(),
+	}
+	r.refreshAgent()
+	return r
+}
+
+func (r *Runtime) Mode() Mode {
+	return r.mode
+}
+
+func (r *Runtime) InputMode() InputMode {
+	return r.inputMode
+}
+
+func (r *Runtime) PendingApproval() string {
+	if r.pending == nil {
+		return ""
+	}
+
+	return r.pending.Command
+}
+
+func (r *Runtime) ToolSpecs() []tools.Spec {
+	return r.tools.Specs()
+}
+
+func (r *Runtime) AgentConfigured() bool {
+	return r.agent != nil && r.agent.Configured()
+}
+
+func (r *Runtime) Debug() bool {
+	return r.debug
+}
+
+func (r *Runtime) SemanticIndex() *semantic.Index {
+	return r.semantic
+}
+
+func (r *Runtime) ProviderSummary() string {
+	if r.config == nil {
+		return "none"
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		return "none"
+	}
+	if strings.TrimSpace(active.Model) == "" {
+		return fmt.Sprintf("%s (%s:no-model)", active.Name, active.Kind)
+	}
+	return fmt.Sprintf("%s (%s:%s)", active.Name, active.Kind, active.Model)
+}
+
+func (r *Runtime) ProviderKinds() []config.ProviderKind {
+	return config.ValidProviderKinds()
+}
+
+func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]string, error) {
+	client, err := provider.NewClient(providerCfg)
+	if err != nil {
+		return nil, err
+	}
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.cacheProviderModels(providerCfg.Name, models)
+	return models, nil
+}
+
+func (r *Runtime) Completions(input string) []string {
+	trimmed := strings.TrimSpace(input)
+	hasTrailingSpace := strings.HasSuffix(input, " ")
+	if trimmed == "" {
+		if r.inputMode == InputModeShell {
+			return []string{"ls", "pwd", "git status", "go build ./...", "/chat"}
+		}
+		return []string{"/help", "/provider add", "/models", "/tool read README.md", "!git status"}
+	}
+
+	if r.inputMode == InputModeShell && !strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "!") {
+		return shellCompletions(trimmed)
+	}
+
+	if strings.HasPrefix(trimmed, "!") {
+		command := strings.TrimSpace(strings.TrimPrefix(trimmed, "!"))
+		if command == "" {
+			return []string{"!git status", "!go build ./...", "!ls"}
+		}
+		return []string{"!" + command}
+	}
+
+	if !strings.HasPrefix(trimmed, "/") {
+		return nil
+	}
+
+	parts := strings.Fields(strings.TrimPrefix(trimmed, "/"))
+	if len(parts) == 0 {
+		return commandCompletions("")
+	}
+
+	if len(parts) == 1 && !hasTrailingSpace {
+		return commandCompletions(parts[0])
+	}
+
+	if strings.EqualFold(parts[0], "tool") {
+		prefix := ""
+		if len(parts) > 1 {
+			prefix = parts[1]
+		}
+		matches := r.tools.Suggestions(prefix)
+		result := make([]string, 0, len(matches))
+		for _, spec := range matches {
+			result = append(result, "/tool "+spec.Usage)
+		}
+		return result
+	}
+
+	if strings.EqualFold(parts[0], "models") {
+		active, ok := r.config.Active()
+		if !ok || len(active.Models) == 0 {
+			return []string{"/models"}
+		}
+		prefix := ""
+		if len(parts) > 1 {
+			prefix = strings.Join(parts[1:], " ")
+		}
+		var result []string
+		for _, model := range active.Models {
+			if prefix == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) {
+				result = append(result, "/models "+model)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+
+	return nil
+}
+
+func (r *Runtime) cacheProviderModels(providerName string, models []string) {
+	if r.config == nil || strings.TrimSpace(providerName) == "" || len(models) == 0 {
+		return
+	}
+	providerCfg, ok := r.config.Provider(providerName)
+	if !ok {
+		return
+	}
+	providerCfg.Models = config.UniqueSortedKeep(providerCfg.Models, models...)
+	r.config.UpsertProvider(providerCfg)
+	_ = r.config.Save()
+}
+
+func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return Response{}
+	}
+
+	if strings.HasPrefix(trimmed, "/") {
+		return r.handleSlashCommand(trimmed, info)
+	}
+
+	if strings.HasPrefix(trimmed, "!") {
+		return r.handleShell(strings.TrimSpace(trimmed[1:]))
+	}
+
+	if r.inputMode == InputModeShell {
+		return r.handleShell(trimmed)
+	}
+
+	if r.AgentConfigured() {
+		return Response{Entries: []Entry{{Kind: EntryUser, Text: trimmed}}, Action: &Action{Type: ActionAgent, AgentPrompt: trimmed}}
+	}
+
+	return Response{Entries: []Entry{
+		{Kind: EntryUser, Text: trimmed},
+		{Kind: EntryAssistant, Text: "El runtime esta operativo pero el agente no esta listo. Configura un provider con /provider add y luego selecciona modelo con /models <modelo>."},
+	}}
+}
+
+func (r *Runtime) HandleShellResult(result ShellResult) Response {
+	status := fmt.Sprintf("Comando finalizado en %s con salida %d.", result.Duration.Round(10_000_000), result.ExitCode)
+	entries := []Entry{{Kind: EntrySystem, Text: status}}
+
+	output := strings.TrimSpace(result.Output)
+	if output == "" {
+		output = "(sin salida)"
+	}
+
+	if result.ExitCode == 0 {
+		entries = append(entries, Entry{Kind: EntryOutput, Text: output})
+		return Response{Entries: entries}
+	}
+
+	entries = append(entries, Entry{Kind: EntryError, Text: output})
+	return Response{Entries: entries}
+}
+
+func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Response {
+	parts := strings.Fields(strings.TrimPrefix(input, "/"))
+	if len(parts) == 0 {
+		return Response{}
+	}
+
+	command := strings.ToLower(parts[0])
+
+	switch command {
+	case "help":
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
+			"Comandos disponibles:",
+			"/help     muestra esta ayuda",
+			"/clear    limpia la timeline",
+			"/plan     activa modo de solo lectura",
+			"/build    activa modo de trabajo",
+			"/shell    activa modo shell para ejecutar comandos directos",
+			"/chat     vuelve al modo normal de chat",
+			"/status   resume modo, permisos y aprobaciones",
+			"/debug    activa o desactiva trazas del agente",
+			"/context  muestra contexto local y git",
+			"/provider gestiona providers configurados",
+			"/models   lista o selecciona modelos del provider activo",
+			"/tools    muestra las tools registradas",
+			"/tool     ejecuta una tool real del runtime",
+			"/approve  ejecuta la accion pendiente",
+			"/deny     cancela la accion pendiente",
+			"!<cmd>    ejecuta un comando shell explicito",
+		}, "\n")}}}
+	case "clear":
+		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reiniciada."}}}
+	case "plan":
+		r.mode = ModePlan
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: plan. Los comandos shell requieren aprobacion explicita."}}}
+	case "build":
+		r.mode = ModeBuild
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: build. Los comandos seguros se ejecutan directamente; los sensibles se quedan pendientes de aprobacion."}}}
+	case "shell":
+		r.inputMode = InputModeShell
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo de entrada: shell. Cualquier linea que no empiece por / se ejecuta como comando."}}}
+	case "chat":
+		r.inputMode = InputModeChat
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo de entrada: chat. La entrada normal vuelve a tratarse como prompt."}}}
+	case "status":
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.statusText(info)}}}
+	case "debug":
+		r.debug = !r.debug
+		if r.agent != nil {
+			r.agent.SetDebug(r.debug)
+		}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Debug agente: %t", r.debug)}}}
+	case "context":
+		enriched := r.enrichContext(context.Background(), info, "")
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
+			fmt.Sprintf("workspace: %s", enriched.Workspace),
+			fmt.Sprintf("path: %s", enriched.Path),
+			fmt.Sprintf("git: %s", enriched.GitSummary()),
+			fmt.Sprintf("provider: %s", r.ProviderSummary()),
+			"signals:",
+			enriched.SignalSummary(),
+			"semantic:",
+			enriched.SemanticSummary,
+			"relevant files:",
+			enriched.RelevantFilesSummary(),
+			"relevant snippets:",
+			enriched.RelevantSnippetsSummary(),
+		}, "\n")}}}
+	case "provider":
+		return r.handleProviderCommand(parts[1:])
+	case "models":
+		return r.handleModelsCommand(parts[1:])
+	case "tools":
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.tools.Specs())}}}
+	case "tool":
+		if len(parts) < 2 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /tool <nombre> <args>. Usa /tools para listar disponibles."}}}
+		}
+
+		toolName := parts[1]
+		toolArgs := ""
+		if len(parts) > 2 {
+			toolArgs = strings.Join(parts[2:], " ")
+		}
+		if strings.EqualFold(toolName, "bash") {
+			return r.handleShell(toolArgs)
+		}
+
+		result, err := r.tools.Run(context.Background(), toolName, toolArgs)
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+		}
+
+		entries := []Entry{
+			{Kind: EntryCommand, Text: fmt.Sprintf("tool %s %s", toolName, strings.TrimSpace(toolArgs))},
+			{Kind: EntrySystem, Text: result.Summary},
+		}
+		if strings.TrimSpace(result.Output) != "" {
+			entries = append(entries, Entry{Kind: EntryOutput, Text: result.Output})
+		}
+		return Response{Entries: entries}
+	case "approve":
+		if r.pending == nil {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay ninguna accion pendiente."}}}
+		}
+
+		pending := r.pending
+		r.pending = nil
+		return Response{
+			Entries: []Entry{
+				{Kind: EntryCommand, Text: "$ " + pending.Command},
+				{Kind: EntrySystem, Text: "Aprobacion recibida. Ejecutando comando..."},
+			},
+			Action: &Action{Type: ActionShell, ShellCommand: pending.Command},
+		}
+	case "deny":
+		if r.pending == nil {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay ninguna accion pendiente."}}}
+		}
+
+		command := r.pending.Command
+		r.pending = nil
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Accion cancelada: %s", command)}}}
+	default:
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Comando desconocido: /%s", command)}}}
+	}
+}
+
+func commandCompletions(prefix string) []string {
+	commands := []string{"help", "clear", "plan", "build", "shell", "chat", "status", "debug", "context", "provider", "models", "tools", "tool", "approve", "deny"}
+	prefix = strings.ToLower(prefix)
+	var result []string
+	for _, command := range commands {
+		if strings.HasPrefix(command, prefix) {
+			result = append(result, "/"+command)
+		}
+	}
+	return result
+}
+
+func shellCompletions(prefix string) []string {
+	commands := []string{"ls", "pwd", "git status", "git diff", "go build ./...", "go test ./...", "npm test"}
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if prefix == "" {
+		return commands
+	}
+
+	var result []string
+	for _, command := range commands {
+		if strings.HasPrefix(strings.ToLower(command), prefix) {
+			result = append(result, command)
+		}
+	}
+	if len(result) == 0 {
+		return []string{prefix}
+	}
+	return result
+}
+
+func formatToolList(specs []tools.Spec) string {
+	lines := []string{"Tools registradas:"}
+	for _, spec := range specs {
+		lines = append(lines, fmt.Sprintf("- %s: %s", spec.Usage, spec.Summary))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) handleShell(command string) Response {
+	if command == "" {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: "Falta el comando despues de !"}}}
+	}
+
+	decision := classifyShell(r.mode, command)
+	if decision.Deny {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: decision.Reason}}}
+	}
+
+	if decision.RequiresApproval {
+		r.pending = &pendingShell{Command: command}
+		return Response{Entries: []Entry{
+			{Kind: EntryCommand, Text: "$ " + command},
+			{Kind: EntrySystem, Text: fmt.Sprintf("Accion pendiente: %s Usa /approve o /deny.", decision.Reason)},
+		}}
+	}
+
+	return Response{
+		Entries: []Entry{
+			{Kind: EntryCommand, Text: "$ " + command},
+			{Kind: EntrySystem, Text: "Ejecutando comando..."},
+		},
+		Action: &Action{Type: ActionShell, ShellCommand: command},
+	}
+}
+
+func (r *Runtime) statusText(info system.ContextInfo) string {
+	pending := "ninguna"
+	if r.pending != nil {
+		pending = r.pending.Command
+	}
+
+	return strings.Join([]string{
+		fmt.Sprintf("modo: %s", r.mode),
+		fmt.Sprintf("entrada: %s", r.inputMode),
+		fmt.Sprintf("agente configurado: %t", r.AgentConfigured()),
+		fmt.Sprintf("provider activo: %s", r.ProviderSummary()),
+		fmt.Sprintf("workspace: %s", info.Workspace),
+		fmt.Sprintf("git: %s", info.GitSummary()),
+		fmt.Sprintf("aprobacion pendiente: %s", pending),
+		"politica: plan pide aprobacion para shell; build ejecuta seguro y pide aprobacion para comandos sensibles.",
+	}, "\n")
+}
+
+func (r *Runtime) handleProviderCommand(args []string) Response {
+	if len(args) == 0 {
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
+			"Uso de providers:",
+			"/provider list",
+			"/provider add",
+			"/provider use <name>",
+			"/provider remove <name>",
+		}, "\n")}}}
+	}
+
+	subcommand := strings.ToLower(args[0])
+	switch subcommand {
+	case "list":
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.providerListText()}}}
+	case "add":
+		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Abriendo formulario de provider..."}}}
+	case "use":
+		if len(args) < 2 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /provider use <name>"}}}
+		}
+		if err := r.config.SetActive(args[1]); err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+		}
+		if err := r.config.Save(); err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+		}
+		r.refreshAgent()
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider activo: %s", r.ProviderSummary())}}}
+	case "remove":
+		if len(args) < 2 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /provider remove <name>"}}}
+		}
+		if !r.config.RemoveProvider(args[1]) {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider no encontrado: %s", args[1])}}}
+		}
+		if err := r.config.Save(); err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+		}
+		r.refreshAgent()
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider eliminado: %s", args[1])}}}
+	default:
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Subcomando desconocido: %s", subcommand)}}}
+	}
+}
+
+func (r *Runtime) SaveProvider(providerCfg config.ProviderConfig, activate bool) error {
+	if r.config == nil {
+		r.config = &config.AppConfig{}
+	}
+	r.config.UpsertProvider(providerCfg)
+	if activate || strings.TrimSpace(r.config.ActiveProvider) == "" {
+		if err := r.config.SetActive(providerCfg.Name); err != nil {
+			return err
+		}
+	}
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	r.refreshAgent()
+	return nil
+}
+
+func (r *Runtime) handleModelsCommand(args []string) Response {
+	active, ok := r.config.Active()
+	if !ok {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: "No hay provider activo. Usa /provider add o /provider use primero."}}}
+	}
+
+	if len(args) == 0 {
+		models, err := r.ListModelsForProvider(context.Background(), active)
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+		}
+		if len(models) == 0 {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "El provider no devolvio modelos."}}}
+		}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join(models, "\n")}}}
+	}
+
+	model := strings.TrimSpace(strings.Join(args, " "))
+	active.Model = model
+	active.Models = config.UniqueSortedKeep(active.Models, model)
+	r.config.UpsertProvider(active)
+	if err := r.config.Save(); err != nil {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+	}
+	r.refreshAgent()
+	return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Modelo activo para %s: %s", active.Name, active.Model)}}}
+}
+
+func (r *Runtime) providerListText() string {
+	if r.config == nil || len(r.config.Providers) == 0 {
+		return "No hay providers configurados. Usa /provider add."
+	}
+
+	lines := []string{"Providers configurados:"}
+	for _, providerCfg := range r.config.Providers {
+		marker := " "
+		if strings.EqualFold(providerCfg.Name, r.config.ActiveProvider) {
+			marker = "*"
+		}
+		model := providerCfg.Model
+		if strings.TrimSpace(model) == "" {
+			model = "no-model"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s [%s] %s", marker, providerCfg.Name, providerCfg.Kind, model))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) refreshAgent() {
+	if r.config == nil {
+		r.agent = nil
+		return
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		r.agent = nil
+		return
+	}
+	client, err := provider.NewClient(active)
+	if err != nil {
+		r.agent = nil
+		return
+	}
+	r.agent = agent.New(client, r.tools)
+	r.agent.SetDebug(r.debug)
+}
+
+func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
+	if r.agent == nil || !r.agent.Configured() {
+		return agent.Result{}, fmt.Errorf("agente no configurado")
+	}
+	info = r.enrichContext(ctx, info, input)
+	return r.agent.Run(ctx, info, input)
+}
+
+func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
+	if r.agent == nil || !r.agent.Configured() {
+		return agent.Result{}, fmt.Errorf("agente no configurado")
+	}
+	info = r.enrichContext(ctx, info, input)
+	return r.agent.RunStream(ctx, info, input, func(event agent.StreamEvent) error {
+		if onEvent == nil {
+			return nil
+		}
+		return onEvent(AgentStreamEvent{Kind: event.Kind, Content: event.Content})
+	})
+}
+
+func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
+	if r.semantic == nil {
+		return info
+	}
+	snapshot, err := r.semantic.Ensure(ctx)
+	if err != nil {
+		if info.Signals == nil {
+			info.Signals = make(map[string]string)
+		}
+		info.Signals["semantic"] = err.Error()
+		return info
+	}
+	info.SemanticSummary = snapshot.Summary()
+	relevant := snapshot.RelevantFiles(input, 4)
+	info.RelevantFiles = make([]string, 0, len(relevant))
+	for _, file := range relevant {
+		info.RelevantFiles = append(info.RelevantFiles, file.Descriptor())
+	}
+	snippets := snapshot.RelevantSnippets(input, 3, 180)
+	info.RelevantSnippets = make([]string, 0, len(snippets))
+	for _, snippet := range snippets {
+		info.RelevantSnippets = append(info.RelevantSnippets, snippet.Descriptor())
+	}
+	if info.Signals == nil {
+		info.Signals = make(map[string]string)
+	}
+	info.Signals["semantic"] = snapshot.Summary()
+	return info
+}

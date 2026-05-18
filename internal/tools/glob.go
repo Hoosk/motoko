@@ -1,0 +1,59 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"sort"
+	"strings"
+)
+
+type GlobTool struct{}
+
+func NewGlobTool() *GlobTool {
+	return &GlobTool{}
+}
+
+func (t *GlobTool) Spec() Spec {
+	return Spec{
+		Name:    "glob",
+		Summary: "Busca rutas por patron dentro del workspace.",
+		Usage:   "glob <patron>",
+	}
+}
+
+func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
+	_ = ctx
+	pattern := strings.TrimSpace(args)
+	if pattern == "" {
+		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+	}
+
+	matcher, err := compileGlob(pattern)
+	if err != nil {
+		return Result{}, err
+	}
+
+	var matches []string
+	err = walkWorkspace(func(relPath, absPath string, entry fs.DirEntry) error {
+		_ = absPath
+		if matcher.MatchString(relPath) {
+			matches = append(matches, relPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin coincidencias para %s.", pattern), Output: ""}, nil
+	}
+
+	return Result{
+		Spec:    t.Spec(),
+		Summary: fmt.Sprintf("%d coincidencias para %s.", len(matches), pattern),
+		Output:  strings.Join(matches, "\n"),
+	}, nil
+}
