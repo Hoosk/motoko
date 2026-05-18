@@ -18,3 +18,10 @@ func TestParseStreamResponseStructuredToolCall(t *testing.T) {
 		t.Fatalf("expected parsed tool call, got %#v", resp)
 	}
 }
+
+func TestParseStreamResponsePlainTextFallsBackToRaw(t *testing.T) {
+	resp := parseStreamResponse("hola", Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3})
+	if resp.Message != "hola" {
+		t.Fatalf("expected raw message, got %#v", resp)
+	}
+}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type Agent struct {
 
 type StreamEvent struct {
 	Kind    string
+	Title   string
 	Content string
 }
 
@@ -112,11 +114,17 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		}
 		seenToolCalls[toolKey] = struct{}{}
 		steps = append(steps, Step{Kind: "tool", Title: toolName, Content: toolInput})
+		if onEvent != nil {
+			_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
+		}
 
 		result, err := a.tools.Run(ctx, toolName, toolInput)
 		if err != nil {
 			errText := fmt.Sprintf("tool error: %v", err)
 			steps = append(steps, Step{Kind: "error", Title: toolName, Content: errText})
+			if onEvent != nil {
+				_ = onEvent(StreamEvent{Kind: "error", Title: toolName, Content: errText})
+			}
 			messages = append(messages,
 				provider.Message{Role: "assistant", Content: fmt.Sprintf("Voy a usar la tool %s.", toolName)},
 				provider.Message{Role: "user", Content: errText},
@@ -126,6 +134,9 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 
 		toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
 		steps = append(steps, Step{Kind: "output", Title: toolName, Content: toolOutput})
+		if onEvent != nil {
+			_ = onEvent(StreamEvent{Kind: "output", Title: toolName, Content: toolOutput})
+		}
 		messages = append(messages,
 			provider.Message{Role: "assistant", Content: fmt.Sprintf("Voy a usar la tool %s con esta entrada:\n%s", toolName, toolInput)},
 			provider.Message{Role: "user", Content: fmt.Sprintf("Resultado de %s:\n%s", toolName, toolOutput)},
@@ -139,36 +150,52 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	if onEvent == nil {
 		return a.provider.Complete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()))
 	}
+	extractor := structuredStreamExtractor{}
 	return a.provider.StreamComplete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()), func(delta string) error {
-		if strings.TrimSpace(delta) == "" {
+		visibleDelta := extractor.Feed(delta)
+		if visibleDelta == "" {
 			return nil
 		}
-		return onEvent(StreamEvent{Kind: "assistant_delta", Content: delta})
+		return onEvent(StreamEvent{Kind: "assistant_delta", Content: visibleDelta})
 	})
 }
 
 func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec) string {
 	var lines []string
 	lines = append(lines,
-		"Eres Motoko, un coding agent terminal. Debes responder en JSON con una de estas dos formas:",
-		`{"message":"tu respuesta final"}`,
-		`{"tool_name":"read","tool_input":"README.md 1 120"}`,
-		"Usa herramientas cuando necesites contexto adicional antes de responder.",
-		"No inventes archivos ni salidas.",
-		"Si usas una tool, pide solo una cada vez.",
-		fmt.Sprintf("Workspace: %s", info.Workspace),
-		fmt.Sprintf("Path: %s", info.Path),
-		fmt.Sprintf("Git: %s", info.GitSummary()),
-		fmt.Sprintf("Signals: %s", info.SignalSummary()),
-		fmt.Sprintf("Semantic: %s", info.SemanticSummary),
-		"Relevant files:",
+		"You are Motoko, an expert coding agent operating directly in the user's terminal.",
+		"You must respond strictly in JSON using exactly one of these two forms:",
+		`1. Final answer: {"message":"plain text for the user"}`,
+		`2. To execute a tool: {"tool_name":"tool_name","tool_input":"arguments"}`,
+		"",
+		"--- BEHAVIORAL RULES ---",
+		"- Use tools to explore the codebase before assuming how it works.",
+		"- If you use a tool, you MUST request only one at a time. The system will return the result to you.",
+		"- DO NOT invent file names, functions, or command outputs.",
+		"",
+		"--- ENVIRONMENT CONTEXT (AUTO-INJECTED) ---",
+		"The system has gathered the following background context to save you from blind searches.",
+		"USE this information as your primary source of truth before using tools:",
+		"",
+		fmt.Sprintf("[Workspace]: %s (%s)", info.Workspace, info.Path),
+		fmt.Sprintf("[Git Status]: %s", info.GitSummary()),
+		fmt.Sprintf("[Background Signals]: %s", info.SignalSummary()),
+		"",
+		"[Project Semantic Summary]:",
+		"This is a map of the main files and symbols. Use it to understand the general structure.",
+		info.SemanticSummary,
+		"",
+		"[Relevant Files for your current request]:",
 		info.RelevantFilesSummary(),
-		"Relevant snippets:",
+		"",
+		"[Pre-extracted Relevant Snippets]:",
+		"Heuristically extracted code snippets that might resolve your request directly without needing to use read or grep.",
 		info.RelevantSnippetsSummary(),
-		"Tools disponibles:",
+		"",
+		"--- AVAILABLE TOOLS ---",
 	)
 	for _, spec := range specs {
-		lines = append(lines, fmt.Sprintf("- %s: %s | uso: %s", spec.Name, spec.Summary, spec.Usage))
+		lines = append(lines, fmt.Sprintf("- %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -183,4 +210,110 @@ func toolDefinitions(specs []tools.Spec) []provider.ToolDefinition {
 		})
 	}
 	return result
+}
+
+type structuredStreamExtractor struct {
+	raw     strings.Builder
+	emitted string
+	plain   bool
+}
+
+func (e *structuredStreamExtractor) Feed(chunk string) string {
+	if chunk == "" {
+		return ""
+	}
+	if e.plain {
+		return chunk
+	}
+	e.raw.WriteString(chunk)
+	raw := e.raw.String()
+	decoded := extractStructuredMessagePrefix(raw)
+	if decoded == "" {
+		trimmed := strings.TrimLeft(raw, " \n\r\t")
+		if trimmed != "" && trimmed[0] != '{' {
+			e.plain = true
+			return raw
+		}
+		return ""
+	}
+	if !strings.HasPrefix(decoded, e.emitted) {
+		e.emitted = decoded
+		return ""
+	}
+	delta := decoded[len(e.emitted):]
+	e.emitted = decoded
+	return delta
+}
+
+func extractStructuredMessagePrefix(raw string) string {
+	keyIndex := strings.Index(raw, `"message"`)
+	if keyIndex == -1 {
+		return ""
+	}
+	i := keyIndex + len(`"message"`)
+	for i < len(raw) && isJSONWhitespace(raw[i]) {
+		i++
+	}
+	if i >= len(raw) || raw[i] != ':' {
+		return ""
+	}
+	i++
+	for i < len(raw) && isJSONWhitespace(raw[i]) {
+		i++
+	}
+	if i >= len(raw) || raw[i] != '"' {
+		return ""
+	}
+	i++
+	var out strings.Builder
+	for i < len(raw) {
+		switch raw[i] {
+		case '"':
+			return out.String()
+		case '\\':
+			if i+1 >= len(raw) {
+				return out.String()
+			}
+			switch raw[i+1] {
+			case '"', '\\', '/':
+				out.WriteByte(raw[i+1])
+				i += 2
+			case 'b':
+				out.WriteByte('\b')
+				i += 2
+			case 'f':
+				out.WriteByte('\f')
+				i += 2
+			case 'n':
+				out.WriteByte('\n')
+				i += 2
+			case 'r':
+				out.WriteByte('\r')
+				i += 2
+			case 't':
+				out.WriteByte('\t')
+				i += 2
+			case 'u':
+				if i+6 > len(raw) {
+					return out.String()
+				}
+				value, err := strconv.ParseInt(raw[i+2:i+6], 16, 32)
+				if err != nil {
+					return out.String()
+				}
+				out.WriteRune(rune(value))
+				i += 6
+			default:
+				return out.String()
+			}
+		default:
+			out.WriteByte(raw[i])
+			i++
+		}
+	}
+	return out.String()
+}
+
+func isJSONWhitespace(b byte) bool {
+	return b == ' ' || b == '\n' || b == '\r' || b == '\t'
 }

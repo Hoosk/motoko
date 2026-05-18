@@ -80,6 +80,7 @@ type Runtime struct {
 
 type AgentStreamEvent struct {
 	Kind    string
+	Title   string
 	Content string
 }
 
@@ -652,10 +653,9 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 		if onEvent == nil {
 			return nil
 		}
-		return onEvent(AgentStreamEvent{Kind: event.Kind, Content: event.Content})
+		return onEvent(AgentStreamEvent{Kind: event.Kind, Title: event.Title, Content: event.Content})
 	})
 }
-
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
 	if r.semantic == nil {
 		return info

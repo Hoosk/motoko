@@ -57,7 +57,7 @@ func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 		Symbols:  []semantic.Symbol{{Name: "RunAgent", Kind: "func", Line: 3, Range: semantic.LineRange{Start: 3, End: 5}}},
 	}}, GeneratedAt: time.Now()}
 	r.semantic = semantic.NewIndex()
-	r.semantic.SetSnapshotForTest(snapshot)
+	r.semantic.SetSnapshotForTest(&snapshot)
 
 	info := r.enrichContext(context.Background(), system.ContextInfo{}, "revisa runagent")
 	if len(info.RelevantSnippets) == 0 {

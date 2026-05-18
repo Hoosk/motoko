@@ -91,9 +91,9 @@ func (m *Model) handleProviderFormEnter() tea.Cmd {
 		return nil
 	}
 	m.providerForm = providerForm{}
-	m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider guardado y activado: %s", cfg.Name)})
-	m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Cargando modelos del provider activo en background... luego usa /models para listarlos o /models <modelo> para elegir uno."})
-	m.renderMessages()
+	m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider guardado y activado: %s", cfg.Name)})
+	m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Cargando modelos del provider activo en background... luego usa /models para listarlos o /models <modelo> para elegir uno."})
+	m.timeline.renderMessages()
 	return loadProviderModels(m.runtime, cfg)
 }
 

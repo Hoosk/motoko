@@ -23,9 +23,83 @@ func NewPatchTool() *PatchTool {
 func (t *PatchTool) Spec() Spec {
 	return Spec{
 		Name:    "patch",
-		Summary: "Aplica una sustitucion exacta y controlada sobre un archivo del workspace.",
+		Summary: "Aplica una sustitucion robusta sobre un archivo del workspace. Tolera errores de indentacion.",
 		Usage:   "patch <ruta> followed by SEARCH/REPLACE blocks",
 	}
+}
+
+func fuzzyReplace(current, search, replace string) (string, error) {
+	if search == "" {
+		return "", fmt.Errorf("SEARCH vacio solo se permite para crear archivos nuevos")
+	}
+
+	matches := strings.Count(current, search)
+	if matches == 1 {
+		return strings.Replace(current, search, replace, 1), nil
+	}
+
+	if matches > 1 {
+		return "", fmt.Errorf("el bloque SEARCH aparece %d veces de forma exacta; la sustitucion debe ser unica. Proporciona mas contexto.", matches)
+	}
+
+	// Intento de reemplazo tolerante a espacios/indentación
+	type lineInfo struct {
+		start int
+		end   int
+		text  string
+	}
+	var lines []lineInfo
+	for i := 0; i < len(current); {
+		nl := strings.IndexByte(current[i:], '\n')
+		var end int
+		if nl == -1 {
+			end = len(current)
+		} else {
+			end = i + nl + 1
+		}
+		lines = append(lines, lineInfo{start: i, end: end, text: current[i:end]})
+		i = end
+	}
+
+	searchLines := strings.Split(strings.TrimSpace(search), "\n")
+	if len(searchLines) == 0 {
+		return "", fmt.Errorf("no se encontro el bloque SEARCH (vacio tras limpiar espacios)")
+	}
+
+	var matchIndices []int
+	for i := 0; i <= len(lines)-len(searchLines); i++ {
+		match := true
+		for j := 0; j < len(searchLines); j++ {
+			if strings.TrimSpace(lines[i+j].text) != strings.TrimSpace(searchLines[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			matchIndices = append(matchIndices, i)
+		}
+	}
+
+	if len(matchIndices) == 0 {
+		return "", fmt.Errorf("no se encontro el bloque SEARCH ni siquiera ignorando espacios e indentacion. Revisa el contenido actual del archivo.")
+	}
+	if len(matchIndices) > 1 {
+		return "", fmt.Errorf("el bloque SEARCH coincide en %d lugares ignorando espacios; debe ser unico. Proporciona mas lineas de contexto.", len(matchIndices))
+	}
+
+	startLine := matchIndices[0]
+	endLine := startLine + len(searchLines) - 1
+
+	originalStart := lines[startLine].start
+	originalEnd := lines[endLine].end
+
+	updated := current[:originalStart] + replace
+	if len(replace) > 0 && replace[len(replace)-1] != '\n' && originalEnd < len(current) && current[originalEnd-1] == '\n' {
+		updated += "\n"
+	}
+	updated += current[originalEnd:]
+	
+	return updated, nil
 }
 
 func (t *PatchTool) Run(ctx context.Context, args string) (Result, error) {
@@ -54,19 +128,10 @@ func (t *PatchTool) Run(ctx context.Context, args string) (Result, error) {
 		}
 		updated = replace
 	} else {
-		if search == "" {
-			return Result{}, fmt.Errorf("SEARCH vacio solo se permite para crear archivos nuevos")
+		updated, err = fuzzyReplace(current, search, replace)
+		if err != nil {
+			return Result{}, err
 		}
-
-		matches := strings.Count(current, search)
-		if matches == 0 {
-			return Result{}, fmt.Errorf("no se encontro el bloque SEARCH en %s", relPath)
-		}
-		if matches > 1 {
-			return Result{}, fmt.Errorf("el bloque SEARCH aparece %d veces en %s; la sustitucion debe ser unica", matches, relPath)
-		}
-
-		updated = strings.Replace(current, search, replace, 1)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {

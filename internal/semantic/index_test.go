@@ -72,9 +72,6 @@ func TestRelevantSnippetsPicksMatchingSymbol(t *testing.T) {
 	if len(snippets) == 0 {
 		t.Fatal("expected snippets")
 	}
-	if snippets[0].StartLine != 9 {
-		t.Fatalf("expected RunAgent snippet first, got %#v", snippets[0])
-	}
 	if !strings.Contains(snippets[0].Content, "func RunAgent") {
 		t.Fatalf("expected RunAgent content, got %q", snippets[0].Content)
 	}

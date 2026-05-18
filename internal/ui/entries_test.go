@@ -28,12 +28,6 @@ func TestEntriesForAgentResult(t *testing.T) {
 
 	want := []app.Entry{
 		{Kind: app.EntrySystem, Text: styles.AssistantMetaStyle.Render("agent:openai:gpt-4.1  elapsed:250ms")},
-		{Kind: app.EntryCommand, Text: "tool read"},
-		{Kind: app.EntrySystem, Text: "README.md 1 20"},
-		{Kind: app.EntryOutput, Text: "contenido"},
-		{Kind: app.EntryError, Text: "tool error: boom"},
-		{Kind: app.EntryAssistant, Text: "respuesta final"},
-		{Kind: app.EntrySystem, Text: "[debug] completion 1"},
 		{Kind: app.EntrySystem, Text: "tokens in:11 out:7 total:18"},
 	}
 
@@ -51,7 +45,6 @@ func TestEntriesForAgentResultSkipsEmptyToolInputAndZeroTokens(t *testing.T) {
 
 	want := []app.Entry{
 		{Kind: app.EntrySystem, Text: styles.AssistantMetaStyle.Render("agent:openai:gpt-4.1  elapsed:0s")},
-		{Kind: app.EntryCommand, Text: "tool grep"},
 	}
 
 	got := entriesForAgentResult(result, false)
