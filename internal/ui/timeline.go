@@ -68,11 +68,12 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 					m.streamMessageIndex = len(m.messages) - 1
 				}
 				if event.Content != "" {
-					m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
-					if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-						m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(string(m.streamedRunes))
-					}
+				m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
+				if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
+					wrapped := wrapText(string(m.streamedRunes), m.assistantWidth())
+					m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped)
 				}
+			}
 			} else {
 				switch event.Kind {
 				case "tool":
@@ -120,6 +121,9 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "up", "down":
+			// Reserved for composer history navigation; do not scroll viewport.
+			return nil
 		case "alt+up":
 			if len(m.messages) > 0 {
 				if m.selectedMessage < 0 {
@@ -184,17 +188,20 @@ func (m *TimelineModel) appendEntry(entry app.Entry) {
 	switch entry.Kind {
 	case app.EntryUser:
 		width := max(20, m.viewport.Width)
-		m.messages = append(m.messages, styles.UserBlockStyle.Width(width).Render(styles.UserPromptStyle.Render(">")+" "+entry.Text))
+		m.messages = append(m.messages, renderUserMessage(entry.Text, width))
 	case app.EntryAssistant:
-		m.messages = append(m.messages, styles.AssistantBlockStyle.Render(entry.Text))
+		wrapped := wrapText(entry.Text, m.assistantWidth())
+		m.messages = append(m.messages, styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped))
 	case app.EntrySystem:
 		m.messages = append(m.messages, styles.SystemStyle.Render(entry.Text))
 	case app.EntryCommand:
 		m.messages = append(m.messages, styles.CommandStyle.Render(entry.Text))
 	case app.EntryOutput:
-		m.messages = append(m.messages, styles.OutputStyle.Render(entry.Text))
+		m.messages = append(m.messages, renderDiffOutput(entry.Text))
 	case app.EntryError:
 		m.messages = append(m.messages, styles.ErrorStyle.Render(entry.Text))
+	case app.EntryHelp:
+		m.messages = append(m.messages, renderHelpEntry(entry.Text))
 	default:
 		m.messages = append(m.messages, entry.Text)
 	}
@@ -219,7 +226,9 @@ func (m *TimelineModel) renderMessages() {
 		}
 	}
 	if m.thinking {
-		wrapped = append(wrapped, styles.SystemStyle.Render(thinkingFrames[m.thinkingFrame]))
+		spinner := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(thinkingFrames[m.thinkingFrame])
+		label := lipgloss.NewStyle().Foreground(styles.Gray).Italic(true).Render("  processing")
+		wrapped = append(wrapped, spinner+label)
 	}
 	m.viewportContent = strings.Join(wrapped, "\n\n")
 	m.viewport.SetContent(m.viewportContent)
@@ -264,7 +273,8 @@ func (m *TimelineModel) CompleteStreaming(text string) {
 		if m.streamMessageIndex == -1 {
 			m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: trimmed})
 		} else if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-			m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(trimmed)
+			wrapped := wrapText(trimmed, m.assistantWidth())
+			m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped)
 		}
 	}
 	m.streaming = false
@@ -278,4 +288,104 @@ func (m TimelineModel) CopySelected() tea.Cmd {
 		return copySelection(stripANSI(m.messages[m.selectedMessage]))
 	}
 	return nil
+}
+
+// renderUserMessage renders a user prompt between two thin horizontal rules.
+func renderUserMessage(text string, width int) string {
+	w := max(20, width)
+	ruleStyle := lipgloss.NewStyle().Foreground(styles.AccentViolet)
+	rule := ruleStyle.Render(strings.Repeat("─", w))
+	body := " " + styles.UserPromptStyle.Render(">") + "  " +
+		lipgloss.NewStyle().Foreground(styles.White).Render(text)
+	return strings.Join([]string{rule, body, rule}, "\n")
+}
+// assistantWidth returns the inner text width for AssistantBlockStyle rendering.
+// AssistantBlockStyle has BorderLeft(1) + PaddingLeft(2) = 3 chars overhead.
+func (m *TimelineModel) assistantWidth() int {
+	return max(40, m.viewport.Width-3)
+}
+
+// renderHelpEntry renders the /help output with colourised sections.
+// Expected format: first line = title, subsequent lines = "/cmd   description"
+// or "!<cmd>   description".
+func renderHelpEntry(text string) string {
+	lines := strings.Split(text, "\n")
+	titleStyle := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true)
+	cmdStyle := lipgloss.NewStyle().Foreground(styles.AccentBlue).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(styles.Gray)
+
+	var rendered []string
+	for i, line := range lines {
+		if i == 0 {
+			rendered = append(rendered, titleStyle.Render(line))
+			continue
+		}
+		if line == "" {
+			rendered = append(rendered, "")
+			continue
+		}
+		// Split command name from description at first double-space run.
+		idx := strings.Index(line, "  ")
+		if idx <= 0 {
+			rendered = append(rendered, descStyle.Render(line))
+			continue
+		}
+		cmd := line[:idx]
+		desc := strings.TrimSpace(line[idx:])
+		rendered = append(rendered, cmdStyle.Render(cmd)+"  "+descStyle.Render(desc))
+	}
+	return strings.Join(rendered, "\n")
+}
+func renderDiffOutput(text string) string {
+	lines := strings.Split(text, "\n")
+	isDiff := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || strings.HasPrefix(line, "@@ ") {
+			isDiff = true
+			break
+		}
+	}
+	if !isDiff {
+		return styles.OutputStyle.Render(text)
+	}
+
+	changedCount := 0
+	for _, line := range lines {
+		if len(line) > 0 {
+			if line[0] == '+' && !strings.HasPrefix(line, "+++ ") {
+				changedCount++
+			} else if line[0] == '-' && !strings.HasPrefix(line, "--- ") {
+				changedCount++
+			}
+		}
+	}
+
+	if changedCount > 20 {
+		var result []string
+		for _, line := range lines {
+			if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+				result = append(result, styles.DiffMetaStyle.Render(line))
+			} else if strings.HasPrefix(line, "@@ ") {
+				result = append(result, styles.DiffHeaderStyle.Render(line))
+			}
+		}
+		result = append(result, styles.DiffMetaStyle.Render(fmt.Sprintf("... (%d líneas cambiadas, colapsado)", changedCount)))
+		return strings.Join(result, "\n")
+	}
+
+	var result []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			result = append(result, styles.DiffMetaStyle.Render(line))
+		} else if strings.HasPrefix(line, "@@ ") {
+			result = append(result, styles.DiffHeaderStyle.Render(line))
+		} else if len(line) > 0 && line[0] == '+' {
+			result = append(result, styles.DiffAddStyle.Render(line))
+		} else if len(line) > 0 && line[0] == '-' {
+			result = append(result, styles.DiffRemoveStyle.Render(line))
+		} else {
+			result = append(result, styles.DiffContextStyle.Render(line))
+		}
+	}
+	return strings.Join(result, "\n")
 }

@@ -18,6 +18,9 @@ type ComposerModel struct {
 	width              int
 	height             int
 	thinking           bool
+	history            []string
+	historyIndex       int
+	savedInput         string
 }
 
 func NewComposerModel(runtime *app.Runtime) ComposerModel {
@@ -25,7 +28,7 @@ func NewComposerModel(runtime *app.Runtime) ComposerModel {
 	ta.Focus()
 	ta.Prompt = ""
 	ta.SetWidth(80)
-	ta.SetHeight(3)
+	ta.SetHeight(2)
 	ta.ShowLineNumbers = false
 
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
@@ -37,8 +40,9 @@ func NewComposerModel(runtime *app.Runtime) ComposerModel {
 	ta.EndOfBufferCharacter = ' '
 
 	m := ComposerModel{
-		textarea: ta,
-		runtime:  runtime,
+		textarea:     ta,
+		runtime:      runtime,
+		historyIndex: -1,
 	}
 	m.syncInputChrome()
 	m.refreshSuggestions()
@@ -79,18 +83,11 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 		case "down", "ctrl+n":
-			if len(m.suggestions) > 0 {
-				m.selectedSuggestion = (m.selectedSuggestion + 1) % len(m.suggestions)
-				return nil
-			}
+			m.navigateHistoryDown()
+			return nil
 		case "up", "ctrl+p":
-			if len(m.suggestions) > 0 {
-				m.selectedSuggestion--
-				if m.selectedSuggestion < 0 {
-					m.selectedSuggestion = len(m.suggestions) - 1
-				}
-				return nil
-			}
+			m.navigateHistoryUp()
+			return nil
 		case "enter":
 			if len(m.suggestions) > 0 && strings.TrimSpace(m.textarea.Value()) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) {
 				m.applySelectedSuggestion()
@@ -98,6 +95,9 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			input := m.textarea.Value()
 			if strings.TrimSpace(input) != "" {
+				m.history = append(m.history, input)
+				m.historyIndex = -1
+				m.savedInput = ""
 				m.textarea.Reset()
 				m.refreshSuggestions()
 				return func() tea.Msg {
@@ -110,8 +110,13 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)
 	m.syncLayout()
-	
-	if _, ok := msg.(tea.KeyMsg); ok {
+
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyRunes, tea.KeyBackspace, tea.KeyDelete:
+			m.historyIndex = -1
+			m.savedInput = ""
+		}
 		m.refreshSuggestions()
 	}
 
@@ -123,7 +128,7 @@ func (m ComposerModel) View() string {
 		return ""
 	}
 	prompt := m.renderInputPrompt()
-	rows := max(3, m.textarea.Height())
+	rows := m.textarea.Height()
 	promptLines := make([]string, rows)
 	for i := range promptLines {
 		if i == 0 {
@@ -139,7 +144,7 @@ func (m ComposerModel) View() string {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
-	return styles.InputChromeStyle.Width(m.width - 4).Render(
+	return styles.InputChromeStyle.Width(m.width - 6).Render(
 		lipgloss.JoinVertical(lipgloss.Left, body, suggestionsBlock),
 	)
 }
@@ -154,10 +159,10 @@ func (m *ComposerModel) syncLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	textareaWidth := max(16, m.width-13)
+	// Overhead: MainContainerStyle.Padding(0,1)=2 + Chrome border H=2 + Chrome Padding(1,1) H=2 + promptBlock=3 = 9
+	textareaWidth := max(16, m.width-9)
 	m.textarea.SetWidth(textareaWidth)
-	inputHeight := clamp(estimateTextareaHeight(m.textarea.Value(), textareaWidth), 3, max(3, m.height-20))
-	m.textarea.SetHeight(inputHeight)
+	m.textarea.SetHeight(2)
 }
 
 func (m *ComposerModel) refreshSuggestions() {
@@ -231,9 +236,38 @@ func (m *ComposerModel) SetThinking(thinking bool) {
 }
 
 func (m ComposerModel) Height() int {
-	return m.textarea.Height() + 2
+	return m.textarea.Height() + 6
 }
 
 func (m ComposerModel) Value() string {
 	return m.textarea.Value()
+}
+
+func (m *ComposerModel) navigateHistoryUp() {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyIndex == -1 {
+		m.savedInput = m.textarea.Value()
+		m.historyIndex = len(m.history) - 1
+	} else if m.historyIndex > 0 {
+		m.historyIndex--
+	}
+	m.textarea.SetValue(m.history[m.historyIndex])
+	m.textarea.CursorEnd()
+}
+
+func (m *ComposerModel) navigateHistoryDown() {
+	if m.historyIndex == -1 {
+		return
+	}
+	if m.historyIndex == len(m.history)-1 {
+		m.historyIndex = -1
+		m.textarea.SetValue(m.savedInput)
+		m.textarea.CursorEnd()
+	} else {
+		m.historyIndex++
+		m.textarea.SetValue(m.history[m.historyIndex])
+		m.textarea.CursorEnd()
+	}
 }

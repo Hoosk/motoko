@@ -28,6 +28,11 @@ type Manager struct {
 	wg         sync.WaitGroup
 }
 
+type NextResult struct {
+	Update Update
+	OK     bool
+}
+
 func NewManager() *Manager {
 	return &Manager{
 		tachikomas: []Tachikoma{},
@@ -51,6 +56,18 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) Wait() {
 	m.wg.Wait()
+}
+
+func (m *Manager) Next(ctx context.Context) NextResult {
+	if m == nil {
+		return NextResult{}
+	}
+	select {
+	case <-ctx.Done():
+		return NextResult{}
+	case update := <-m.updates:
+		return NextResult{Update: update, OK: true}
+	}
 }
 
 func (m *Manager) publishUpdate(update Update) bool {

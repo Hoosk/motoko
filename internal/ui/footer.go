@@ -7,6 +7,7 @@ import (
 	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type FooterModel struct {
@@ -14,6 +15,8 @@ type FooterModel struct {
 	tachikomaInfo map[string]string
 	runtime       *app.Runtime
 	width         int
+	thinking      bool
+	thinkingFrame int
 }
 
 func NewFooterModel(runtime *app.Runtime) FooterModel {
@@ -33,24 +36,29 @@ func (m *FooterModel) Update(msg tea.Msg) tea.Cmd {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 
+	case ThinkingTickMsg:
+		if m.thinking {
+			m.thinkingFrame = (m.thinkingFrame + 1) % len(thinkingFrames)
+		}
+
 	case TachikomaMsg:
 		m.tachikomaInfo[msg.Name] = msg.Status
 		if m.sysInfo.Signals == nil {
 			m.sysInfo.Signals = make(map[string]string)
 		}
 		m.sysInfo.Signals[msg.Name] = msg.Status
-		
+
 		signals := m.sysInfo.Signals
 		m.sysInfo = system.GetContextInfo()
 		m.sysInfo.Signals = signals
-		
+
 		if m.sysInfo.Signals == nil {
 			m.sysInfo.Signals = make(map[string]string)
 		}
 		for name, status := range m.tachikomaInfo {
 			m.sysInfo.Signals[name] = status
 		}
-		
+
 	case ShellResultMsg, ResponseAppliedMsg:
 		signals := m.sysInfo.Signals
 		m.sysInfo = system.GetContextInfo()
@@ -61,19 +69,52 @@ func (m *FooterModel) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+func (m *FooterModel) SetThinking(thinking bool) {
+	m.thinking = thinking
+	if thinking {
+		m.thinkingFrame = 0
+	}
+}
+
 func (m FooterModel) View() string {
 	if m.width == 0 {
 		return ""
 	}
-	ws := styles.WorkspaceStyle.Render("workspace: " + m.sysInfo.Workspace)
-	git := styles.GitStyle.Render("git: " + m.sysInfo.GitSummary())
-	pending := styles.SystemStyle.Render("pending: " + pendingLabel(m.runtime.PendingApproval()))
-	provider := styles.SystemStyle.Render("provider: " + m.runtime.ProviderSummary())
 
-	parts := []string{ws, git, pending, provider}
-	return styles.FooterStyle.Width(m.width - 4).Render(strings.Join(parts, "  │  "))
+	ws := lipgloss.NewStyle().Foreground(styles.AccentViolet).Bold(true).Render("⬡ " + m.sysInfo.Workspace)
+	agent := lipgloss.NewStyle().Foreground(styles.AccentViolet).Render("● " + m.runtime.AgentName())
+
+	parts := []string{ws}
+	if m.sysInfo.HasGit && m.sysInfo.GitBranch != "" {
+		parts = append(parts, styles.GitStyle.Render("⎇ "+m.sysInfo.GitBranch))
+	}
+	parts = append(parts, agent)
+	parts = append(parts, styles.SystemStyle.Render(m.runtime.ProviderSummary()))
+
+	if m.thinking {
+		spinner := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(thinkingFrames[m.thinkingFrame])
+		label := lipgloss.NewStyle().Foreground(styles.AccentBlue).Render(agentActivityLabel(m.runtime.AgentName()))
+		parts = append(parts, spinner+" "+label)
+	}
+
+	if pending := m.runtime.PendingApproval(); pending != "" {
+		parts = append(parts, styles.ErrorStyle.Render("⚠ "+pending))
+	}
+
+	return styles.FooterStyle.Width(m.width - 4).Render(strings.Join(parts, "  "))
 }
 
 func (m FooterModel) GetSysInfo() system.ContextInfo {
 	return m.sysInfo
+}
+
+func agentActivityLabel(agentName string) string {
+	switch agentName {
+	case "build":
+		return "building"
+	case "plan":
+		return "planning"
+	default:
+		return "thinking"
+	}
 }

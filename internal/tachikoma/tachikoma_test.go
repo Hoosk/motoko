@@ -83,6 +83,30 @@ func TestManagerDropsUpdatesWhenBufferIsFull(t *testing.T) {
 	}
 }
 
+func TestManagerNextRespectsCancellation(t *testing.T) {
+	mgr := NewManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := mgr.Next(ctx)
+	if result.OK {
+		t.Fatal("expected canceled next call to stop without update")
+	}
+}
+
+func TestManagerNextReturnsPublishedUpdate(t *testing.T) {
+	mgr := NewManager()
+	if !mgr.publishUpdate(Update{Name: "one", Status: "ok"}) {
+		t.Fatal("expected publish to succeed")
+	}
+	result := mgr.Next(context.Background())
+	if !result.OK {
+		t.Fatal("expected next call to return update")
+	}
+	if result.Update.Name != "one" || result.Update.Status != "ok" {
+		t.Fatalf("unexpected next result %#v", result)
+	}
+}
+
 func TestMockTachikomaName(t *testing.T) {
 	if got := NewMockTachikoma("x").Name(); got != "x" {
 		t.Fatalf("unexpected mock tachikoma name %q", got)

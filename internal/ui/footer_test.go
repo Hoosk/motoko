@@ -20,12 +20,15 @@ func TestFooterViewIncludesProviderAndPending(t *testing.T) {
 	f.sysInfo = system.ContextInfo{Workspace: "motoko", HasGit: true, GitBranch: "main"}
 	f.width = 120
 	view := stripANSI(f.View())
-	if !strings.Contains(view, "provider: openrouter") {
+	// New compact format: provider summary appears as "openrouter (openrouter:...)"
+	if !strings.Contains(view, "openrouter") {
 		t.Fatalf("expected provider in footer, got %q", view)
 	}
-	if !strings.Contains(view, "pending: none") {
-		t.Fatalf("expected pending label in footer, got %q", view)
+	// New format: agent mode appears as "● plan"
+	if !strings.Contains(view, "plan") {
+		t.Fatalf("expected agent mode in footer, got %q", view)
 	}
+	// Pending only shows if there is a pending command; no "pending: none" in new format
 }
 
 func TestFooterUpdateTracksTachikomaSignals(t *testing.T) {

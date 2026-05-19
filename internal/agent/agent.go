@@ -38,9 +38,10 @@ type Step struct {
 }
 
 type Agent struct {
-	provider provider.Client
-	tools    *tools.Registry
-	debug    bool
+	provider    provider.Client
+	tools       *tools.Registry
+	debug       bool
+	agentSystem string
 }
 
 type StreamEvent struct {
@@ -55,6 +56,11 @@ func New(p provider.Client, toolsRegistry *tools.Registry) *Agent {
 
 func (a *Agent) SetDebug(enabled bool) {
 	a.debug = enabled
+}
+
+// SetAgentOverride sets the mode-specific system prompt injected before context.
+func (a *Agent) SetAgentOverride(system string) {
+	a.agentSystem = system
 }
 
 func (a *Agent) Configured() bool {
@@ -161,10 +167,10 @@ func maxToolIterations() int {
 
 func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.Message, onEvent func(StreamEvent) error) (provider.Response, error) {
 	if onEvent == nil {
-		return a.provider.Complete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()))
+		return a.provider.Complete(ctx, buildSystemPrompt(info, a.tools.Specs(), a.agentSystem), messages, toolDefinitions(a.tools.Specs()))
 	}
 	extractor := structuredStreamExtractor{}
-	return a.provider.StreamComplete(ctx, buildSystemPrompt(info, a.tools.Specs()), messages, toolDefinitions(a.tools.Specs()), func(delta string) error {
+	return a.provider.StreamComplete(ctx, buildSystemPrompt(info, a.tools.Specs(), a.agentSystem), messages, toolDefinitions(a.tools.Specs()), func(delta string) error {
 		visibleDelta := extractor.Feed(delta)
 		if visibleDelta == "" {
 			return nil
@@ -173,7 +179,7 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	})
 }
 
-func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec) string {
+func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
 	lines = append(lines,
 		"You are Motoko, a senior coding agent working directly in the user's terminal and repository.",
@@ -192,6 +198,11 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec) string {
 		"- Prefer finishing the task end-to-end instead of stopping at analysis.",
 		"- If the existing context already answers the question, answer directly without unnecessary tool calls.",
 		"",
+	)
+	if agentSystem != "" {
+		lines = append(lines, "--- AGENT MODE ---", agentSystem, "")
+	}
+	lines = append(lines,
 		"--- CONTEXT ---",
 		"The following context was prepared automatically. Use it before doing blind searches.",
 		"",

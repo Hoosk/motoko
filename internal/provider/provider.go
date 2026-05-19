@@ -98,20 +98,38 @@ func (c baseClient) Summary() string {
 	return fmt.Sprintf("%s:%s", c.providerName, c.model)
 }
 
-type openAIClient struct{ baseClient }
-type anthropicClient struct{ baseClient }
-type geminiClient struct{ baseClient }
+type openAIClient struct {
+	baseClient
+	thinkingBudget int
+}
+type anthropicClient struct {
+	baseClient
+	thinkingBudget int
+}
+type geminiClient struct {
+	baseClient
+	thinkingBudget int
+}
 
 func newOpenAIClient(cfg config.ProviderConfig) Client {
-	return &openAIClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &openAIClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func newAnthropicClient(cfg config.ProviderConfig) Client {
-	return &anthropicClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &anthropicClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func newGeminiClient(cfg config.ProviderConfig) Client {
-	return &geminiClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &geminiClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition) (Response, error) {
@@ -178,11 +196,21 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
 
+	maxTokens := 4096
 	reqBody := map[string]any{
 		"model":      c.model,
-		"max_tokens": 4096,
+		"max_tokens": maxTokens,
 		"system":     systemPrompt,
 		"messages":   toAnthropicMessages(messages),
+	}
+	if c.thinkingBudget > 0 {
+		if c.thinkingBudget >= maxTokens {
+			reqBody["max_tokens"] = c.thinkingBudget + 1024
+		}
+		reqBody["thinking"] = map[string]any{
+			"type":          "enabled",
+			"budget_tokens": c.thinkingBudget,
+		}
 	}
 
 	var decoded anthropicResponse

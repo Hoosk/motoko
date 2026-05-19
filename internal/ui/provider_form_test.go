@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func TestProviderFormDefaultsAndPresetSync(t *testing.T) {
-	m := NewModel(app.NewRuntime(), func() {})
+	m := NewModel(app.NewRuntime(), func() {}, context.Background())
 	m.openProviderForm()
 	if m.providerForm.name != "openai" {
 		t.Fatalf("expected openai default name, got %q", m.providerForm.name)
@@ -26,9 +27,9 @@ func TestProviderFormDefaultsAndPresetSync(t *testing.T) {
 }
 
 func TestProviderFormValidationAndMaskSecret(t *testing.T) {
-	m := NewModel(app.NewRuntime(), func() {})
+	m := NewModel(app.NewRuntime(), func() {}, context.Background())
 	m.openProviderForm()
-	m.providerForm.fieldIndex = m.providerFieldCount() - 1
+	m.providerForm.fieldIndex = 2 // Save button
 	_ = m.handleProviderFormEnter()
 	if m.providerForm.status != "La API key es obligatoria." {
 		t.Fatalf("expected api key validation, got %q", m.providerForm.status)

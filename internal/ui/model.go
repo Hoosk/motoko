@@ -2,10 +2,12 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/styles"
@@ -56,18 +58,30 @@ type Model struct {
 	cancel          func()
 	showTachikomas  bool
 	showToolPalette bool
+	modePickerOpen  bool
+	agentList       []agent.AgentDef
+	agentListIndex  int
+	modelPickerOpen  bool
+	modelList        []string
+	modelListIndex   int
+	modelPickerLoading bool
 	width           int
 	height          int
 	agentStream     *agentStreamBuffer
+	tachikomaCtx    context.Context
 }
 
-func NewModel(runtime *app.Runtime, cancel func()) Model {
+func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context) Model {
+	if tachikomaCtx == nil {
+		tachikomaCtx = context.Background()
+	}
 	return Model{
 		timeline: NewTimelineModel(),
 		composer: NewComposerModel(runtime),
 		footer:   NewFooterModel(runtime),
 		runtime:  runtime,
 		cancel:   cancel,
+		tachikomaCtx: tachikomaCtx,
 	}
 }
 
@@ -77,13 +91,19 @@ func (m Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, m.composer.Init(), m.timeline.Init(), m.footer.Init())
 	if m.manager != nil {
-		cmds = append(cmds, waitForTachikoma(m.manager.Updates()))
+		cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
 	}
 	return tea.Batch(cmds...)
 }
 
-func waitForTachikoma(updates <-chan tachikoma.Update) tea.Cmd {
-	return func() tea.Msg { return TachikomaMsg(<-updates) }
+func waitForTachikoma(ctx context.Context, manager *tachikoma.Manager) tea.Cmd {
+	return func() tea.Msg {
+		result := manager.Next(ctx)
+		if !result.OK {
+			return nil
+		}
+		return TachikomaMsg(result.Update)
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -95,7 +115,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.handleProviderFormKey(msg)
 			return m, cmd
 		}
-		
+		if m.modePickerOpen {
+			cmd := m.handleModePickerKey(msg)
+			return m, cmd
+		}
+		if m.modelPickerOpen {
+			cmd := m.handleModelPickerKey(msg)
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			if m.showToolPalette {
@@ -136,12 +164,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		if response.Signal == "open-mode-popup" {
+			m.openModePicker()
+			return m, tea.Batch(cmds...)
+		}
+
+		if response.Signal == "open-models-popup" {
+			m.openModelPicker()
+			active, ok := m.runtime.GetActiveProviderConfig()
+			if ok {
+				cmds = append(cmds, loadProviderModels(m.runtime, active))
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		if response.Action != nil {
 			if response.Action.Type == app.ActionShell {
 				cmds = append(cmds, runShellCommand(response.Action.ShellCommand))
 			} else if response.Action.Type == app.ActionAgent {
 				m.timeline.SetThinking(true)
 				m.composer.SetThinking(true)
+				m.footer.SetThinking(true)
 				m.timeline.SetStreaming(true)
 				m.agentStream = &agentStreamBuffer{}
 				
@@ -167,7 +210,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.Events) > 0 {
 			m.timeline.SetThinking(false)
 			m.composer.SetThinking(false)
+			// Footer keeps thinking=true until AgentResultMsg (entire agent run).
 			for _, event := range msg.Events {
+				if !m.runtime.Debug() {
+					switch event.Kind {
+					case "output", "debug":
+						continue
+					case "tool":
+						event.Content = ""
+					}
+				}
 				if cmd := m.timeline.Update(AgentStreamEventMsg{Event: event}); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -180,7 +232,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case ThinkingTickMsg:
-		if m.timeline.thinking {
+		if m.timeline.thinking || m.footer.thinking {
 			cmds = append(cmds, thinkingTick())
 		}
 
@@ -192,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.timeline.SetThinking(false)
 		m.composer.SetThinking(false)
+		m.footer.SetThinking(false)
 		m.timeline.SetStreaming(false)
 		
 		if msg.Err != nil {
@@ -204,17 +257,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
+	case ProviderModelsMsg:
+		if m.modelPickerOpen {
+			m.modelPickerLoading = false
+			if msg.Err != nil {
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+				m.timeline.renderMessages()
+			} else {
+				m.modelList = msg.Models
+				m.modelListIndex = 0
+			}
+		} else {
+			// Fall through to timeline.
+			if cmd := m.timeline.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
 	case ShellResultMsg:
 		response := m.runtime.HandleShellResult(msg.Result)
 		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: response} })
 
+	case AgentChangedMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Modo agente: " + msg.Agent})
+		m.timeline.renderMessages()
+
+	case ModelChangedMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Modelo activo para %s: %s", msg.Provider, msg.Model)})
+		m.timeline.renderMessages()
+
 	case TachikomaMsg:
 		if m.manager != nil {
-			cmds = append(cmds, waitForTachikoma(m.manager.Updates()))
+			cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
 		}
 	}
 
-	if !m.providerForm.active {
+	if !m.providerForm.active && !m.modePickerOpen && !m.modelPickerOpen {
 		cmds = append(cmds, m.composer.Update(msg))
 		cmds = append(cmds, m.timeline.Update(msg))
 		cmds = append(cmds, m.footer.Update(msg))
@@ -237,6 +315,14 @@ func (m Model) View() string {
 
 	if m.providerForm.active {
 		popup := styles.PopupStyle.Render(m.renderProviderForm())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+	}
+	if m.modePickerOpen {
+		popup := styles.PopupStyle.Render(m.renderModePicker())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+	}
+	if m.modelPickerOpen {
+		popup := styles.PopupStyle.Render(m.renderModelPicker())
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 	}
 	if !m.showToolPalette {

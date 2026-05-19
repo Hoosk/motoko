@@ -16,6 +16,67 @@ var fixedIgnoredDirs = map[string]struct{}{
 type Matcher struct {
 	ignoredFiles map[string]struct{}
 	ignoredDirs  map[string]struct{}
+	patterns     []ignorePattern
+}
+
+// ignorePattern represents a single parsed .gitignore pattern used as
+// a fallback when git ls-files is not available.
+type ignorePattern struct {
+	pattern string // normalized pattern (no leading /, no trailing /)
+	dirOnly bool   // was originally suffixed with /
+	rooted  bool   // contained an interior / so it is anchored to base
+	base    string // relative path of the directory containing .gitignore
+}
+
+// parseIgnoreLine parses a single line from a .gitignore file.
+// base is the relative path (from workspace root) of the directory that
+// contains the .gitignore file (empty string for the root).
+// Returns (pattern, true) if the line represents a pattern we should act on.
+func parseIgnoreLine(line, base string) (ignorePattern, bool) {
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+		return ignorePattern{}, false
+	}
+	p := ignorePattern{base: base}
+	p.dirOnly = strings.HasSuffix(line, "/")
+	line = strings.TrimSuffix(line, "/")
+	// A leading / means anchored to the .gitignore's directory.
+	// An interior / (not leading/trailing) also means anchored.
+	stripped := strings.TrimPrefix(line, "/")
+	p.rooted = line != stripped || strings.Contains(stripped, "/")
+	line = stripped
+	p.pattern = line
+	return p, p.pattern != ""
+}
+
+// matches reports whether the given relative path (from workspace root)
+// is matched by this pattern. isDir indicates whether the path is a directory.
+func (p ignorePattern) matches(relPath string, isDir bool) bool {
+	if p.dirOnly && !isDir {
+		return false
+	}
+	// Restrict to paths under the .gitignore's base directory.
+	target := relPath
+	if p.base != "" {
+		prefix := p.base + "/"
+		if !strings.HasPrefix(relPath, prefix) {
+			return false
+		}
+		target = relPath[len(prefix):]
+	}
+	if p.rooted {
+		// Anchored: pattern must match the path from the base dir.
+		matched, _ := filepath.Match(p.pattern, target)
+		return matched
+	}
+	// Non-anchored: pattern can match the base name or any path suffix.
+	parts := strings.Split(target, "/")
+	for i := range parts {
+		suffix := strings.Join(parts[i:], "/")
+		if matched, _ := filepath.Match(p.pattern, suffix); matched {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(root string) (*Matcher, error) {
@@ -59,6 +120,20 @@ func (m *Matcher) Ignored(relPath string, isDir bool) bool {
 			return true
 		}
 	}
+	// Pattern-based check (from .gitignore fallback parser).
+	for _, p := range m.patterns {
+		if p.matches(relPath, isDir) {
+			return true
+		}
+	}
+	// Check parent directories against patterns (handles files under ignored dirs).
+	for dir := parentRelativePath(relPath); dir != ""; dir = parentRelativePath(dir) {
+		for _, p := range m.patterns {
+			if p.matches(dir, true) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -67,6 +142,9 @@ func (m *Matcher) loadGitIgnored(root string) {
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
+		// Git is not available or root is not a git repo: fall back to
+		// parsing .gitignore files directly.
+		m.loadGitIgnoreFiles(root)
 		return
 	}
 	for _, rawLine := range strings.Split(string(out), "\n") {
@@ -83,6 +161,62 @@ func (m *Matcher) loadGitIgnored(root string) {
 			continue
 		}
 		m.ignoredFiles[line] = struct{}{}
+	}
+}
+
+// maxGitIgnoreWalkDepth is the maximum directory depth we recurse into
+// when searching for nested .gitignore files in the fallback path.
+const maxGitIgnoreWalkDepth = 6
+
+// loadGitIgnoreFiles walks the workspace tree and parses every .gitignore
+// file found up to maxGitIgnoreWalkDepth deep.
+func (m *Matcher) loadGitIgnoreFiles(root string) {
+	m.walkForGitIgnore(root, root, "", 0)
+}
+
+func (m *Matcher) walkForGitIgnore(root, dir, relBase string, depth int) {
+	if depth > maxGitIgnoreWalkDepth {
+		return
+	}
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		m.loadSingleGitIgnoreFile(gitignorePath, relBase)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if _, ok := fixedIgnoredDirs[name]; ok {
+			continue
+		}
+		childRel := name
+		if relBase != "" {
+			childRel = relBase + "/" + name
+		}
+		m.walkForGitIgnore(root, filepath.Join(dir, name), childRel, depth+1)
+	}
+}
+
+// loadSingleGitIgnoreFile parses one .gitignore file and appends the
+// resulting patterns to m.patterns.  base is the relative path (from the
+// workspace root) of the directory that contains the file.
+func (m *Matcher) loadSingleGitIgnoreFile(path, base string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		p, ok := parseIgnoreLine(line, base)
+		if !ok {
+			continue
+		}
+		m.patterns = append(m.patterns, p)
 	}
 }
 

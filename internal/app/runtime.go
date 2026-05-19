@@ -36,6 +36,7 @@ const (
 	EntryCommand   EntryKind = "command"
 	EntryOutput    EntryKind = "output"
 	EntryError     EntryKind = "error"
+	EntryHelp      EntryKind = "help"
 )
 
 type Entry struct {
@@ -68,14 +69,16 @@ type pendingShell struct {
 }
 
 type Runtime struct {
-	mode      Mode
-	inputMode InputMode
-	pending   *pendingShell
-	tools     *tools.Registry
-	agent     *agent.Agent
-	config    *config.AppConfig
-	debug     bool
-	semantic  *semantic.Index
+	mode             Mode
+	inputMode        InputMode
+	pending          *pendingShell
+	tools            *tools.Registry
+	agent            *agent.Agent
+	config           *config.AppConfig
+	debug            bool
+	semantic         *semantic.Index
+	currentAgentName string
+	availableAgents  []agent.AgentDef
 }
 
 type AgentStreamEvent struct {
@@ -91,12 +94,19 @@ func NewRuntime() *Runtime {
 		cfg = &config.AppConfig{}
 	}
 
+	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
+	if customAgents, err := agent.LoadAgentsFile(".agents"); err == nil && len(customAgents) > 0 {
+		allAgents = append(allAgents, customAgents...)
+	}
+
 	r := &Runtime{
-		mode:      ModePlan,
-		inputMode: InputModeChat,
-		tools:     toolsRegistry,
-		config:    cfg,
-		semantic:  semantic.NewIndex(),
+		mode:             ModePlan,
+		inputMode:        InputModeChat,
+		tools:            toolsRegistry,
+		config:           cfg,
+		semantic:         semantic.NewIndex(),
+		currentAgentName: "plan",
+		availableAgents:  allAgents,
 	}
 	r.refreshAgent()
 	return r
@@ -104,6 +114,37 @@ func NewRuntime() *Runtime {
 
 func (r *Runtime) Mode() Mode {
 	return r.mode
+}
+
+// AgentName returns the name of the currently active agent mode.
+func (r *Runtime) AgentName() string {
+	if r.currentAgentName == "" {
+		return string(r.mode)
+	}
+	return r.currentAgentName
+}
+
+// AvailableAgents returns all agents (builtin + custom from .agents).
+func (r *Runtime) AvailableAgents() []agent.AgentDef {
+	return r.availableAgents
+}
+
+// SetAgentMode switches to the named agent, updating the mode and system prompt.
+func (r *Runtime) SetAgentMode(name string) {
+	for _, a := range r.availableAgents {
+		if strings.EqualFold(a.Name, name) {
+			r.currentAgentName = a.Name
+			if strings.EqualFold(name, "build") {
+				r.mode = ModeBuild
+			} else {
+				r.mode = ModePlan
+			}
+			if r.agent != nil {
+				r.agent.SetAgentOverride(a.System)
+			}
+			return
+		}
+	}
 }
 
 func (r *Runtime) InputMode() InputMode {
@@ -151,6 +192,57 @@ func (r *Runtime) ProviderSummary() string {
 func (r *Runtime) ProviderPresets() []config.ProviderPreset {
 	return config.ValidProviderPresets()
 }
+
+// GetActiveProviderConfig returns the currently active ProviderConfig.
+func (r *Runtime) GetActiveProviderConfig() (config.ProviderConfig, bool) {
+	if r.config == nil {
+		return config.ProviderConfig{}, false
+	}
+	return r.config.Active()
+}
+
+// SetActiveModel updates the model field for the active provider and saves.
+func (r *Runtime) SetActiveModel(model string) error {
+	if r.config == nil {
+		return fmt.Errorf("no hay configuracion")
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		return fmt.Errorf("no hay provider activo")
+	}
+	active.Model = model
+	active.Models = config.UniqueSortedKeep(active.Models, model)
+	r.config.UpsertProvider(active)
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	r.refreshAgent()
+	return nil
+}
+
+// SetThinkingBudget updates the thinking budget for the active provider.
+// level: 0=off, 1=low(1024), 2=medium(4096), 3=high(16000).
+func (r *Runtime) SetThinkingBudget(budget int) error {
+	if r.config == nil {
+		return fmt.Errorf("no hay configuracion")
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		return fmt.Errorf("no hay provider activo")
+	}
+	active.ThinkingBudget = budget
+	r.config.UpsertProvider(active)
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	r.refreshAgent()
+	return nil
+}
+
+// ThinkingBudgetLevels returns the ordered token-budget values for thinking modes.
+// Index: 0=off, 1=low, 2=medium, 3=high.
+var ThinkingBudgetLevels = []int{0, 1024, 4096, 16000}
+var ThinkingBudgetLabels = []string{"off", "low (1k)", "medium (4k)", "high (16k)"}
 
 func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]string, error) {
 	client, err := provider.NewClient(providerCfg)
@@ -305,10 +397,11 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 
 	switch command {
 	case "help":
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
+		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Comandos disponibles:",
 			"/help     muestra esta ayuda",
 			"/clear    limpia la timeline",
+			"/mode     abre el selector de modo/agente",
 			"/plan     activa modo de solo lectura",
 			"/build    activa modo de trabajo",
 			"/shell    activa modo shell para ejecutar comandos directos",
@@ -327,11 +420,13 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "clear":
 		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reiniciada."}}}
 	case "plan":
-		r.mode = ModePlan
+		r.SetAgentMode("plan")
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: plan. Los comandos shell requieren aprobacion explicita."}}}
 	case "build":
-		r.mode = ModeBuild
+		r.SetAgentMode("build")
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: build. Los comandos seguros se ejecutan directamente; los sensibles se quedan pendientes de aprobacion."}}}
+	case "mode":
+		return Response{Signal: "open-mode-popup"}
 	case "shell":
 		r.inputMode = InputModeShell
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo de entrada: shell. Cualquier linea que no empiece por / se ejecuta como comando."}}}
@@ -423,7 +518,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", "clear", "plan", "build", "shell", "chat", "status", "debug", "context", "provider", "models", "tools", "tool", "approve", "deny"}
+	commands := []string{"help", "clear", "mode", "plan", "build", "shell", "chat", "status", "debug", "context", "provider", "models", "tools", "tool", "approve", "deny"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {
@@ -577,14 +672,8 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 	}
 
 	if len(args) == 0 {
-		models, err := r.ListModelsForProvider(context.Background(), active)
-		if err != nil {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
-		}
-		if len(models) == 0 {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "El provider no devolvio modelos."}}}
-		}
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join(models, "\n")}}}
+		// Open interactive model picker popup.
+		return Response{Signal: "open-models-popup"}
 	}
 
 	model := strings.TrimSpace(strings.Join(args, " "))
@@ -639,6 +728,13 @@ func (r *Runtime) refreshAgent() {
 	}
 	r.agent = agent.New(client, r.tools)
 	r.agent.SetDebug(r.debug)
+	// Re-apply the current agent mode system prompt.
+	for _, a := range r.availableAgents {
+		if strings.EqualFold(a.Name, r.currentAgentName) {
+			r.agent.SetAgentOverride(a.System)
+			break
+		}
+	}
 }
 
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {

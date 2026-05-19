@@ -23,7 +23,7 @@ func main() {
 	mgr := newTachikomaManager(runtime)
 
 	// Create UI Model
-	m := ui.NewModel(runtime, cancel)
+	m := ui.NewModel(runtime, cancel, ctx)
 	m.SetManager(mgr)
 
 	// Start Tachikomas in the background

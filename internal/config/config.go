@@ -24,13 +24,14 @@ const (
 )
 
 type ProviderConfig struct {
-	Name    string         `json:"name"`
-	Preset  ProviderPreset `json:"preset,omitempty"`
-	Kind    ProviderKind   `json:"kind"`
-	BaseURL string         `json:"base_url"`
-	APIKey  string         `json:"api_key"`
-	Model   string         `json:"model"`
-	Models  []string       `json:"models,omitempty"`
+	Name           string         `json:"name"`
+	Preset         ProviderPreset `json:"preset,omitempty"`
+	Kind           ProviderKind   `json:"kind"`
+	BaseURL        string         `json:"base_url"`
+	APIKey         string         `json:"api_key"`
+	Model          string         `json:"model"`
+	Models         []string       `json:"models,omitempty"`
+	ThinkingBudget int            `json:"thinking_budget,omitempty"`
 }
 
 type AppConfig struct {

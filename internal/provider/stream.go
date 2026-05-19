@@ -30,6 +30,11 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 			"include_usage": true,
 		},
 	}
+	// o-series models use reasoning_effort instead of temperature.
+	if c.thinkingBudget > 0 && isOpenAIReasoningModel(c.model) {
+		delete(reqBody, "temperature")
+		reqBody["reasoning_effort"] = budgetToReasoningEffort(c.thinkingBudget)
+	}
 	var raw strings.Builder
 	usage := Usage{}
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", reqBody, map[string]string{
@@ -76,12 +81,23 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
+	maxTokens := 4096
 	reqBody := map[string]any{
 		"model":      c.model,
-		"max_tokens": 4096,
+		"max_tokens": maxTokens,
 		"system":     systemPrompt,
 		"messages":   toAnthropicMessages(messages),
 		"stream":     true,
+	}
+	if c.thinkingBudget > 0 {
+		// Extended thinking requires max_tokens > budget_tokens.
+		if c.thinkingBudget >= maxTokens {
+			reqBody["max_tokens"] = c.thinkingBudget + 1024
+		}
+		reqBody["thinking"] = map[string]any{
+			"type":         "enabled",
+			"budget_tokens": c.thinkingBudget,
+		}
 	}
 	var raw strings.Builder
 	usage := Usage{}
@@ -141,15 +157,21 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
+	genConfig := map[string]any{
+		"responseMimeType": "application/json",
+		"temperature":      0.2,
+	}
+	if c.thinkingBudget > 0 {
+		genConfig["thinkingConfig"] = map[string]any{
+			"thinkingBudget": c.thinkingBudget,
+		}
+	}
 	body := map[string]any{
 		"system_instruction": map[string]any{
 			"parts": []map[string]string{{"text": systemPrompt}},
 		},
-		"contents": toGeminiMessages(messages),
-		"generationConfig": map[string]any{
-			"responseMimeType": "application/json",
-			"temperature":      0.2,
-		},
+		"contents":         toGeminiMessages(messages),
+		"generationConfig": genConfig,
 	}
 	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s", c.baseURL, c.model, c.apiKey)
 	var raw strings.Builder
@@ -194,6 +216,27 @@ func parseStreamResponse(raw string, usage Usage) Response {
 		return parsed
 	}
 	return Response{Message: raw, Usage: usage}
+}
+
+// isOpenAIReasoningModel reports whether the model name belongs to the
+// o-series (o1, o3, o4, etc.) that use reasoning_effort.
+func isOpenAIReasoningModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.HasPrefix(lower, "o1") ||
+		strings.HasPrefix(lower, "o3") ||
+		strings.HasPrefix(lower, "o4")
+}
+
+// budgetToReasoningEffort maps a token budget to an OpenAI reasoning_effort string.
+func budgetToReasoningEffort(budget int) string {
+	switch {
+	case budget >= 16000:
+		return "high"
+	case budget >= 4096:
+		return "medium"
+	default:
+		return "low"
+	}
 }
 
 func postJSONStream(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, onData func(string) error) error {

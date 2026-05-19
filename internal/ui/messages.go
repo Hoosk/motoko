@@ -31,3 +31,14 @@ type finalizeStreamMsg struct {
 }
 
 type CopySelectionMsg struct{ Err error }
+
+// AgentChangedMsg is emitted when the user selects a different agent mode.
+type AgentChangedMsg struct {
+	Agent string
+}
+
+// ModelChangedMsg is emitted when the user selects a different model.
+type ModelChangedMsg struct {
+	Provider string
+	Model    string
+}
