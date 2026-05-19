@@ -18,13 +18,7 @@ func main() {
 
 	runtime := app.NewRuntime()
 
-	// Initialize Tachikoma Manager
-	mgr := tachikoma.NewManager()
-
-	// Add minimum viable Tachikomas with real workspace and git context.
-	mgr.Add(tachikoma.NewWorkspaceTachikoma(30 * time.Second))
-	mgr.Add(tachikoma.NewGitTachikoma(5 * time.Second))
-	mgr.Add(tachikoma.NewCodeTachikoma(runtime.SemanticIndex(), 20*time.Second))
+	mgr := newTachikomaManager(runtime)
 
 	// Create UI Model
 	m := ui.NewModel(runtime, cancel)
@@ -39,4 +33,12 @@ func main() {
 		fmt.Printf("Error al iniciar Motoko: %v", err)
 		os.Exit(1)
 	}
+}
+
+func newTachikomaManager(runtime *app.Runtime) *tachikoma.Manager {
+	mgr := tachikoma.NewManager()
+	mgr.Add(tachikoma.NewWorkspaceTachikoma(30 * time.Second))
+	mgr.Add(tachikoma.NewGitTachikoma(5 * time.Second))
+	mgr.Add(tachikoma.NewCodeTachikoma(runtime.SemanticIndex(), 20*time.Second))
+	return mgr
 }

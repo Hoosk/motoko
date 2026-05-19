@@ -69,3 +69,23 @@ func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 		t.Fatalf("expected snippet mentioning RunAgent, got %q", info.RelevantSnippets[0])
 	}
 }
+
+func TestSaveProviderNormalizesNameBeforeActivating(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	r := NewRuntime()
+	err := r.SaveProvider(config.ProviderConfig{
+		Preset: config.ProviderPresetOpenRouter,
+		APIKey: "k",
+		Model:  "openai/gpt-4.1",
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.config.ActiveProvider != "openrouter" {
+		t.Fatalf("expected normalized active provider, got %q", r.config.ActiveProvider)
+	}
+	active, ok := r.config.Active()
+	if !ok || active.Name != "openrouter" {
+		t.Fatalf("expected normalized active config, got %#v ok=%t", active, ok)
+	}
+}

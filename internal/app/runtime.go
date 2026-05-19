@@ -556,6 +556,7 @@ func (r *Runtime) SaveProvider(providerCfg config.ProviderConfig, activate bool)
 	if r.config == nil {
 		r.config = &config.AppConfig{}
 	}
+	providerCfg = config.NormalizeProvider(providerCfg)
 	r.config.UpsertProvider(providerCfg)
 	if activate || strings.TrimSpace(r.config.ActiveProvider) == "" {
 		if err := r.config.SetActive(providerCfg.Name); err != nil {
