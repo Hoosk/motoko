@@ -163,33 +163,36 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec) string {
 	var lines []string
 	lines = append(lines,
-		"You are Motoko, an expert coding agent operating directly in the user's terminal.",
-		"You must respond strictly in JSON using exactly one of these two forms:",
+		"You are Motoko, a senior coding agent working directly in the user's terminal and repository.",
+		"Return exactly one JSON object and nothing else.",
+		"Do not wrap JSON in markdown fences.",
+		"Do not add prose before or after the JSON.",
+		"Valid response forms:",
 		`1. Final answer: {"message":"plain text for the user"}`,
-		`2. To execute a tool: {"tool_name":"tool_name","tool_input":"arguments"}`,
+		`2. Tool call: {"tool_name":"tool_name","tool_input":"arguments"}`,
+		"When answering the user, keep message text direct, factual, and ready to display incrementally while you stream.",
 		"",
-		"--- BEHAVIORAL RULES ---",
+		"--- OPERATING RULES ---",
 		"- Use tools to explore the codebase before assuming how it works.",
-		"- If you use a tool, you MUST request only one at a time. The system will return the result to you.",
+		"- If you use a tool, request only one tool at a time. The system will return the result to you.",
 		"- DO NOT invent file names, functions, or command outputs.",
+		"- Prefer finishing the task end-to-end instead of stopping at analysis.",
+		"- If the existing context already answers the question, answer directly without unnecessary tool calls.",
 		"",
-		"--- ENVIRONMENT CONTEXT (AUTO-INJECTED) ---",
-		"The system has gathered the following background context to save you from blind searches.",
-		"USE this information as your primary source of truth before using tools:",
+		"--- CONTEXT ---",
+		"The following context was prepared automatically. Use it before doing blind searches.",
 		"",
 		fmt.Sprintf("[Workspace]: %s (%s)", info.Workspace, info.Path),
 		fmt.Sprintf("[Git Status]: %s", info.GitSummary()),
 		fmt.Sprintf("[Background Signals]: %s", info.SignalSummary()),
 		"",
 		"[Project Semantic Summary]:",
-		"This is a map of the main files and symbols. Use it to understand the general structure.",
 		info.SemanticSummary,
 		"",
 		"[Relevant Files for your current request]:",
 		info.RelevantFilesSummary(),
 		"",
 		"[Pre-extracted Relevant Snippets]:",
-		"Heuristically extracted code snippets that might resolve your request directly without needing to use read or grep.",
 		info.RelevantSnippetsSummary(),
 		"",
 		"--- AVAILABLE TOOLS ---",
@@ -226,7 +229,7 @@ func (e *structuredStreamExtractor) Feed(chunk string) string {
 		return chunk
 	}
 	e.raw.WriteString(chunk)
-	raw := e.raw.String()
+	raw := providerNormalizeStructuredPayload(e.raw.String())
 	decoded := extractStructuredMessagePrefix(raw)
 	if decoded == "" {
 		trimmed := strings.TrimLeft(raw, " \n\r\t")
@@ -316,4 +319,16 @@ func extractStructuredMessagePrefix(raw string) string {
 
 func isJSONWhitespace(b byte) bool {
 	return b == ' ' || b == '\n' || b == '\r' || b == '\t'
+}
+
+func providerNormalizeStructuredPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+		if strings.HasPrefix(trimmed, "json") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "json"))
+		}
+	}
+	return trimmed
 }

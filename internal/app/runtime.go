@@ -143,13 +143,13 @@ func (r *Runtime) ProviderSummary() string {
 		return "none"
 	}
 	if strings.TrimSpace(active.Model) == "" {
-		return fmt.Sprintf("%s (%s:no-model)", active.Name, active.Kind)
+		return fmt.Sprintf("%s (%s:no-model)", active.Name, active.Preset)
 	}
-	return fmt.Sprintf("%s (%s:%s)", active.Name, active.Kind, active.Model)
+	return fmt.Sprintf("%s (%s:%s)", active.Name, active.Preset, active.Model)
 }
 
-func (r *Runtime) ProviderKinds() []config.ProviderKind {
-	return config.ValidProviderKinds()
+func (r *Runtime) ProviderPresets() []config.ProviderPreset {
+	return config.ValidProviderPresets()
 }
 
 func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]string, error) {
@@ -612,7 +612,11 @@ func (r *Runtime) providerListText() string {
 		if strings.TrimSpace(model) == "" {
 			model = "no-model"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s [%s] %s", marker, providerCfg.Name, providerCfg.Kind, model))
+		label := string(providerCfg.Preset)
+		if strings.TrimSpace(label) == "" {
+			label = string(providerCfg.Kind)
+		}
+		lines = append(lines, fmt.Sprintf("%s %s [%s] %s", marker, providerCfg.Name, label, model))
 	}
 	return strings.Join(lines, "\n")
 }

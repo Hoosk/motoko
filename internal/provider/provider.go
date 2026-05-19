@@ -49,17 +49,21 @@ type Client interface {
 	ListModels(ctx context.Context) ([]string, error)
 }
 
+type clientFactory func(config.ProviderConfig) Client
+
+var clientFactories = map[config.ProviderKind]clientFactory{
+	config.ProviderKindOpenAICompatible: newOpenAIClient,
+	config.ProviderKindAnthropic:       newAnthropicClient,
+	config.ProviderKindGemini:          newGeminiClient,
+}
+
 func NewClient(cfg config.ProviderConfig) (Client, error) {
-	switch cfg.Kind {
-	case config.ProviderOpenAI:
-		return newOpenAIClient(cfg), nil
-	case config.ProviderAnthropic:
-		return newAnthropicClient(cfg), nil
-	case config.ProviderGemini:
-		return newGeminiClient(cfg), nil
-	default:
+	cfg = config.NormalizeProvider(cfg)
+	factory, ok := clientFactories[cfg.Kind]
+	if !ok {
 		return nil, fmt.Errorf("provider no soportado: %s", cfg.Kind)
 	}
+	return factory(cfg), nil
 }
 
 type baseClient struct {
@@ -466,6 +470,7 @@ type structuredResponse struct {
 }
 
 func parseStructuredResponse(raw string) Response {
+	raw = normalizeStructuredPayload(raw)
 	if raw == "" {
 		return Response{}
 	}
@@ -480,4 +485,27 @@ func parseStructuredResponse(raw string) Response {
 		response.ToolCall = &ToolCall{Name: strings.TrimSpace(parsed.ToolName), Input: parsed.ToolInput}
 	}
 	return response
+}
+
+func normalizeStructuredPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+		if strings.HasPrefix(trimmed, "json") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "json"))
+		}
+		if end := strings.LastIndex(trimmed, "```"); end >= 0 {
+			trimmed = strings.TrimSpace(trimmed[:end])
+		}
+	}
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end >= start {
+		return strings.TrimSpace(trimmed[start : end+1])
+	}
+	return trimmed
 }

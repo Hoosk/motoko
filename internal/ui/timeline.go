@@ -61,42 +61,38 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 
 	case AgentStreamEventMsg:
 		if m.streaming {
-			if msg.Done {
-				m.streaming = false
-			} else {
-				event := msg.Event
-				if event.Kind == "assistant_delta" {
-					if m.streamMessageIndex == -1 {
-						m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: ""})
-						m.streamMessageIndex = len(m.messages) - 1
-					}
-					if event.Content != "" {
-						m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
-						if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-							m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(string(m.streamedRunes))
-						}
-					}
-				} else {
-					switch event.Kind {
-					case "tool":
-						m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: fmt.Sprintf("tool %s", event.Title)})
-						if strings.TrimSpace(event.Content) != "" {
-							m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-						}
-					case "output":
-						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
-					case "error":
-						m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
-					case "debug":
-						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
-					}
-					if m.streamMessageIndex != -1 {
-						m.streamMessageIndex = -1
-						m.streamedRunes = nil
+			event := msg.Event
+			if event.Kind == "assistant_delta" {
+				if m.streamMessageIndex == -1 {
+					m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: ""})
+					m.streamMessageIndex = len(m.messages) - 1
+				}
+				if event.Content != "" {
+					m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
+					if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
+						m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(string(m.streamedRunes))
 					}
 				}
-				m.renderMessages()
+			} else {
+				switch event.Kind {
+				case "tool":
+					m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: fmt.Sprintf("tool %s", event.Title)})
+					if strings.TrimSpace(event.Content) != "" {
+						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+					}
+				case "output":
+					m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
+				case "error":
+					m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
+				case "debug":
+					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
+				}
+				if m.streamMessageIndex != -1 {
+					m.streamMessageIndex = -1
+					m.streamedRunes = nil
+				}
 			}
+			m.renderMessages()
 		}
 
 	case finalizeStreamMsg:

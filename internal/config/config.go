@@ -10,20 +10,27 @@ import (
 )
 
 type ProviderKind string
+type ProviderPreset string
 
 const (
-	ProviderOpenAI    ProviderKind = "openai"
-	ProviderAnthropic ProviderKind = "anthropic"
-	ProviderGemini    ProviderKind = "gemini"
+	ProviderKindOpenAICompatible ProviderKind = "openai-compatible"
+	ProviderKindAnthropic       ProviderKind = "anthropic"
+	ProviderKindGemini          ProviderKind = "gemini"
+
+	ProviderPresetOpenAI     ProviderPreset = "openai"
+	ProviderPresetOpenRouter ProviderPreset = "openrouter"
+	ProviderPresetAnthropic ProviderPreset = "anthropic"
+	ProviderPresetGemini    ProviderPreset = "gemini"
 )
 
 type ProviderConfig struct {
-	Name    string       `json:"name"`
-	Kind    ProviderKind `json:"kind"`
-	BaseURL string       `json:"base_url"`
-	APIKey  string       `json:"api_key"`
-	Model   string       `json:"model"`
-	Models  []string     `json:"models,omitempty"`
+	Name    string         `json:"name"`
+	Preset  ProviderPreset `json:"preset,omitempty"`
+	Kind    ProviderKind   `json:"kind"`
+	BaseURL string         `json:"base_url"`
+	APIKey  string         `json:"api_key"`
+	Model   string         `json:"model"`
+	Models  []string       `json:"models,omitempty"`
 }
 
 type AppConfig struct {
@@ -48,6 +55,9 @@ func Load() (*AppConfig, error) {
 	var cfg AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	for i := range cfg.Providers {
+		cfg.Providers[i] = NormalizeProvider(cfg.Providers[i])
 	}
 	cfg.sortProviders()
 	return &cfg, nil
@@ -78,11 +88,7 @@ func (c *AppConfig) Save() error {
 }
 
 func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
-	provider.Name = strings.TrimSpace(provider.Name)
-	provider.BaseURL = strings.TrimSpace(provider.BaseURL)
-	provider.APIKey = strings.TrimSpace(provider.APIKey)
-	provider.Model = strings.TrimSpace(provider.Model)
-	provider.Models = uniqueSorted(provider.Models)
+	provider = NormalizeProvider(provider)
 
 	for i, existing := range c.Providers {
 		if strings.EqualFold(existing.Name, provider.Name) {
@@ -134,16 +140,47 @@ func (c *AppConfig) SetActive(name string) error {
 	return nil
 }
 
-func DefaultBaseURL(kind ProviderKind) string {
-	switch kind {
-	case ProviderOpenAI:
+func NormalizeProvider(provider ProviderConfig) ProviderConfig {
+	provider.Name = strings.TrimSpace(provider.Name)
+	provider.Preset = normalizePreset(provider.Preset, provider.Kind)
+	provider.Kind = normalizeKind(provider.Kind, provider.Preset)
+	provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+	provider.APIKey = strings.TrimSpace(provider.APIKey)
+	provider.Model = strings.TrimSpace(provider.Model)
+	provider.Models = uniqueSorted(provider.Models)
+	if provider.Name == "" {
+		provider.Name = DefaultProviderName(provider.Preset)
+		if provider.Name == "" {
+			provider.Name = "provider"
+		}
+	}
+	if provider.BaseURL == "" {
+		provider.BaseURL = DefaultBaseURL(provider.Preset, provider.Kind)
+	}
+	return provider
+}
+
+func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
+	switch normalizePreset(preset, kind) {
+	case ProviderPresetOpenAI:
 		return "https://api.openai.com/v1"
-	case ProviderAnthropic:
+	case ProviderPresetOpenRouter:
+		return "https://openrouter.ai/api/v1"
+	case ProviderPresetAnthropic:
 		return "https://api.anthropic.com"
-	case ProviderGemini:
+	case ProviderPresetGemini:
 		return "https://generativelanguage.googleapis.com/v1beta"
 	default:
-		return ""
+		switch normalizeKind(kind, preset) {
+		case ProviderKindOpenAICompatible:
+			return "https://api.openai.com/v1"
+		case ProviderKindAnthropic:
+			return "https://api.anthropic.com"
+		case ProviderKindGemini:
+			return "https://generativelanguage.googleapis.com/v1beta"
+		default:
+			return ""
+		}
 	}
 }
 
@@ -170,8 +207,69 @@ func UniqueSortedKeep(items []string, extra ...string) []string {
 	return uniqueSorted(all)
 }
 
-func ValidProviderKinds() []ProviderKind {
-	return []ProviderKind{ProviderOpenAI, ProviderAnthropic, ProviderGemini}
+func ValidProviderPresets() []ProviderPreset {
+	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini}
+}
+
+func DefaultProviderName(preset ProviderPreset) string {
+	switch preset {
+	case ProviderPresetOpenAI:
+		return "openai"
+	case ProviderPresetOpenRouter:
+		return "openrouter"
+	case ProviderPresetAnthropic:
+		return "anthropic"
+	case ProviderPresetGemini:
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
+	switch strings.TrimSpace(string(preset)) {
+	case string(ProviderPresetOpenAI):
+		return ProviderPresetOpenAI
+	case string(ProviderPresetOpenRouter):
+		return ProviderPresetOpenRouter
+	case string(ProviderPresetAnthropic):
+		return ProviderPresetAnthropic
+	case string(ProviderPresetGemini):
+		return ProviderPresetGemini
+	}
+	switch strings.TrimSpace(string(kind)) {
+	case "openai", string(ProviderKindOpenAICompatible):
+		return ProviderPresetOpenAI
+	case string(ProviderPresetOpenRouter):
+		return ProviderPresetOpenRouter
+	case string(ProviderKindAnthropic):
+		return ProviderPresetAnthropic
+	case string(ProviderKindGemini):
+		return ProviderPresetGemini
+	default:
+		return ""
+	}
+}
+
+func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
+	switch strings.TrimSpace(string(kind)) {
+	case string(ProviderKindOpenAICompatible), "openai":
+		return ProviderKindOpenAICompatible
+	case string(ProviderKindAnthropic):
+		return ProviderKindAnthropic
+	case string(ProviderKindGemini):
+		return ProviderKindGemini
+	}
+	switch normalizePreset(preset, kind) {
+	case ProviderPresetOpenAI, ProviderPresetOpenRouter:
+		return ProviderKindOpenAICompatible
+	case ProviderPresetAnthropic:
+		return ProviderKindAnthropic
+	case ProviderPresetGemini:
+		return ProviderKindGemini
+	default:
+		return ""
+	}
 }
 
 func (c *AppConfig) sortProviders() {

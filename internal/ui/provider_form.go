@@ -11,26 +11,37 @@ import (
 )
 
 func (m *Model) openProviderForm() {
-	m.providerForm = providerForm{active: true, status: "Paso 1: elige provider. Paso 2: pega API key. Paso 3: Save. Luego usa /models para escoger modelo."}
+	preset := m.currentProviderPreset()
+	m.providerForm = providerForm{
+		active:  true,
+		name:    config.DefaultProviderName(preset),
+		baseURL: config.DefaultBaseURL(preset, ""),
+		status:  "Configura nombre, preset, base URL y API key. Luego guarda y usa /models para elegir modelo.",
+	}
 }
 
-func (m *Model) currentProviderKind() config.ProviderKind {
-	kinds := m.runtime.ProviderKinds()
-	if len(kinds) == 0 {
-		return config.ProviderOpenAI
+func (m *Model) currentProviderPreset() config.ProviderPreset {
+	presets := m.runtime.ProviderPresets()
+	if len(presets) == 0 {
+		return config.ProviderPresetOpenAI
 	}
-	if m.providerForm.kindIndex < 0 || m.providerForm.kindIndex >= len(kinds) {
-		return kinds[0]
+	if m.providerForm.presetIndex < 0 || m.providerForm.presetIndex >= len(presets) {
+		return presets[0]
 	}
-	return kinds[m.providerForm.kindIndex]
+	return presets[m.providerForm.presetIndex]
 }
 
 func (m *Model) providerConfigFromForm() config.ProviderConfig {
-	kind := m.currentProviderKind()
-	return config.ProviderConfig{Name: string(kind), Kind: kind, BaseURL: config.DefaultBaseURL(kind), APIKey: strings.TrimSpace(m.providerForm.apiKey)}
+	preset := m.currentProviderPreset()
+	return config.NormalizeProvider(config.ProviderConfig{
+		Name:    strings.TrimSpace(m.providerForm.name),
+		Preset:  preset,
+		BaseURL: strings.TrimSpace(m.providerForm.baseURL),
+		APIKey:  strings.TrimSpace(m.providerForm.apiKey),
+	})
 }
 
-func (m *Model) providerFieldCount() int { return 3 }
+func (m *Model) providerFieldCount() int { return 5 }
 
 func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
@@ -48,28 +59,43 @@ func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "left":
 		if m.providerForm.fieldIndex == 0 {
-			kinds := m.runtime.ProviderKinds()
-			m.providerForm.kindIndex--
-			if m.providerForm.kindIndex < 0 {
-				m.providerForm.kindIndex = len(kinds) - 1
+			presets := m.runtime.ProviderPresets()
+			m.providerForm.presetIndex--
+			if m.providerForm.presetIndex < 0 {
+				m.providerForm.presetIndex = len(presets) - 1
 			}
+			m.syncProviderFormPreset()
 		}
 		return nil
 	case "right":
 		if m.providerForm.fieldIndex == 0 {
-			kinds := m.runtime.ProviderKinds()
-			m.providerForm.kindIndex = (m.providerForm.kindIndex + 1) % len(kinds)
+			presets := m.runtime.ProviderPresets()
+			m.providerForm.presetIndex = (m.providerForm.presetIndex + 1) % len(presets)
+			m.syncProviderFormPreset()
 		}
 		return nil
 	case "backspace":
-		if m.providerForm.fieldIndex == 1 {
+		switch m.providerForm.fieldIndex {
+		case 1:
+			m.providerForm.name = trimLastRune(m.providerForm.name)
+		case 2:
+			m.providerForm.baseURL = trimLastRune(m.providerForm.baseURL)
+		case 3:
 			m.providerForm.apiKey = trimLastRune(m.providerForm.apiKey)
 		}
 		return nil
 	case "enter":
 		return m.handleProviderFormEnter()
 	default:
-		if m.providerForm.fieldIndex == 1 && len(msg.Runes) > 0 {
+		if len(msg.Runes) == 0 {
+			return nil
+		}
+		switch m.providerForm.fieldIndex {
+		case 1:
+			m.providerForm.name += string(msg.Runes)
+		case 2:
+			m.providerForm.baseURL += string(msg.Runes)
+		case 3:
 			m.providerForm.apiKey += string(msg.Runes)
 		}
 		return nil
@@ -77,11 +103,19 @@ func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleProviderFormEnter() tea.Cmd {
-	if m.providerForm.fieldIndex != 2 {
+	if m.providerForm.fieldIndex != m.providerFieldCount()-1 {
 		m.providerForm.fieldIndex = (m.providerForm.fieldIndex + 1) % m.providerFieldCount()
 		return nil
 	}
 	cfg := m.providerConfigFromForm()
+	if strings.TrimSpace(cfg.Name) == "" {
+		m.providerForm.status = "El nombre del provider es obligatorio."
+		return nil
+	}
+	if strings.TrimSpace(cfg.BaseURL) == "" {
+		m.providerForm.status = "La base URL es obligatoria."
+		return nil
+	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		m.providerForm.status = "La API key es obligatoria."
 		return nil
@@ -99,11 +133,21 @@ func (m *Model) handleProviderFormEnter() tea.Cmd {
 
 func (m Model) renderProviderForm() string {
 	fields := []string{
-		renderProviderField(0, m.providerForm.fieldIndex, "Provider", string(m.currentProviderKind())+"  (left/right)"),
-		renderProviderField(1, m.providerForm.fieldIndex, "API Key", maskSecret(m.providerForm.apiKey)),
-		renderProviderField(2, m.providerForm.fieldIndex, "Save", buttonLabel(m.providerForm.loading, "guardar y conectar")),
+		renderProviderField(0, m.providerForm.fieldIndex, "Preset", string(m.currentProviderPreset())+"  (left/right)"),
+		renderProviderField(1, m.providerForm.fieldIndex, "Name", m.providerForm.name),
+		renderProviderField(2, m.providerForm.fieldIndex, "Base URL", m.providerForm.baseURL),
+		renderProviderField(3, m.providerForm.fieldIndex, "API Key", maskSecret(m.providerForm.apiKey)),
+		renderProviderField(4, m.providerForm.fieldIndex, "Save", buttonLabel(m.providerForm.loading, "guardar y conectar")),
 	}
-	return strings.Join([]string{styles.PopupTitleStyle.Render("Add Provider"), styles.PopupMutedStyle.Render("Paso 1: elige provider. Paso 2: pega API key. Paso 3: Save. Luego usa /models para escoger modelo."), strings.Join(fields, "\n"), "", styles.SystemStyle.Render(m.providerForm.status)}, "\n")
+	return strings.Join([]string{styles.PopupTitleStyle.Render("Add Provider"), styles.PopupMutedStyle.Render("El preset define la familia de API y el base URL inicial. Puedes editar nombre y URL antes de guardar."), strings.Join(fields, "\n"), "", styles.SystemStyle.Render(m.providerForm.status)}, "\n")
+}
+
+func (m *Model) syncProviderFormPreset() {
+	preset := m.currentProviderPreset()
+	if strings.TrimSpace(m.providerForm.name) == "" || m.providerForm.name == config.DefaultProviderName(config.ProviderPresetOpenAI) || m.providerForm.name == config.DefaultProviderName(config.ProviderPresetOpenRouter) || m.providerForm.name == config.DefaultProviderName(config.ProviderPresetAnthropic) || m.providerForm.name == config.DefaultProviderName(config.ProviderPresetGemini) {
+		m.providerForm.name = config.DefaultProviderName(preset)
+	}
+	m.providerForm.baseURL = config.DefaultBaseURL(preset, "")
 }
 
 func renderProviderField(index, active int, label, value string) string {

@@ -18,7 +18,8 @@ func TestCompletionsModelsKeepsTrailingSpaceContext(t *testing.T) {
 		ActiveProvider: "openai",
 		Providers: []config.ProviderConfig{{
 			Name:   "openai",
-			Kind:   config.ProviderOpenAI,
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
 			Models: []string{"gpt-4.1", "gpt-4.1-mini", "o4-mini"},
 		}},
 	}
@@ -36,7 +37,8 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 		ActiveProvider: "openai",
 		Providers: []config.ProviderConfig{{
 			Name:   "openai",
-			Kind:   config.ProviderOpenAI,
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
 			Models: []string{"gpt-4.1", "gpt-4.1-mini", "o4-mini"},
 		}},
 	}

@@ -19,7 +19,6 @@ type ResponseAppliedMsg struct {
 
 type AgentStreamEventMsg struct {
 	Event app.AgentStreamEvent
-	Done  bool
 }
 
 type AgentStreamBatchMsg struct {

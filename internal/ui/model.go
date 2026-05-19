@@ -32,7 +32,9 @@ type ThinkingTickMsg struct{}
 type providerForm struct {
 	active     bool
 	fieldIndex int
-	kindIndex  int
+	presetIndex int
+	name       string
+	baseURL    string
 	apiKey     string
 	loading    bool
 	status     string
