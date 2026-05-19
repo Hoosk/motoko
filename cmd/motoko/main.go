@@ -14,20 +14,16 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		cancel()
+	}()
 
 	runtime := app.NewRuntime()
 
-	// Initialize Tachikoma Manager
-	mgr := tachikoma.NewManager()
-
-	// Add minimum viable Tachikomas with real workspace and git context.
-	mgr.Add(tachikoma.NewWorkspaceTachikoma(30 * time.Second))
-	mgr.Add(tachikoma.NewGitTachikoma(5 * time.Second))
-	mgr.Add(tachikoma.NewCodeTachikoma(runtime.SemanticIndex(), 20*time.Second))
+	mgr := newTachikomaManager(runtime)
 
 	// Create UI Model
-	m := ui.NewModel(runtime, cancel)
+	m := ui.NewModel(runtime, cancel, ctx)
 	m.SetManager(mgr)
 
 	// Start Tachikomas in the background
@@ -36,7 +32,19 @@ func main() {
 	// Start Bubble Tea program
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
+		cancel()
+		mgr.Wait()
 		fmt.Printf("Error al iniciar Motoko: %v", err)
 		os.Exit(1)
 	}
+	cancel()
+	mgr.Wait()
+}
+
+func newTachikomaManager(runtime *app.Runtime) *tachikoma.Manager {
+	mgr := tachikoma.NewManager()
+	mgr.Add(tachikoma.NewWorkspaceTachikoma(30 * time.Second))
+	mgr.Add(tachikoma.NewGitTachikoma(5 * time.Second))
+	mgr.Add(tachikoma.NewCodeTachikoma(runtime.SemanticIndex(), 20*time.Second))
+	return mgr
 }

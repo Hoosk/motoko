@@ -129,4 +129,20 @@ var (
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(MainNeon).
 		PaddingLeft(1)
+
+	DiffAddStyle = lipgloss.NewStyle().
+		Foreground(AccentBlue)
+
+	DiffRemoveStyle = lipgloss.NewStyle().
+		Foreground(AlertPink)
+
+	DiffMetaStyle = lipgloss.NewStyle().
+		Foreground(Gray)
+
+	DiffContextStyle = lipgloss.NewStyle().
+		Foreground(SoftBlue)
+
+	DiffHeaderStyle = lipgloss.NewStyle().
+		Foreground(AccentViolet).
+		Bold(true)
 )

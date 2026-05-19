@@ -18,7 +18,8 @@ func TestCompletionsModelsKeepsTrailingSpaceContext(t *testing.T) {
 		ActiveProvider: "openai",
 		Providers: []config.ProviderConfig{{
 			Name:   "openai",
-			Kind:   config.ProviderOpenAI,
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
 			Models: []string{"gpt-4.1", "gpt-4.1-mini", "o4-mini"},
 		}},
 	}
@@ -36,7 +37,8 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 		ActiveProvider: "openai",
 		Providers: []config.ProviderConfig{{
 			Name:   "openai",
-			Kind:   config.ProviderOpenAI,
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
 			Models: []string{"gpt-4.1", "gpt-4.1-mini", "o4-mini"},
 		}},
 	}
@@ -57,7 +59,7 @@ func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 		Symbols:  []semantic.Symbol{{Name: "RunAgent", Kind: "func", Line: 3, Range: semantic.LineRange{Start: 3, End: 5}}},
 	}}, GeneratedAt: time.Now()}
 	r.semantic = semantic.NewIndex()
-	r.semantic.SetSnapshotForTest(snapshot)
+	r.semantic.SetSnapshotForTest(&snapshot)
 
 	info := r.enrichContext(context.Background(), system.ContextInfo{}, "revisa runagent")
 	if len(info.RelevantSnippets) == 0 {
@@ -65,5 +67,25 @@ func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 	}
 	if !strings.Contains(info.RelevantSnippets[0], "RunAgent") {
 		t.Fatalf("expected snippet mentioning RunAgent, got %q", info.RelevantSnippets[0])
+	}
+}
+
+func TestSaveProviderNormalizesNameBeforeActivating(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	r := NewRuntime()
+	err := r.SaveProvider(config.ProviderConfig{
+		Preset: config.ProviderPresetOpenRouter,
+		APIKey: "k",
+		Model:  "openai/gpt-4.1",
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.config.ActiveProvider != "openrouter" {
+		t.Fatalf("expected normalized active provider, got %q", r.config.ActiveProvider)
+	}
+	active, ok := r.config.Active()
+	if !ok || active.Name != "openrouter" {
+		t.Fatalf("expected normalized active config, got %#v ok=%t", active, ok)
 	}
 }

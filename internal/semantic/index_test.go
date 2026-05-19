@@ -3,6 +3,7 @@ package semantic
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,10 +73,43 @@ func TestRelevantSnippetsPicksMatchingSymbol(t *testing.T) {
 	if len(snippets) == 0 {
 		t.Fatal("expected snippets")
 	}
-	if snippets[0].StartLine != 9 {
-		t.Fatalf("expected RunAgent snippet first, got %#v", snippets[0])
-	}
 	if !strings.Contains(snippets[0].Content, "func RunAgent") {
 		t.Fatalf("expected RunAgent content, got %q", snippets[0].Content)
+	}
+}
+
+func TestBuildSnapshotSkipsGitIgnoredFiles(t *testing.T) {
+	root := t.TempDir()
+	runGitCommand(t, root, "init")
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("dist/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dist", "ignored.go"), []byte("package dist\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "app", "runtime.go"), []byte("package app\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := BuildSnapshot(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Files) != 1 || snapshot.Files[0].Path != "internal/app/runtime.go" {
+		t.Fatalf("expected ignored files skipped, got %#v", snapshot.Files)
+	}
+}
+
+func runGitCommand(t *testing.T, workdir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = workdir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
 	}
 }

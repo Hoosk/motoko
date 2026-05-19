@@ -1,6 +1,11 @@
 package tachikoma
 
-import "context"
+import (
+	"context"
+	"sync"
+)
+
+const updatesBufferSize = 32
 
 // Update represents a status update from a Tachikoma
 type Update struct {
@@ -13,19 +18,25 @@ type Update struct {
 // Tachikoma is the interface for background context gatherers
 type Tachikoma interface {
 	Name() string
-	Run(ctx context.Context, updates chan<- Update) error
+	Run(ctx context.Context, publish func(Update) bool) error
 }
 
 // Manager coordinates multiple Tachikomas
 type Manager struct {
 	tachikomas []Tachikoma
 	updates    chan Update
+	wg         sync.WaitGroup
+}
+
+type NextResult struct {
+	Update Update
+	OK     bool
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		tachikomas: []Tachikoma{},
-		updates:    make(chan Update, 10),
+		updates:    make(chan Update, updatesBufferSize),
 	}
 }
 
@@ -35,9 +46,36 @@ func (m *Manager) Add(t Tachikoma) {
 
 func (m *Manager) Start(ctx context.Context) {
 	for _, t := range m.tachikomas {
+		m.wg.Add(1)
 		go func(t Tachikoma) {
-			_ = t.Run(ctx, m.updates)
+			defer m.wg.Done()
+			_ = t.Run(ctx, m.publishUpdate)
 		}(t)
+	}
+}
+
+func (m *Manager) Wait() {
+	m.wg.Wait()
+}
+
+func (m *Manager) Next(ctx context.Context) NextResult {
+	if m == nil {
+		return NextResult{}
+	}
+	select {
+	case <-ctx.Done():
+		return NextResult{}
+	case update := <-m.updates:
+		return NextResult{Update: update, OK: true}
+	}
+}
+
+func (m *Manager) publishUpdate(update Update) bool {
+	select {
+	case m.updates <- update:
+		return true
+	default:
+		return false
 	}
 }
 

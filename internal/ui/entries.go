@@ -39,23 +39,6 @@ func entriesForAgentResult(result agent.Result, showContext bool) []app.Entry {
 	if strings.TrimSpace(result.AgentLabel) != "" || result.Duration > 0 {
 		entries = append(entries, app.Entry{Kind: app.EntrySystem, Text: styles.AssistantMetaStyle.Render(fmt.Sprintf("agent:%s  elapsed:%s", result.AgentLabel, result.Duration.Round(time.Millisecond)))})
 	}
-	for _, step := range result.Steps {
-		switch step.Kind {
-		case "tool":
-			entries = append(entries, app.Entry{Kind: app.EntryCommand, Text: fmt.Sprintf("tool %s", step.Title)})
-			if strings.TrimSpace(step.Content) != "" {
-				entries = append(entries, app.Entry{Kind: app.EntrySystem, Text: step.Content})
-			}
-		case "output":
-			entries = append(entries, app.Entry{Kind: app.EntryOutput, Text: step.Content})
-		case "error":
-			entries = append(entries, app.Entry{Kind: app.EntryError, Text: step.Content})
-		case "assistant":
-			entries = append(entries, app.Entry{Kind: app.EntryAssistant, Text: step.Content})
-		case "debug":
-			entries = append(entries, app.Entry{Kind: app.EntrySystem, Text: "[debug] " + step.Content})
-		}
-	}
 	if result.Usage.TotalTokens > 0 {
 		entries = append(entries, app.Entry{
 			Kind: app.EntrySystem,

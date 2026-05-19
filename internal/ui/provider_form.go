@@ -8,29 +8,41 @@ import (
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
+// Fields: 0=Preset  1=APIKey  2=Save  3=Cancel
+func (m *Model) providerFieldCount() int { return 4 }
+
 func (m *Model) openProviderForm() {
-	m.providerForm = providerForm{active: true, status: "Paso 1: elige provider. Paso 2: pega API key. Paso 3: Save. Luego usa /models para escoger modelo."}
+	preset := m.currentProviderPreset()
+	m.providerForm = providerForm{
+		active:  true,
+		name:    config.DefaultProviderName(preset),
+		baseURL: config.DefaultBaseURL(preset, ""),
+	}
 }
 
-func (m *Model) currentProviderKind() config.ProviderKind {
-	kinds := m.runtime.ProviderKinds()
-	if len(kinds) == 0 {
-		return config.ProviderOpenAI
+func (m *Model) currentProviderPreset() config.ProviderPreset {
+	presets := m.runtime.ProviderPresets()
+	if len(presets) == 0 {
+		return config.ProviderPresetOpenAI
 	}
-	if m.providerForm.kindIndex < 0 || m.providerForm.kindIndex >= len(kinds) {
-		return kinds[0]
+	if m.providerForm.presetIndex < 0 || m.providerForm.presetIndex >= len(presets) {
+		return presets[0]
 	}
-	return kinds[m.providerForm.kindIndex]
+	return presets[m.providerForm.presetIndex]
 }
 
 func (m *Model) providerConfigFromForm() config.ProviderConfig {
-	kind := m.currentProviderKind()
-	return config.ProviderConfig{Name: string(kind), Kind: kind, BaseURL: config.DefaultBaseURL(kind), APIKey: strings.TrimSpace(m.providerForm.apiKey)}
+	preset := m.currentProviderPreset()
+	return config.NormalizeProvider(config.ProviderConfig{
+		Name:    config.DefaultProviderName(preset),
+		Preset:  preset,
+		BaseURL: config.DefaultBaseURL(preset, ""),
+		APIKey:  strings.TrimSpace(m.providerForm.apiKey),
+	})
 }
-
-func (m *Model) providerFieldCount() int { return 3 }
 
 func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
@@ -48,17 +60,19 @@ func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case "left":
 		if m.providerForm.fieldIndex == 0 {
-			kinds := m.runtime.ProviderKinds()
-			m.providerForm.kindIndex--
-			if m.providerForm.kindIndex < 0 {
-				m.providerForm.kindIndex = len(kinds) - 1
+			presets := m.runtime.ProviderPresets()
+			m.providerForm.presetIndex--
+			if m.providerForm.presetIndex < 0 {
+				m.providerForm.presetIndex = len(presets) - 1
 			}
+			m.syncProviderFormPreset()
 		}
 		return nil
 	case "right":
 		if m.providerForm.fieldIndex == 0 {
-			kinds := m.runtime.ProviderKinds()
-			m.providerForm.kindIndex = (m.providerForm.kindIndex + 1) % len(kinds)
+			presets := m.runtime.ProviderPresets()
+			m.providerForm.presetIndex = (m.providerForm.presetIndex + 1) % len(presets)
+			m.syncProviderFormPreset()
 		}
 		return nil
 	case "backspace":
@@ -69,7 +83,10 @@ func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		return m.handleProviderFormEnter()
 	default:
-		if m.providerForm.fieldIndex == 1 && len(msg.Runes) > 0 {
+		if len(msg.Runes) == 0 {
+			return nil
+		}
+		if m.providerForm.fieldIndex == 1 {
 			m.providerForm.apiKey += string(msg.Runes)
 		}
 		return nil
@@ -77,33 +94,59 @@ func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleProviderFormEnter() tea.Cmd {
-	if m.providerForm.fieldIndex != 2 {
+	switch m.providerForm.fieldIndex {
+	case 3: // Cancel
+		m.providerForm = providerForm{}
+		return nil
+	case 2: // Save
+		cfg := m.providerConfigFromForm()
+		if strings.TrimSpace(cfg.APIKey) == "" {
+			m.providerForm.status = "La API key es obligatoria."
+			return nil
+		}
+		if err := m.runtime.SaveProvider(cfg, true); err != nil {
+			m.providerForm.status = err.Error()
+			return nil
+		}
+		m.providerForm = providerForm{}
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider guardado y activado: %s", cfg.Name)})
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Cargando modelos del provider activo en background... luego usa /models para listarlos o /models <modelo> para elegir uno."})
+		m.timeline.renderMessages()
+		return loadProviderModels(m.runtime, cfg)
+	default:
 		m.providerForm.fieldIndex = (m.providerForm.fieldIndex + 1) % m.providerFieldCount()
 		return nil
 	}
-	cfg := m.providerConfigFromForm()
-	if strings.TrimSpace(cfg.APIKey) == "" {
-		m.providerForm.status = "La API key es obligatoria."
-		return nil
-	}
-	if err := m.runtime.SaveProvider(cfg, true); err != nil {
-		m.providerForm.status = err.Error()
-		return nil
-	}
-	m.providerForm = providerForm{}
-	m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider guardado y activado: %s", cfg.Name)})
-	m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Cargando modelos del provider activo en background... luego usa /models para listarlos o /models <modelo> para elegir uno."})
-	m.renderMessages()
-	return loadProviderModels(m.runtime, cfg)
 }
 
 func (m Model) renderProviderForm() string {
-	fields := []string{
-		renderProviderField(0, m.providerForm.fieldIndex, "Provider", string(m.currentProviderKind())+"  (left/right)"),
-		renderProviderField(1, m.providerForm.fieldIndex, "API Key", maskSecret(m.providerForm.apiKey)),
-		renderProviderField(2, m.providerForm.fieldIndex, "Save", buttonLabel(m.providerForm.loading, "guardar y conectar")),
-	}
-	return strings.Join([]string{styles.PopupTitleStyle.Render("Add Provider"), styles.PopupMutedStyle.Render("Paso 1: elige provider. Paso 2: pega API key. Paso 3: Save. Luego usa /models para escoger modelo."), strings.Join(fields, "\n"), "", styles.SystemStyle.Render(m.providerForm.status)}, "\n")
+	preset := m.currentProviderPreset()
+	presetLine := renderProviderField(0, m.providerForm.fieldIndex,
+		"Provider", string(preset)+"  ◀ ▶")
+	apiKeyLine := renderProviderField(1, m.providerForm.fieldIndex,
+		"API Key", maskSecret(m.providerForm.apiKey))
+
+	saveBtn := renderProviderButton(2, m.providerForm.fieldIndex, buttonLabel(m.providerForm.loading, "guardar"))
+	cancelBtn := renderProviderButton(3, m.providerForm.fieldIndex, "cancelar")
+	buttons := lipgloss.JoinHorizontal(lipgloss.Left, saveBtn, "   ", cancelBtn)
+
+	return strings.Join([]string{
+		styles.PopupTitleStyle.Render("Add Provider"),
+		styles.PopupMutedStyle.Render("Selecciona el proveedor e introduce tu API key."),
+		"",
+		presetLine,
+		apiKeyLine,
+		"",
+		buttons,
+		"",
+		styles.SystemStyle.Render(m.providerForm.status),
+	}, "\n")
+}
+
+func (m *Model) syncProviderFormPreset() {
+	preset := m.currentProviderPreset()
+	m.providerForm.name = config.DefaultProviderName(preset)
+	m.providerForm.baseURL = config.DefaultBaseURL(preset, "")
 }
 
 func renderProviderField(index, active int, label, value string) string {
@@ -112,6 +155,14 @@ func renderProviderField(index, active int, label, value string) string {
 		return styles.PopupSelectionStyle.Render(line)
 	}
 	return line
+}
+
+func renderProviderButton(index, active int, label string) string {
+	text := "[ " + label + " ]"
+	if index == active {
+		return styles.PopupSelectionStyle.Render(text)
+	}
+	return styles.PopupFieldLabelStyle.Render(text)
 }
 
 func maskSecret(value string) string {

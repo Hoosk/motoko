@@ -3,25 +3,20 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/styles"
-	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tachikoma"
-	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type TachikomaMsg tachikoma.Update
-
 type ShellResultMsg struct{ Result app.ShellResult }
 type ProviderModelsMsg struct {
 	Models []string
@@ -29,357 +24,106 @@ type ProviderModelsMsg struct {
 }
 type AgentResultMsg struct {
 	Prompt string
-	Result agent.Result
+	Result app.Response
+	Assistant string
 	Err    error
 }
-type AgentStreamChunkMsg struct {
-	Chunk string
-	Done  bool
-}
+
 type ThinkingTickMsg struct{}
-type CopySelectionMsg struct{ Err error }
 
 type providerForm struct {
 	active     bool
 	fieldIndex int
-	kindIndex  int
+	presetIndex int
+	name       string
+	baseURL    string
 	apiKey     string
 	loading    bool
 	status     string
 }
 
-type Model struct {
-	viewport           viewport.Model
-	viewportContent    string
-	textarea           textarea.Model
-	messages           []string
-	runtime            *app.Runtime
-	tachikomaInfo      map[string]string
-	manager            *tachikoma.Manager
-	cancel             func()
-	sysInfo            system.ContextInfo
-	showTachikomas     bool
-	showToolPalette    bool
-	ready              bool
-	width              int
-	height             int
-	suggestions        []string
-	selectedSuggestion int
-	providerForm       providerForm
-	thinking           bool
-	thinkingFrame      int
-	pendingPrompt      string
-	autoScroll         bool
-	streaming          bool
-	streamedRunes      []rune
-	streamMessageIndex int
-	agentStream        <-chan string
-	selectedMessage    int
+type agentStreamBuffer struct {
+	mu     sync.Mutex
+	events []app.AgentStreamEvent
+	done   bool
 }
 
-const logoArt = `
-  __  __  ____ _____ ____  _  _____
- |  \/  |/ __ \_   _/ __ \| |/ / _ \
- | \  / | |  | || || |  | | ' / | | |
- | |\/| | |  | || || |  | |  <| | | |
- | |  | | |__| || || |__| | . \ |_| |
- |_|  |_|\____/ |_| \____/|_|\_\___/
-`
+type Model struct {
+	timeline        TimelineModel
+	composer        ComposerModel
+	footer          FooterModel
+	providerForm    providerForm
+	runtime         *app.Runtime
+	manager         *tachikoma.Manager
+	cancel          func()
+	showTachikomas  bool
+	showToolPalette bool
+	modePickerOpen  bool
+	agentList       []agent.AgentDef
+	agentListIndex  int
+	modelPickerOpen  bool
+	modelList        []string
+	modelListIndex   int
+	modelPickerLoading bool
+	width           int
+	height          int
+	agentStream     *agentStreamBuffer
+	tachikomaCtx    context.Context
+}
 
-var thinkingFrames = []string{"thinking.", "thinking..", "thinking..."}
-
-func NewModel(runtime *app.Runtime, cancel func()) Model {
-	ta := textarea.New()
-	ta.Placeholder = "Escribe un prompt, /tool ..., o !comando"
-	ta.Focus()
-	ta.Prompt = ""
-	ta.SetWidth(80)
-	ta.SetHeight(3)
-	ta.ShowLineNumbers = false
-	
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(styles.White)
-	ta.BlurredStyle.Text = lipgloss.NewStyle().Foreground(styles.White)
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.Gray)
-	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.Gray)
-	ta.EndOfBufferCharacter = ' '
-
-	vp := viewport.New(80, 20)
-	m := Model{
-		textarea:        ta,
-		viewport:        vp,
-		runtime:         runtime,
-		tachikomaInfo:   make(map[string]string),
-		cancel:          cancel,
-		sysInfo:         system.GetContextInfo(),
-		autoScroll:      true,
-		selectedMessage: -1,
+func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context) Model {
+	if tachikomaCtx == nil {
+		tachikomaCtx = context.Background()
 	}
-	m.syncInputChrome()
-	m.resetMessages()
-	m.refreshSuggestions()
-	return m
+	return Model{
+		timeline: NewTimelineModel(),
+		composer: NewComposerModel(runtime),
+		footer:   NewFooterModel(runtime),
+		runtime:  runtime,
+		cancel:   cancel,
+		tachikomaCtx: tachikomaCtx,
+	}
 }
 
 func (m *Model) SetManager(mgr *tachikoma.Manager) { m.manager = mgr }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textarea.Blink}
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.composer.Init(), m.timeline.Init(), m.footer.Init())
 	if m.manager != nil {
-		cmds = append(cmds, waitForTachikoma(m.manager.Updates()))
+		cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
 	}
 	return tea.Batch(cmds...)
 }
 
-func waitForTachikoma(updates <-chan tachikoma.Update) tea.Cmd {
-	return func() tea.Msg { return TachikomaMsg(<-updates) }
-}
-
-func runShellCommand(command string) tea.Cmd {
-	return func() tea.Msg { return ShellResultMsg{Result: app.RunShellCommand(context.Background(), command)} }
-}
-
-func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd {
+func waitForTachikoma(ctx context.Context, manager *tachikoma.Manager) tea.Cmd {
 	return func() tea.Msg {
-		models, err := runtime.ListModelsForProvider(context.Background(), cfg)
-		return ProviderModelsMsg{Models: models, Err: err}
-	}
-}
-
-func waitAgentStream(ch <-chan string) tea.Cmd {
-	return func() tea.Msg {
-		chunk, ok := <-ch
-		if !ok {
-			return AgentStreamChunkMsg{Done: true}
-		}
-		return AgentStreamChunkMsg{Chunk: chunk}
-	}
-}
-
-func thinkingTick() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return ThinkingTickMsg{} })
-}
-
-func copySelection(text string) tea.Cmd {
-	return func() tea.Msg {
-		return CopySelectionMsg{Err: writeClipboard(text)}
-	}
-}
-
-func writeClipboard(text string) error {
-	if err := clipboard.WriteAll(text); err == nil {
-		return nil
-	}
-	commands := [][]string{
-		{"wl-copy"},
-		{"xclip", "-selection", "clipboard"},
-		{"xsel", "--clipboard", "--input"},
-	}
-	for _, args := range commands {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Stdin = strings.NewReader(text)
-		if err := cmd.Run(); err == nil {
+		result := manager.Next(ctx)
+		if !result.OK {
 			return nil
 		}
+		return TachikomaMsg(result.Update)
 	}
-	return fmt.Errorf("no se pudo copiar: instala wl-copy, xclip o xsel si el backend actual falla")
-}
-
-func (m *Model) resetMessages() {
-	styledLogo := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(logoArt)
-	m.messages = []string{
-		styledLogo,
-		styles.SystemStyle.Render("Motoko online. /provider add abre el formulario; /models lista o selecciona modelos del provider activo."),
-	}
-	m.selectedMessage = -1
-	if m.viewport.Width > 0 {
-		m.renderMessages()
-	}
-}
-
-func (m *Model) refreshContext() {
-	signals := m.sysInfo.Signals
-	m.sysInfo = system.GetContextInfo()
-	if len(signals) > 0 {
-		m.sysInfo.Signals = signals
-	}
-}
-
-func (m *Model) refreshSuggestions() {
-	m.syncInputChrome()
-	if m.providerForm.active || m.thinking {
-		m.suggestions = nil
-		m.selectedSuggestion = 0
-		return
-	}
-	m.suggestions = m.runtime.Completions(m.textarea.Value())
-	if len(m.suggestions) == 0 {
-		m.selectedSuggestion = 0
-		return
-	}
-	if m.selectedSuggestion >= len(m.suggestions) {
-		m.selectedSuggestion = len(m.suggestions) - 1
-	}
-	if m.selectedSuggestion < 0 {
-		m.selectedSuggestion = 0
-	}
-}
-
-func (m *Model) syncInputChrome() {
-	if m.runtime.InputMode() == app.InputModeShell {
-		m.textarea.Placeholder = "Modo shell activo: escribe un comando o /chat para salir"
-		m.textarea.Prompt = ""
-		return
-	}
-	m.textarea.Placeholder = "Escribe un prompt, /tool ..., o !comando"
-	m.textarea.Prompt = ""
-}
-
-func (m *Model) applySelectedSuggestion() {
-	if len(m.suggestions) == 0 {
-		return
-	}
-	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
-	m.textarea.CursorEnd()
-	m.refreshSuggestions()
-}
-
-func (m *Model) renderMessages() {
-	var wrapped []string
-	width := m.viewport.Width
-	if width <= 0 {
-		return
-	}
-	currentOffset := m.viewport.YOffset
-	selectedIdx := -1
-	if m.selectedMessage >= 0 && len(m.messages) > 0 {
-		selectedIdx = clamp(m.selectedMessage, 0, len(m.messages)-1)
-	}
-	for i, msg := range m.messages {
-		if i == selectedIdx {
-			// Left-bar indicator: border takes 1 char, so content = width-1
-			wrapped = append(wrapped, styles.SelectedMessageStyle.Width(width-1).Render(msg))
-		} else {
-			wrapped = append(wrapped, lipgloss.NewStyle().Width(width).Render(msg))
-		}
-	}
-	if m.thinking {
-		wrapped = append(wrapped, styles.SystemStyle.Render(thinkingFrames[m.thinkingFrame]))
-	}
-	m.viewportContent = strings.Join(wrapped, "\n\n")
-	m.viewport.SetContent(m.viewportContent)
-	maxOffset := m.maxViewportOffset()
-	if m.autoScroll || currentOffset >= maxOffset {
-		m.viewport.GotoBottom()
-		m.autoScroll = true
-		return
-	}
-	m.viewport.YOffset = clamp(currentOffset, 0, maxOffset)
-}
-
-func (m *Model) syncLayout() {
-	if m.width <= 0 || m.height <= 0 {
-		return
-	}
-	textareaWidth := max(16, m.width-13)
-	m.textarea.SetWidth(textareaWidth)
-	inputHeight := clamp(estimateTextareaHeight(m.textarea.Value(), textareaWidth), 3, max(3, m.height-20))
-	m.textarea.SetHeight(inputHeight)
-	// Total fixed overhead: timeline_border(2) + composer_border(2)
-	// + composer_padding_v(2) + suggestions(1) + footer(1) = 8
-	viewportHeight := max(6, m.height-(inputHeight+8))
-	if !m.ready {
-		m.viewport = viewport.New(m.width-6, viewportHeight)
-		m.ready = true
-		return
-	}
-	m.viewport.Width = m.width - 6
-	m.viewport.Height = viewportHeight
-}
-
-func (m Model) maxViewportOffset() int {
-	if m.viewport.Height <= 0 || m.viewportContent == "" {
-		return 0
-	}
-	lineCount := strings.Count(m.viewportContent, "\n") + 1
-	return max(0, lineCount-m.viewport.Height)
-}
-
-func (m *Model) appendEntry(entry app.Entry) {
-	switch entry.Kind {
-	case app.EntryUser:
-		width := max(20, m.viewport.Width)
-		m.messages = append(m.messages, styles.UserBlockStyle.Width(width).Render(styles.UserPromptStyle.Render(">")+" "+entry.Text))
-	case app.EntryAssistant:
-		m.messages = append(m.messages, styles.AssistantBlockStyle.Render(entry.Text))
-	case app.EntrySystem:
-		m.messages = append(m.messages, styles.SystemStyle.Render(entry.Text))
-	case app.EntryCommand:
-		m.messages = append(m.messages, styles.CommandStyle.Render(entry.Text))
-	case app.EntryOutput:
-		m.messages = append(m.messages, styles.OutputStyle.Render(entry.Text))
-	case app.EntryError:
-		m.messages = append(m.messages, styles.ErrorStyle.Render(entry.Text))
-	default:
-		m.messages = append(m.messages, entry.Text)
-	}
-}
-
-func (m *Model) applyResponse(response app.Response) tea.Cmd {
-	if response.Clear {
-		m.resetMessages()
-	}
-	for _, entry := range response.Entries {
-		m.appendEntry(entry)
-	}
-	if response.Signal == "open-provider-popup" {
-		m.openProviderForm()
-		return nil
-	}
-	if response.Action == nil {
-		return nil
-	}
-	if response.Action.Type == app.ActionShell {
-		return runShellCommand(response.Action.ShellCommand)
-	}
-	if response.Action.Type == app.ActionAgent {
-		m.thinking = true
-		m.thinkingFrame = 0
-		m.pendingPrompt = response.Action.AgentPrompt
-		m.streaming = true
-		m.streamedRunes = nil
-		m.streamMessageIndex = -1
-		m.agentStream = nil
-		m.renderMessages()
-		streamCh := make(chan string, 64)
-		m.agentStream = streamCh
-		cmd := func() tea.Msg {
-			result, err := m.runtime.RunAgentStream(context.Background(), m.sysInfo, response.Action.AgentPrompt, func(event app.AgentStreamEvent) error {
-				if event.Kind == "assistant_delta" && event.Content != "" {
-					streamCh <- event.Content
-				}
-				return nil
-			})
-			close(streamCh)
-			return AgentResultMsg{Prompt: response.Action.AgentPrompt, Result: result, Err: err}
-		}
-		return tea.Batch(cmd, waitAgentStream(streamCh), thinkingTick())
-	}
-	return nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var taCmd, vpCmd tea.Cmd
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.providerForm.active {
 			cmd := m.handleProviderFormKey(msg)
-			m.refreshSuggestions()
 			return m, cmd
 		}
+		if m.modePickerOpen {
+			cmd := m.handleModePickerKey(msg)
+			return m, cmd
+		}
+		if m.modelPickerOpen {
+			cmd := m.handleModelPickerKey(msg)
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			if m.showToolPalette {
@@ -394,82 +138,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			m.showToolPalette = !m.showToolPalette
 			return m, nil
-		case "tab":
-			if len(m.suggestions) > 0 {
-				m.applySelectedSuggestion()
-				return m, nil
-			}
-		case "right":
-			if len(m.suggestions) > 0 {
-				m.applySelectedSuggestion()
-				return m, nil
-			}
-		case "down", "ctrl+n":
-			if len(m.suggestions) > 0 {
-				m.selectedSuggestion = (m.selectedSuggestion + 1) % len(m.suggestions)
-				return m, nil
-			}
-		case "up", "ctrl+p":
-			if len(m.suggestions) > 0 {
-				m.selectedSuggestion--
-				if m.selectedSuggestion < 0 {
-					m.selectedSuggestion = len(m.suggestions) - 1
-				}
-				return m, nil
-			}
-		case "alt+up":
-			if len(m.messages) > 0 {
-				if m.selectedMessage < 0 {
-					m.selectedMessage = len(m.messages) - 1
-				} else {
-					m.selectedMessage = clamp(m.selectedMessage-1, 0, len(m.messages)-1)
-				}
-				m.renderMessages()
-			}
-			return m, nil
-		case "alt+down":
-			if len(m.messages) > 0 {
-				if m.selectedMessage < 0 {
-					m.selectedMessage = 0
-				} else {
-					m.selectedMessage = clamp(m.selectedMessage+1, 0, len(m.messages)-1)
-				}
-				m.renderMessages()
-			}
-			return m, nil
-		case "alt+c":
-			if m.selectedMessage >= 0 && m.selectedMessage < len(m.messages) {
-				return m, copySelection(stripANSI(m.messages[m.selectedMessage]))
-			}
 		case "c":
-			if m.selectedMessage >= 0 && strings.TrimSpace(m.textarea.Value()) == "" {
-				return m, copySelection(stripANSI(m.messages[m.selectedMessage]))
-			}
-		case "enter":
-			if m.showToolPalette {
-				m.showToolPalette = false
-				return m, nil
-			}
-			if m.thinking || m.streaming {
-				return m, nil
-			}
-			if len(m.suggestions) > 0 && strings.TrimSpace(m.textarea.Value()) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) {
-				m.applySelectedSuggestion()
-				return m, nil
-			}
-			input := m.textarea.Value()
-			if strings.TrimSpace(input) != "" {
-				response := m.runtime.HandleInput(input, m.sysInfo)
-				m.textarea.Reset()
-				cmds = append(cmds, m.applyResponse(response))
-				m.refreshContext()
-				m.refreshSuggestions()
-				m.renderMessages()
+			if m.composer.Value() == "" {
+				cmds = append(cmds, m.timeline.CopySelected())
 				return m, tea.Batch(cmds...)
-			}
-			// Empty input: copy selected message if any
-			if m.selectedMessage >= 0 && m.selectedMessage < len(m.messages) {
-				return m, copySelection(stripANSI(m.messages[m.selectedMessage]))
 			}
 		}
 
@@ -477,104 +149,156 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.syncLayout()
-		m.renderMessages()
 
-	case TachikomaMsg:
-		m.tachikomaInfo[msg.Name] = msg.Status
-		if m.sysInfo.Signals == nil {
-			m.sysInfo.Signals = make(map[string]string)
+	case SubmitPromptMsg:
+		response := m.runtime.HandleInput(msg.Prompt, m.footer.GetSysInfo())
+		
+		if response.Clear {
+			cmds = append(cmds, func() tea.Msg { return ClearMessagesMsg{} })
 		}
-		m.sysInfo.Signals[msg.Name] = msg.Status
-		m.refreshContext()
-		if m.sysInfo.Signals == nil {
-			m.sysInfo.Signals = make(map[string]string)
-		}
-		for name, status := range m.tachikomaInfo {
-			m.sysInfo.Signals[name] = status
-		}
-		if m.manager != nil {
-			cmds = append(cmds, waitForTachikoma(m.manager.Updates()))
+		
+		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: response} })
+
+		if response.Signal == "open-provider-popup" {
+			m.openProviderForm()
+			return m, tea.Batch(cmds...)
 		}
 
-	case ShellResultMsg:
-		m.refreshContext()
-		cmds = append(cmds, m.applyResponse(m.runtime.HandleShellResult(msg.Result)))
-		m.renderMessages()
-
-	case ProviderModelsMsg:
-		for _, entry := range entriesForProviderModels(msg.Models, msg.Err) {
-			m.appendEntry(entry)
+		if response.Signal == "open-mode-popup" {
+			m.openModePicker()
+			return m, tea.Batch(cmds...)
 		}
-		m.renderMessages()
 
-	case AgentResultMsg:
-		m.thinking = false
-		m.pendingPrompt = ""
-		if msg.Err != nil {
-			m.streaming = false
-			m.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
-		} else {
-			entries := entriesForAgentResult(msg.Result, m.runtime.Debug())
-			for _, entry := range entries {
-				if entry.Kind == app.EntryAssistant {
-					if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-						m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(entry.Text)
+		if response.Signal == "open-models-popup" {
+			m.openModelPicker()
+			active, ok := m.runtime.GetActiveProviderConfig()
+			if ok {
+				cmds = append(cmds, loadProviderModels(m.runtime, active))
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		if response.Action != nil {
+			if response.Action.Type == app.ActionShell {
+				cmds = append(cmds, runShellCommand(response.Action.ShellCommand))
+			} else if response.Action.Type == app.ActionAgent {
+				m.timeline.SetThinking(true)
+				m.composer.SetThinking(true)
+				m.footer.SetThinking(true)
+				m.timeline.SetStreaming(true)
+				m.agentStream = &agentStreamBuffer{}
+				
+				cmds = append(cmds, 
+					waitAgentStream(m.agentStream), 
+					thinkingTick(),
+					func() tea.Msg {
+						result, err := m.runtime.RunAgentStream(context.Background(), m.footer.GetSysInfo(), response.Action.AgentPrompt, func(event app.AgentStreamEvent) error {
+							m.agentStream.push(event)
+							return nil
+						})
+						m.agentStream.finish()
+						
+						resp := app.Response{}
+						resp.Entries = entriesForAgentResult(result, m.runtime.Debug())
+						return AgentResultMsg{Prompt: response.Action.AgentPrompt, Result: resp, Assistant: result.Assistant, Err: err}
+					},
+				)
+			}
+		}
+		
+	case AgentStreamBatchMsg:
+		if len(msg.Events) > 0 {
+			m.timeline.SetThinking(false)
+			m.composer.SetThinking(false)
+			// Footer keeps thinking=true until AgentResultMsg (entire agent run).
+			for _, event := range msg.Events {
+				if !m.runtime.Debug() {
+					switch event.Kind {
+					case "output", "debug":
 						continue
+					case "tool":
+						event.Content = ""
 					}
 				}
-				m.appendEntry(entry)
+				if cmd := m.timeline.Update(AgentStreamEventMsg{Event: event}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
-			m.streaming = false
-			m.streamedRunes = nil
-			m.streamMessageIndex = -1
 		}
-		m.renderMessages()
-
-	case AgentStreamChunkMsg:
-		if m.streaming {
-			if m.streamMessageIndex == -1 {
-				m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: ""})
-				m.streamMessageIndex = len(m.messages) - 1
-			}
-			if msg.Chunk != "" {
-				m.streamedRunes = append(m.streamedRunes, []rune(msg.Chunk)...)
-				if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-					m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Render(string(m.streamedRunes))
-				}
-				m.renderMessages()
-				if m.agentStream != nil {
-					cmds = append(cmds, waitAgentStream(m.agentStream))
-				}
-			}
-			if msg.Done {
-				m.agentStream = nil
-			}
+		if !msg.Done && m.agentStream != nil {
+			cmds = append(cmds, waitAgentStream(m.agentStream))
+		} else if msg.Done {
+			m.agentStream = nil
 		}
 
 	case ThinkingTickMsg:
-		if m.thinking {
-			m.thinkingFrame = (m.thinkingFrame + 1) % len(thinkingFrames)
-			m.renderMessages()
+		if m.timeline.thinking || m.footer.thinking {
 			cmds = append(cmds, thinkingTick())
 		}
 
-	case CopySelectionMsg:
-		if msg.Err != nil {
-			m.appendEntry(app.Entry{Kind: app.EntryError, Text: "clipboard: " + msg.Err.Error()})
-		} else {
-			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "copiado al portapapeles"})
+	case AgentResultMsg:
+		if strings.TrimSpace(msg.Assistant) != "" {
+			if cmd := m.timeline.Update(finalizeStreamMsg{Text: msg.Assistant}); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
-		m.renderMessages()
+		m.timeline.SetThinking(false)
+		m.composer.SetThinking(false)
+		m.footer.SetThinking(false)
+		m.timeline.SetStreaming(false)
+		
+		if msg.Err != nil {
+			cmds = append(cmds, func() tea.Msg { 
+				return ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryError, Text: msg.Err.Error()}}}} 
+			})
+		} else {
+			cmds = append(cmds, func() tea.Msg { 
+				return ResponseAppliedMsg{Response: msg.Result} 
+			})
+		}
+
+	case ProviderModelsMsg:
+		if m.modelPickerOpen {
+			m.modelPickerLoading = false
+			if msg.Err != nil {
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+				m.timeline.renderMessages()
+			} else {
+				m.modelList = msg.Models
+				m.modelListIndex = 0
+			}
+		} else {
+			// Fall through to timeline.
+			if cmd := m.timeline.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case ShellResultMsg:
+		response := m.runtime.HandleShellResult(msg.Result)
+		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: response} })
+
+	case AgentChangedMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Modo agente: " + msg.Agent})
+		m.timeline.renderMessages()
+
+	case ModelChangedMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Modelo activo para %s: %s", msg.Provider, msg.Model)})
+		m.timeline.renderMessages()
+
+	case TachikomaMsg:
+		if m.manager != nil {
+			cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
+		}
 	}
 
-	if !m.providerForm.active {
-		m.textarea, taCmd = m.textarea.Update(msg)
-		m.syncLayout()
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		m.autoScroll = m.viewport.YOffset >= m.maxViewportOffset()
-		cmds = append(cmds, taCmd, vpCmd)
+	if !m.providerForm.active && !m.modePickerOpen && !m.modelPickerOpen {
+		cmds = append(cmds, m.composer.Update(msg))
+		cmds = append(cmds, m.timeline.Update(msg))
+		cmds = append(cmds, m.footer.Update(msg))
+		m.syncLayout() // Recalculate layout in case sub-models changed height
 	}
-	m.refreshSuggestions()
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -582,17 +306,86 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "inicializando..."
 	}
-	timeline := styles.TimelineStyle.Width(m.width - 4).Height(m.viewport.Height).Render(m.viewport.View())
-	composer := m.renderComposer()
-	footer := m.renderFooter()
-	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, timeline, composer, footer))
+
+	timelineView := m.timeline.View()
+	composerView := m.composer.View()
+	footerView := m.footer.View()
+
+	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView, footerView))
+
 	if m.providerForm.active {
 		popup := styles.PopupStyle.Render(m.renderProviderForm())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+	}
+	if m.modePickerOpen {
+		popup := styles.PopupStyle.Render(m.renderModePicker())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+	}
+	if m.modelPickerOpen {
+		popup := styles.PopupStyle.Render(m.renderModelPicker())
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 	}
 	if !m.showToolPalette {
 		return base
 	}
-	popup := styles.PopupStyle.Render(m.renderToolPalette())
+	popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.showTachikomas, m.footer.tachikomaInfo))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+}
+
+func (m *Model) syncLayout() {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+	
+	composerHeight := m.composer.Height()
+	viewportHeight := max(6, m.height-(composerHeight+5))
+	
+	m.composer.SyncLayout(m.width, composerHeight)
+	m.timeline.SyncLayout(m.width, viewportHeight)
+}
+
+func runShellCommand(command string) tea.Cmd {
+	return func() tea.Msg { return ShellResultMsg{Result: app.RunShellCommand(context.Background(), command)} }
+}
+
+func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd {
+	return func() tea.Msg {
+		models, err := runtime.ListModelsForProvider(context.Background(), cfg)
+		return ProviderModelsMsg{Models: models, Err: err}
+	}
+}
+
+func (b *agentStreamBuffer) push(event app.AgentStreamEvent) {
+	b.mu.Lock()
+	b.events = append(b.events, event)
+	b.mu.Unlock()
+}
+
+func (b *agentStreamBuffer) finish() {
+	b.mu.Lock()
+	b.done = true
+	b.mu.Unlock()
+}
+
+func (b *agentStreamBuffer) drain() ([]app.AgentStreamEvent, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.events) == 0 {
+		return nil, b.done
+	}
+	events := append([]app.AgentStreamEvent(nil), b.events...)
+	b.events = nil
+	return events, b.done
+}
+
+func waitAgentStream(buffer *agentStreamBuffer) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(16 * time.Millisecond)
+		events, done := buffer.drain()
+		return AgentStreamBatchMsg{Events: events, Done: done}
+	}
+}
+
+func thinkingTick() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return ThinkingTickMsg{} })
 }

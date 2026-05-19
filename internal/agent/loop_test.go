@@ -49,3 +49,28 @@ func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestMaxToolIterationsDefaultsToTwentyFour(t *testing.T) {
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "")
+	if got := maxToolIterations(); got != defaultMaxToolIterations {
+		t.Fatalf("expected default max iterations %d, got %d", defaultMaxToolIterations, got)
+	}
+}
+
+func TestMaxToolIterationsAcceptsEnvOverride(t *testing.T) {
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "31")
+	if got := maxToolIterations(); got != 31 {
+		t.Fatalf("expected env override, got %d", got)
+	}
+}
+
+func TestMaxToolIterationsFallsBackOnInvalidEnv(t *testing.T) {
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "invalid")
+	if got := maxToolIterations(); got != defaultMaxToolIterations {
+		t.Fatalf("expected invalid env to fall back, got %d", got)
+	}
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "0")
+	if got := maxToolIterations(); got != defaultMaxToolIterations {
+		t.Fatalf("expected non-positive env to fall back, got %d", got)
+	}
+}

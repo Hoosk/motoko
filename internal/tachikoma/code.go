@@ -20,11 +20,16 @@ func (c *CodeTachikoma) Name() string {
 	return "CodeTachikoma"
 }
 
-func (c *CodeTachikoma) Run(ctx context.Context, updates chan<- Update) error {
+func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		status := "semantic index unavailable"
 		var payload any
 		if c.index != nil {
@@ -36,7 +41,7 @@ func (c *CodeTachikoma) Run(ctx context.Context, updates chan<- Update) error {
 				payload = snapshot
 			}
 		}
-		updates <- Update{Name: c.Name(), Status: status, Payload: payload}
+		publish(Update{Name: c.Name(), Status: status, Payload: payload})
 
 		select {
 		case <-ctx.Done():

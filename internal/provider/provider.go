@@ -49,17 +49,21 @@ type Client interface {
 	ListModels(ctx context.Context) ([]string, error)
 }
 
+type clientFactory func(config.ProviderConfig) Client
+
+var clientFactories = map[config.ProviderKind]clientFactory{
+	config.ProviderKindOpenAICompatible: newOpenAIClient,
+	config.ProviderKindAnthropic:       newAnthropicClient,
+	config.ProviderKindGemini:          newGeminiClient,
+}
+
 func NewClient(cfg config.ProviderConfig) (Client, error) {
-	switch cfg.Kind {
-	case config.ProviderOpenAI:
-		return newOpenAIClient(cfg), nil
-	case config.ProviderAnthropic:
-		return newAnthropicClient(cfg), nil
-	case config.ProviderGemini:
-		return newGeminiClient(cfg), nil
-	default:
+	cfg = config.NormalizeProvider(cfg)
+	factory, ok := clientFactories[cfg.Kind]
+	if !ok {
 		return nil, fmt.Errorf("provider no soportado: %s", cfg.Kind)
 	}
+	return factory(cfg), nil
 }
 
 type baseClient struct {
@@ -94,20 +98,38 @@ func (c baseClient) Summary() string {
 	return fmt.Sprintf("%s:%s", c.providerName, c.model)
 }
 
-type openAIClient struct{ baseClient }
-type anthropicClient struct{ baseClient }
-type geminiClient struct{ baseClient }
+type openAIClient struct {
+	baseClient
+	thinkingBudget int
+}
+type anthropicClient struct {
+	baseClient
+	thinkingBudget int
+}
+type geminiClient struct {
+	baseClient
+	thinkingBudget int
+}
 
 func newOpenAIClient(cfg config.ProviderConfig) Client {
-	return &openAIClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &openAIClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func newAnthropicClient(cfg config.ProviderConfig) Client {
-	return &anthropicClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &anthropicClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func newGeminiClient(cfg config.ProviderConfig) Client {
-	return &geminiClient{baseClient: newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)}
+	return &geminiClient{
+		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		thinkingBudget: cfg.ThinkingBudget,
+	}
 }
 
 func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition) (Response, error) {
@@ -174,11 +196,21 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
 
+	maxTokens := 4096
 	reqBody := map[string]any{
 		"model":      c.model,
-		"max_tokens": 4096,
+		"max_tokens": maxTokens,
 		"system":     systemPrompt,
 		"messages":   toAnthropicMessages(messages),
+	}
+	if c.thinkingBudget > 0 {
+		if c.thinkingBudget >= maxTokens {
+			reqBody["max_tokens"] = c.thinkingBudget + 1024
+		}
+		reqBody["thinking"] = map[string]any{
+			"type":          "enabled",
+			"budget_tokens": c.thinkingBudget,
+		}
 	}
 
 	var decoded anthropicResponse
@@ -466,6 +498,7 @@ type structuredResponse struct {
 }
 
 func parseStructuredResponse(raw string) Response {
+	raw = normalizeStructuredPayload(raw)
 	if raw == "" {
 		return Response{}
 	}
@@ -480,4 +513,27 @@ func parseStructuredResponse(raw string) Response {
 		response.ToolCall = &ToolCall{Name: strings.TrimSpace(parsed.ToolName), Input: parsed.ToolInput}
 	}
 	return response
+}
+
+func normalizeStructuredPayload(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSpace(trimmed)
+		if strings.HasPrefix(trimmed, "json") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "json"))
+		}
+		if end := strings.LastIndex(trimmed, "```"); end >= 0 {
+			trimmed = strings.TrimSpace(trimmed[:end])
+		}
+	}
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end >= start {
+		return strings.TrimSpace(trimmed[start : end+1])
+	}
+	return trimmed
 }
