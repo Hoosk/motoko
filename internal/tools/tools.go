@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+const maxToolOutputBytes = 12_000
+
+const truncatedToolOutputSuffix = "\n...[output truncated]"
+
 type Spec struct {
 	Name    string
 	Summary string
@@ -89,5 +93,17 @@ func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
 		return Result{}, fmt.Errorf("tool desconocida: %s", name)
 	}
 
-	return tool.Run(ctx, args)
+	result, err := tool.Run(ctx, args)
+	if err != nil {
+		return Result{}, err
+	}
+	result.Output = truncateToolOutput(result.Output)
+	return result, nil
+}
+
+func truncateToolOutput(output string) string {
+	if len(output) <= maxToolOutputBytes {
+		return output
+	}
+	return output[:maxToolOutputBytes] + truncatedToolOutputSuffix
 }

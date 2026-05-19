@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/css"
@@ -34,7 +35,9 @@ const (
 	defaultSnippetFiles  = 3
 	defaultSnippetBudget = 220
 	maxSnippetLines      = 48
+	maxIndexDepth        = 12
 	staleAfter           = 30 * time.Second
+	refreshTimeout       = 5 * time.Second
 )
 
 type LineRange struct {
@@ -292,10 +295,23 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 			return nil, err
 		}
 	}
+	root = filepath.Clean(root)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, refreshTimeout)
+		defer cancel()
+	}
 	snapshot := &Snapshot{
 		GeneratedAt:    time.Now(),
 		Root:           root,
 		LanguageCounts: make(map[string]int),
+	}
+	matcher, err := workspaceignore.Load(root)
+	if err != nil {
+		return nil, err
 	}
 	changed := findChangedFiles(root)
 	snapshot.ChangedPaths = changed
@@ -304,9 +320,28 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		changedMap[p] = true
 	}
 	dirsSeen := make(map[string]bool)
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if depth := strings.Count(rel, "/") + 1; depth > maxIndexDepth {
+				return filepath.SkipDir
+			}
+			if matcher.Ignored(rel, true) {
+				return filepath.SkipDir
+			}
 		}
 		if d.IsDir() {
 			if d.Name() == ".git" || d.Name() == "node_modules" || d.Name() == "vendor" {
@@ -314,7 +349,9 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(root, path)
+		if matcher.Ignored(rel, false) {
+			return nil
+		}
 		if !isSupported(rel) {
 			return nil
 		}

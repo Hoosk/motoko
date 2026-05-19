@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
 )
 
 func resolveWorkspacePath(target string) (string, string, error) {
@@ -45,6 +47,10 @@ func walkWorkspace(fn func(relPath, absPath string, entry fs.DirEntry) error) er
 	if err != nil {
 		return err
 	}
+	matcher, err := workspaceignore.Load(workspace)
+	if err != nil {
+		return err
+	}
 
 	return filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -60,6 +66,12 @@ func walkWorkspace(fn func(relPath, absPath string, entry fs.DirEntry) error) er
 		}
 
 		rel = filepath.ToSlash(rel)
+		if matcher.Ignored(rel, entry.IsDir()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() && (rel == ".git" || strings.HasPrefix(rel, ".git/")) {
 			return filepath.SkipDir
 		}

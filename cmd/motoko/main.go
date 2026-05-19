@@ -14,7 +14,9 @@ import (
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		cancel()
+	}()
 
 	runtime := app.NewRuntime()
 
@@ -30,9 +32,13 @@ func main() {
 	// Start Bubble Tea program
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
+		cancel()
+		mgr.Wait()
 		fmt.Printf("Error al iniciar Motoko: %v", err)
 		os.Exit(1)
 	}
+	cancel()
+	mgr.Wait()
 }
 
 func newTachikomaManager(runtime *app.Runtime) *tachikoma.Manager {

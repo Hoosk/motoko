@@ -32,6 +32,9 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	if search == "" {
 		return "", fmt.Errorf("SEARCH vacio solo se permite para crear archivos nuevos")
 	}
+	if err := validateFuzzySearchBlock(search); err != nil {
+		return "", err
+	}
 
 	matches := strings.Count(current, search)
 	if matches == 1 {
@@ -100,6 +103,32 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	updated += current[originalEnd:]
 	
 	return updated, nil
+}
+
+func validateFuzzySearchBlock(search string) error {
+	trimmed := strings.TrimSpace(search)
+	if trimmed == "" {
+		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+	}
+	lines := strings.Split(trimmed, "\n")
+	meaningfulLines := 0
+	nonWhitespace := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		meaningfulLines++
+		for _, r := range line {
+			if !strings.ContainsRune("{}[]()", r) {
+				nonWhitespace++
+			}
+		}
+	}
+	if meaningfulLines < 2 || nonWhitespace < 3 {
+		return fmt.Errorf("el bloque SEARCH es demasiado ambiguo para fuzzy replace; proporciona mas lineas de contexto unicas")
+	}
+	return nil
 }
 
 func (t *PatchTool) Run(ctx context.Context, args string) (Result, error) {

@@ -20,13 +20,18 @@ func (w *WorkspaceTachikoma) Name() string {
 	return "WorkspaceTachikoma"
 }
 
-func (w *WorkspaceTachikoma) Run(ctx context.Context, updates chan<- Update) error {
+func (w *WorkspaceTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		info := system.GetContextInfo()
-		updates <- Update{Name: w.Name(), Status: fmt.Sprintf("workspace %s", info.Workspace)}
+		publish(Update{Name: w.Name(), Status: fmt.Sprintf("workspace %s", info.Workspace)})
 
 		select {
 		case <-ctx.Done():

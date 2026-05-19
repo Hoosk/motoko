@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
-const maxToolIterations = 4
+const defaultMaxToolIterations = 24
 
 type Result struct {
 	Assistant  string
@@ -85,7 +86,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		RelevantSnippets: info.RelevantSnippetsSummary(),
 	}
 
-	for i := 0; i < maxToolIterations; i++ {
+	for i := 0; i < maxToolIterations(); i++ {
 		resp, err := a.complete(ctx, info, messages, onEvent)
 		if err != nil {
 			return Result{}, err
@@ -144,6 +145,18 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 	}
 
 	return Result{}, fmt.Errorf("se alcanzo el maximo de iteraciones de tools")
+}
+
+func maxToolIterations() int {
+	value := strings.TrimSpace(os.Getenv("MOTOKO_MAX_ITERATIONS"))
+	if value == "" {
+		return defaultMaxToolIterations
+	}
+	iterations, err := strconv.Atoi(value)
+	if err != nil || iterations < 1 {
+		return defaultMaxToolIterations
+	}
+	return iterations
 }
 
 func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.Message, onEvent func(StreamEvent) error) (provider.Response, error) {
