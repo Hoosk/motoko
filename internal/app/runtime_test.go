@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
@@ -87,5 +88,23 @@ func TestSaveProviderNormalizesNameBeforeActivating(t *testing.T) {
 	active, ok := r.config.Active()
 	if !ok || active.Name != "openrouter" {
 		t.Fatalf("expected normalized active config, got %#v ok=%t", active, ok)
+	}
+}
+
+func TestMentionSuggestionsPreferAgentsAndFiles(t *testing.T) {
+	r := NewRuntime()
+	r.availableAgents = append(r.availableAgents, agent.AgentDef{Name: "explore", System: "Busca codigo"})
+	r.semantic = semantic.NewIndex()
+	r.semantic.SetSnapshotForTest(&semantic.Snapshot{
+		GeneratedAt: time.Now(),
+		Files:       []semantic.FileSummary{{Path: "internal/app/runtime.go", Language: "go", Content: []byte("package app\n")}},
+	})
+	got := r.MentionSuggestions("revisa @ex")
+	if len(got) == 0 || got[0] != "@explore" {
+		t.Fatalf("expected @explore first, got %#v", got)
+	}
+	got = r.MentionSuggestions("revisa @runtime")
+	if len(got) == 0 || !strings.Contains(strings.Join(got, " "), "@internal/app/runtime.go") {
+		t.Fatalf("expected file mention suggestion, got %#v", got)
 	}
 }

@@ -50,6 +50,20 @@ func TestComposerTabRotatesSuggestions(t *testing.T) {
 	}
 }
 
+func TestComposerMentionSuggestionsApplyAtTokenPosition(t *testing.T) {
+	m := NewComposerModel(app.NewRuntime())
+	m.SyncLayout(80, 30)
+	m.textarea.SetValue("revisa @pl")
+	m.refreshSuggestions()
+	if len(m.suggestions) == 0 {
+		t.Fatal("expected mention suggestions")
+	}
+	_ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if !strings.Contains(m.Value(), "@plan") {
+		t.Fatalf("expected @ mention replacement, got %q", m.Value())
+	}
+}
+
 func TestComposerHintsAndPromptReflectMode(t *testing.T) {
 	r := app.NewRuntime()
 	m := NewComposerModel(r)

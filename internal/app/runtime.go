@@ -86,6 +86,7 @@ type Runtime struct {
 	workspaceID      string
 	contextWindow    int
 	wasResumed       bool
+	mentionedFiles   []string
 }
 
 type RuntimeOptions struct {
@@ -149,6 +150,14 @@ func (r *Runtime) AgentName() string {
 		return string(r.mode)
 	}
 	return r.currentAgentName
+}
+
+func (r *Runtime) AgentNames() []string {
+	result := make([]string, 0, len(r.availableAgents))
+	for _, a := range r.availableAgents {
+		result = append(result, a.Name)
+	}
+	return result
 }
 
 // AvailableAgents returns all agents (builtin + custom from .agents).
@@ -349,6 +358,104 @@ func (r *Runtime) CurrentSessionEntries() []Entry {
 	return entries
 }
 
+func (r *Runtime) MentionSuggestions(input string) []string {
+	token, ok := trailingMentionToken(input)
+	if !ok {
+		return nil
+	}
+	prefix := strings.ToLower(strings.TrimPrefix(token, "@"))
+	var result []string
+	for _, name := range r.AgentNames() {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
+			result = append(result, "@"+name)
+		}
+	}
+	if r.semantic != nil {
+		if snapshot, err := r.semantic.Ensure(context.Background()); err == nil && snapshot != nil {
+			seen := make(map[string]struct{})
+			for _, file := range snapshot.Files {
+				path := file.Path
+				if _, ok := seen[path]; ok {
+					continue
+				}
+				if prefix == "" || strings.Contains(strings.ToLower(path), prefix) {
+					seen[path] = struct{}{}
+					result = append(result, "@"+path)
+				}
+			}
+		}
+	}
+	if len(result) > 8 {
+		result = result[:8]
+	}
+	return result
+}
+
+func (r *Runtime) ReplaceTrailingMention(input, mention string) string {
+	token, ok := trailingMentionToken(input)
+	if !ok {
+		return input
+	}
+	idx := strings.LastIndex(input, token)
+	if idx == -1 {
+		return input
+	}
+	replacement := mention
+	if strings.HasPrefix(mention, "@") && r.isAgentMention(mention) {
+		replacement += " "
+	}
+	if strings.HasPrefix(mention, "@") && !r.isAgentMention(mention) {
+		replacement += " "
+	}
+	return input[:idx] + replacement
+}
+
+func (r *Runtime) isAgentMention(mention string) bool {
+	name := strings.TrimPrefix(strings.TrimSpace(mention), "@")
+	for _, agentName := range r.AgentNames() {
+		if strings.EqualFold(agentName, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) extractMentionedFiles(input string) []string {
+	fields := strings.Fields(input)
+	var files []string
+	seen := make(map[string]struct{})
+	for _, field := range fields {
+		if !strings.HasPrefix(field, "@") {
+			continue
+		}
+		mention := strings.TrimPrefix(field, "@")
+		if mention == "" || r.isAgentMention(field) {
+			continue
+		}
+		if _, ok := seen[mention]; ok {
+			continue
+		}
+		seen[mention] = struct{}{}
+		files = append(files, mention)
+	}
+	return files
+}
+
+func trailingMentionToken(input string) (string, bool) {
+	if input == "" {
+		return "", false
+	}
+	fields := strings.Fields(input)
+	if len(fields) == 0 {
+		return "", false
+	}
+	last := fields[len(fields)-1]
+	if !strings.HasPrefix(last, "@") {
+		return "", false
+	}
+	return last, true
+}
+
 func (r *Runtime) Completions(input string) []string {
 	trimmed := strings.TrimSpace(input)
 	hasTrailingSpace := strings.HasSuffix(input, " ")
@@ -442,6 +549,14 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 	if strings.HasPrefix(trimmed, "/") {
 		return r.handleSlashCommand(trimmed, info)
 	}
+
+	for _, field := range strings.Fields(trimmed) {
+		if strings.HasPrefix(field, "@") && r.isAgentMention(field) {
+			r.SetAgentMode(strings.TrimPrefix(field, "@"))
+			break
+		}
+	}
+	r.mentionedFiles = r.extractMentionedFiles(trimmed)
 
 	if strings.HasPrefix(trimmed, "!") {
 		return r.handleShell(strings.TrimSpace(trimmed[1:]))
@@ -1009,5 +1124,22 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		info.Signals = make(map[string]string)
 	}
 	info.Signals["semantic"] = snapshot.Summary()
+	for _, path := range r.mentionedFiles {
+		for _, file := range snapshot.Files {
+			if file.Path != path {
+				continue
+			}
+			info.RelevantFiles = append([]string{file.Descriptor()}, info.RelevantFiles...)
+			content := string(file.Content)
+			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+			limit := min(120, len(lines))
+			var numbered []string
+			for i := 0; i < limit; i++ {
+				numbered = append(numbered, fmt.Sprintf("%d: %s", i+1, lines[i]))
+			}
+			info.RelevantSnippets = append([]string{fmt.Sprintf("FILE %s\nLINES 1-%d\nREASON explicit @ mention\n%s", file.Path, limit, strings.Join(numbered, "\n"))}, info.RelevantSnippets...)
+			break
+		}
+	}
 	return info
 }

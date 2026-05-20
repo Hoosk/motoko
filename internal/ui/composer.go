@@ -15,6 +15,7 @@ type ComposerModel struct {
 	textarea           textarea.Model
 	suggestions        []string
 	suggestionBase     []string
+	suggestionSource   string
 	selectedSuggestion int
 	runtime            *app.Runtime
 	width              int
@@ -182,7 +183,13 @@ func (m *ComposerModel) refreshSuggestions() {
 		m.selectedSuggestion = 0
 		return
 	}
-	m.suggestions = m.runtime.Completions(m.textarea.Value())
+	if mentionSuggestions := m.runtime.MentionSuggestions(m.textarea.Value()); len(mentionSuggestions) > 0 {
+		m.suggestions = mentionSuggestions
+		m.suggestionSource = "mention"
+	} else {
+		m.suggestions = m.runtime.Completions(m.textarea.Value())
+		m.suggestionSource = "default"
+	}
 	m.suggestionBase = nil
 	if len(m.suggestions) == 0 {
 		m.selectedSuggestion = 0
@@ -201,6 +208,11 @@ func (m *ComposerModel) applySelectedSuggestion() {
 		return
 	}
 	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
+	if m.suggestionSource == "mention" {
+		m.textarea.SetValue(m.runtime.ReplaceTrailingMention(m.textarea.Value(), m.suggestions[m.selectedSuggestion]))
+	} else {
+		m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
+	}
 	m.textarea.CursorEnd()
 }
 
@@ -222,6 +234,7 @@ func (m *ComposerModel) advanceSuggestion(step int) {
 
 func (m *ComposerModel) clearSuggestionCycle() {
 	m.suggestionBase = nil
+	m.suggestionSource = ""
 }
 
 func (m *ComposerModel) syncInputChrome() {
@@ -241,18 +254,18 @@ func (m ComposerModel) renderInputPrompt() string {
 
 func (m ComposerModel) renderSuggestionsLine() string {
 	statusWidth := 22
-	status := lipgloss.NewStyle().Width(statusWidth).Render("")
+	status := lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Left).Render("")
 	if m.thinking {
-		status = lipgloss.NewStyle().Width(statusWidth).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
+		status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Left).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
 	}
 	var detail string
 	if len(m.suggestions) == 0 {
 		if m.runtime.InputMode() == app.InputModeShell {
 			detail = styles.InputHintStyle.Render("Shell directo activo. Enter ejecuta. /chat sale. Ctrl+T abre la paleta.")
-			return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
+			return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 		}
 		detail = styles.InputHintStyle.Render("Tab rota y completa. /provider add abre el formulario. /models tiene autocompletado con modelos cacheados.")
-		return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
+		return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 	}
 	limit := min(3, len(m.suggestions))
 	items := make([]string, 0, limit)
@@ -264,7 +277,7 @@ func (m ComposerModel) renderSuggestionsLine() string {
 		items = append(items, styles.SuggestionStyle.Render(m.suggestions[i]))
 	}
 	detail = strings.Join(items, "   ")
-	return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
+	return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 }
 
 func (m *ComposerModel) SetThinking(thinking bool) {
