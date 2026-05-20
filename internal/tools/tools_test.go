@@ -442,8 +442,39 @@ func TestFuzzyReplaceRejectsAmbiguousSearchBlocks(t *testing.T) {
 	if _, err := fuzzyReplace("}\n}\n}\n", "}\n}", "x"); err == nil {
 		t.Fatal("expected ambiguous closing-brace block to fail")
 	}
-	if _, err := fuzzyReplace("old\n", "old", "new"); err == nil {
-		t.Fatal("expected single-line fuzzy search block to fail")
+	if _, err := fuzzyReplace("{\n", "{", "x"); err == nil {
+		t.Fatal("expected trivial single-line exact search block to fail")
+	}
+}
+
+func TestFuzzyReplaceAllowsUniqueExactSingleLineSearch(t *testing.T) {
+	updated, err := fuzzyReplace("uno\ndos unico\ntres\n", "dos unico", "dos cambiado")
+	if err != nil {
+		t.Fatalf("fuzzyReplace() error = %v", err)
+	}
+	if updated != "uno\ndos cambiado\ntres\n" {
+		t.Fatalf("unexpected updated content %q", updated)
+	}
+}
+
+func TestPatchToolAppliesUniqueExactSingleLineSearchReplace(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "test.md")
+	content := "Linea inicial\n## Siguientes Pasos\n- Esperar a que el usuario decida.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewPatchTool().Run(context.Background(), "test.md\n<<<<<<< SEARCH\n## Siguientes Pasos\n=======\n# mi moto alpina derrapante\n## Siguientes Pasos\n>>>>>>> REPLACE")
+	if err != nil {
+		t.Fatalf("patch tool error = %v", err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updated)
+	if !strings.Contains(text, "# mi moto alpina derrapante\n## Siguientes Pasos") {
+		t.Fatalf("expected inserted heading, got %q", text)
 	}
 }
 

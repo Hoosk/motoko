@@ -16,8 +16,8 @@ type fakeLoopProvider struct {
 
 func (f *fakeLoopProvider) Configured() bool { return true }
 func (f *fakeLoopProvider) Summary() string  { return "fake:loop" }
-func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]string, error) {
-	return []string{"loop"}, nil
+func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{{ID: "loop"}}, nil
 }
 func (f *fakeLoopProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
@@ -41,7 +41,7 @@ func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(&fakeLoopTool{})
 	a := New(&fakeLoopProvider{}, registry)
-	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo")
+	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
 	if err == nil {
 		t.Fatal("expected loop detection error")
 	}

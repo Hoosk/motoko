@@ -14,8 +14,8 @@ type fakeStreamingProvider struct{}
 
 func (f *fakeStreamingProvider) Configured() bool { return true }
 func (f *fakeStreamingProvider) Summary() string  { return "fake:test" }
-func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]string, error) {
-	return []string{"test"}, nil
+func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{{ID: "test"}}, nil
 }
 func (f *fakeStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
 	return provider.Response{Message: "hola"}, nil
@@ -29,7 +29,7 @@ func (f *fakeStreamingProvider) StreamComplete(ctx context.Context, systemPrompt
 func TestRunStreamEmitsAssistantDeltas(t *testing.T) {
 	a := New(&fakeStreamingProvider{}, tools.NewRegistry())
 	var chunks []string
-	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "di hola", func(event StreamEvent) error {
+	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "di hola", nil, func(event StreamEvent) error {
 		chunks = append(chunks, event.Content)
 		return nil
 	})
@@ -48,8 +48,8 @@ type fakePlainStreamingProvider struct{}
 
 func (f *fakePlainStreamingProvider) Configured() bool { return true }
 func (f *fakePlainStreamingProvider) Summary() string  { return "fake:plain" }
-func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]string, error) {
-	return []string{"test"}, nil
+func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{{ID: "test"}}, nil
 }
 func (f *fakePlainStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
 	return provider.Response{Message: "hola mundo"}, nil
@@ -64,7 +64,7 @@ func (f *fakePlainStreamingProvider) StreamComplete(ctx context.Context, systemP
 func TestRunStreamFallsBackToPlainDeltas(t *testing.T) {
 	a := New(&fakePlainStreamingProvider{}, tools.NewRegistry())
 	var chunks []string
-	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "di hola", func(event StreamEvent) error {
+	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "di hola", nil, func(event StreamEvent) error {
 		chunks = append(chunks, event.Content)
 		return nil
 	})
@@ -85,8 +85,8 @@ type fakeToolStreamingProvider struct {
 
 func (f *fakeToolStreamingProvider) Configured() bool { return true }
 func (f *fakeToolStreamingProvider) Summary() string  { return "fake:tool-stream" }
-func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]string, error) {
-	return []string{"test"}, nil
+func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{{ID: "test"}}, nil
 }
 func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
@@ -117,7 +117,7 @@ func TestRunStreamSuppressesToolCallJSONAndEmitsToolEvents(t *testing.T) {
 	registry.Register(&fakeStreamTool{})
 	a := New(&fakeToolStreamingProvider{}, registry)
 	var events []StreamEvent
-	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "lee el archivo", func(event StreamEvent) error {
+	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "lee el archivo", nil, func(event StreamEvent) error {
 		events = append(events, event)
 		return nil
 	})

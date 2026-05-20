@@ -22,6 +22,7 @@ type Result struct {
 	AgentLabel string
 	Duration   time.Duration
 	Context    ContextSnapshot
+	Messages   []provider.Message
 }
 
 type ContextSnapshot struct {
@@ -67,21 +68,22 @@ func (a *Agent) Configured() bool {
 	return a != nil && a.provider != nil && a.provider.Configured() && a.tools != nil
 }
 
-func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string) (Result, error) {
-	return a.run(ctx, info, userInput, nil)
+func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.Message) (Result, error) {
+	return a.run(ctx, info, userInput, priorHistory, nil)
 }
 
-func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInput string, onEvent func(StreamEvent) error) (Result, error) {
-	return a.run(ctx, info, userInput, onEvent)
+func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.Message, onEvent func(StreamEvent) error) (Result, error) {
+	return a.run(ctx, info, userInput, priorHistory, onEvent)
 }
 
-func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, onEvent func(StreamEvent) error) (Result, error) {
+func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.Message, onEvent func(StreamEvent) error) (Result, error) {
 	if !a.Configured() {
 		return Result{}, fmt.Errorf("agente no configurado")
 	}
 	startedAt := time.Now()
 
-	messages := []provider.Message{{Role: "user", Content: userInput}}
+	messages := append([]provider.Message{}, priorHistory...)
+	messages = append(messages, provider.Message{Role: "user", Content: userInput})
 	steps := []Step{{Kind: "user", Title: "prompt", Content: userInput}}
 	totalUsage := provider.Usage{}
 	seenToolCalls := make(map[string]struct{})
@@ -109,8 +111,9 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			if message == "" {
 				message = "No tengo una respuesta util todavia."
 			}
+			messages = append(messages, provider.Message{Role: "assistant", Content: message})
 			steps = append(steps, Step{Kind: "assistant", Title: "answer", Content: message})
-			return Result{Assistant: message, Steps: steps, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot}, nil
+			return Result{Assistant: message, Steps: steps, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot, Messages: messages}, nil
 		}
 
 		toolName := strings.TrimSpace(resp.ToolCall.Name)

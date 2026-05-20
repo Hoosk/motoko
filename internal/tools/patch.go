@@ -99,17 +99,21 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	if search == "" {
 		return "", fmt.Errorf("SEARCH vacio solo se permite para crear archivos nuevos")
 	}
-	if err := validateFuzzySearchBlock(search); err != nil {
-		return "", err
-	}
 
-	matches := strings.Count(current, search)
+	matches := countOverlappingMatches(current, search)
 	if matches == 1 {
+		if err := validateExactSearchBlock(search); err != nil {
+			return "", err
+		}
 		return strings.Replace(current, search, replace, 1), nil
 	}
 
 	if matches > 1 {
 		return "", fmt.Errorf("el bloque SEARCH aparece %d veces de forma exacta; la sustitucion debe ser unica. Proporciona mas contexto.", matches)
+	}
+
+	if err := validateFuzzySearchBlock(search); err != nil {
+		return "", err
 	}
 
 	// Intento de reemplazo tolerante a espacios/indentación
@@ -168,7 +172,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 		updated += "\n"
 	}
 	updated += current[originalEnd:]
-	
+
 	return updated, nil
 }
 
@@ -196,6 +200,51 @@ func validateFuzzySearchBlock(search string) error {
 		return fmt.Errorf("el bloque SEARCH es demasiado ambiguo para fuzzy replace; proporciona mas lineas de contexto unicas")
 	}
 	return nil
+}
+
+func validateExactSearchBlock(search string) error {
+	trimmed := strings.TrimSpace(search)
+	if trimmed == "" {
+		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+	}
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) >= 2 {
+		return nil
+	}
+	line := strings.TrimSpace(lines[0])
+	if line == "" {
+		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+	}
+	nonPunctuation := 0
+	for _, r := range line {
+		if strings.ContainsRune("{}[]()<>;:,.", r) {
+			continue
+		}
+		if r == ' ' || r == '\t' {
+			continue
+		}
+		nonPunctuation++
+	}
+	if nonPunctuation < 3 {
+		return fmt.Errorf("el bloque SEARCH es demasiado ambiguo para fuzzy replace; proporciona mas lineas de contexto unicas")
+	}
+	return nil
+}
+
+func countOverlappingMatches(current, search string) int {
+	if search == "" {
+		return 0
+	}
+	count := 0
+	for start := 0; start <= len(current)-len(search); {
+		idx := strings.Index(current[start:], search)
+		if idx == -1 {
+			break
+		}
+		count++
+		start += idx + 1
+	}
+	return count
 }
 
 func (t *PatchTool) Run(ctx context.Context, args string) (Result, error) {
@@ -401,7 +450,7 @@ func parsePatchInput(input string) (string, string, string, error) {
 	search := strings.TrimPrefix(body[:dividerIndex], patchSearchMarker)
 	search = strings.TrimPrefix(search, "\n")
 
-	replace := body[dividerIndex+len(patchDividerMarker):replaceIndex]
+	replace := body[dividerIndex+len(patchDividerMarker) : replaceIndex]
 	replace = strings.TrimPrefix(replace, "\n")
 
 	trailer := strings.TrimSpace(body[replaceIndex+len(patchReplaceMarker):])

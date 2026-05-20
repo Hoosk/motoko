@@ -14,13 +14,13 @@ type ProviderPreset string
 
 const (
 	ProviderKindOpenAICompatible ProviderKind = "openai-compatible"
-	ProviderKindAnthropic       ProviderKind = "anthropic"
-	ProviderKindGemini          ProviderKind = "gemini"
+	ProviderKindAnthropic        ProviderKind = "anthropic"
+	ProviderKindGemini           ProviderKind = "gemini"
 
 	ProviderPresetOpenAI     ProviderPreset = "openai"
 	ProviderPresetOpenRouter ProviderPreset = "openrouter"
-	ProviderPresetAnthropic ProviderPreset = "anthropic"
-	ProviderPresetGemini    ProviderPreset = "gemini"
+	ProviderPresetAnthropic  ProviderPreset = "anthropic"
+	ProviderPresetGemini     ProviderPreset = "gemini"
 )
 
 type ProviderConfig struct {
@@ -31,6 +31,7 @@ type ProviderConfig struct {
 	APIKey         string         `json:"api_key"`
 	Model          string         `json:"model"`
 	Models         []string       `json:"models,omitempty"`
+	ContextWindow  int            `json:"context_window,omitempty"`
 	ThinkingBudget int            `json:"thinking_budget,omitempty"`
 }
 

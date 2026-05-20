@@ -7,10 +7,11 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 )
 
-func entriesForProviderModels(models []string, err error) []app.Entry {
+func entriesForProviderModels(models []provider.ModelInfo, err error) []app.Entry {
 	if err != nil {
 		return []app.Entry{{Kind: app.EntryError, Text: err.Error()}}
 	}

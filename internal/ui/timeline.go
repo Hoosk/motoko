@@ -6,24 +6,25 @@ import (
 
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/bubbles/viewport"
 )
 
 type TimelineModel struct {
-	viewport           viewport.Model
-	viewportContent    string
-	messages           []string
-	selectedMessage    int
-	width              int
-	height             int
-	autoScroll         bool
-	streaming          bool
-	streamedRunes      []rune
-	streamMessageIndex int
-	thinking           bool
-	thinkingFrame      int
+	viewport         viewport.Model
+	viewportContent  string
+	messages         []string
+	entries          []app.Entry
+	selectedMessage  int
+	width            int
+	height           int
+	autoScroll       bool
+	streaming        bool
+	streamedRunes    []rune
+	streamEntryIndex int
+	thinking         bool
+	thinkingFrame    int
 }
 
 func NewTimelineModel() TimelineModel {
@@ -63,17 +64,16 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		if m.streaming {
 			event := msg.Event
 			if event.Kind == "assistant_delta" {
-				if m.streamMessageIndex == -1 {
+				if m.streamEntryIndex == -1 {
 					m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: ""})
-					m.streamMessageIndex = len(m.messages) - 1
+					m.streamEntryIndex = len(m.entries) - 1
 				}
 				if event.Content != "" {
-				m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
-				if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-					wrapped := wrapText(string(m.streamedRunes), m.assistantWidth())
-					m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped)
+					m.streamedRunes = append(m.streamedRunes, []rune(event.Content)...)
+					if m.streamEntryIndex >= 0 && m.streamEntryIndex < len(m.entries) {
+						m.entries[m.streamEntryIndex].Text = string(m.streamedRunes)
+					}
 				}
-			}
 			} else {
 				switch event.Kind {
 				case "tool":
@@ -88,8 +88,8 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 				case "debug":
 					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
 				}
-				if m.streamMessageIndex != -1 {
-					m.streamMessageIndex = -1
+				if m.streamEntryIndex != -1 {
+					m.streamEntryIndex = -1
 					m.streamedRunes = nil
 				}
 			}
@@ -178,6 +178,7 @@ func (m *TimelineModel) resetMessages() {
 		styledLogo,
 		styles.SystemStyle.Render("Motoko online. /provider add abre el formulario; /models lista o selecciona modelos del provider activo."),
 	}
+	m.entries = nil
 	m.selectedMessage = -1
 	if m.viewport.Width > 0 {
 		m.renderMessages()
@@ -185,26 +186,7 @@ func (m *TimelineModel) resetMessages() {
 }
 
 func (m *TimelineModel) appendEntry(entry app.Entry) {
-	switch entry.Kind {
-	case app.EntryUser:
-		width := max(20, m.viewport.Width)
-		m.messages = append(m.messages, renderUserMessage(entry.Text, width))
-	case app.EntryAssistant:
-		wrapped := wrapText(entry.Text, m.assistantWidth())
-		m.messages = append(m.messages, styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped))
-	case app.EntrySystem:
-		m.messages = append(m.messages, styles.SystemStyle.Render(entry.Text))
-	case app.EntryCommand:
-		m.messages = append(m.messages, styles.CommandStyle.Render(entry.Text))
-	case app.EntryOutput:
-		m.messages = append(m.messages, renderDiffOutput(entry.Text))
-	case app.EntryError:
-		m.messages = append(m.messages, styles.ErrorStyle.Render(entry.Text))
-	case app.EntryHelp:
-		m.messages = append(m.messages, renderHelpEntry(entry.Text))
-	default:
-		m.messages = append(m.messages, entry.Text)
-	}
+	m.entries = append(m.entries, entry)
 }
 
 func (m *TimelineModel) renderMessages() {
@@ -215,6 +197,15 @@ func (m *TimelineModel) renderMessages() {
 	}
 	currentOffset := m.viewport.YOffset
 	selectedIdx := -1
+	m.messages = m.messages[:0]
+	styledLogo := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(logoArt)
+	m.messages = append(m.messages,
+		styledLogo,
+		styles.SystemStyle.Render("Motoko online. /provider add abre el formulario; /models lista o selecciona modelos del provider activo."),
+	)
+	for _, entry := range m.entries {
+		m.messages = append(m.messages, m.renderEntry(entry))
+	}
 	if m.selectedMessage >= 0 && len(m.messages) > 0 {
 		selectedIdx = clamp(m.selectedMessage, 0, len(m.messages)-1)
 	}
@@ -241,6 +232,28 @@ func (m *TimelineModel) renderMessages() {
 	m.viewport.YOffset = clamp(currentOffset, 0, maxOffset)
 }
 
+func (m *TimelineModel) renderEntry(entry app.Entry) string {
+	switch entry.Kind {
+	case app.EntryUser:
+		return renderUserMessage(entry.Text, max(20, m.viewport.Width))
+	case app.EntryAssistant:
+		wrapped := wrapText(entry.Text, m.assistantWidth())
+		return styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped)
+	case app.EntrySystem:
+		return styles.SystemStyle.Render(entry.Text)
+	case app.EntryCommand:
+		return styles.CommandStyle.Render(entry.Text)
+	case app.EntryOutput:
+		return renderDiffOutput(entry.Text)
+	case app.EntryError:
+		return styles.ErrorStyle.Render(entry.Text)
+	case app.EntryHelp:
+		return renderHelpEntry(entry.Text)
+	default:
+		return entry.Text
+	}
+}
+
 func (m TimelineModel) maxViewportOffset() int {
 	if m.viewport.Height <= 0 || m.viewportContent == "" {
 		return 0
@@ -260,26 +273,25 @@ func (m *TimelineModel) SetStreaming(streaming bool) {
 	m.streaming = streaming
 	if streaming {
 		m.streamedRunes = nil
-		m.streamMessageIndex = -1
+		m.streamEntryIndex = -1
 		return
 	}
 	m.streamedRunes = nil
-	m.streamMessageIndex = -1
+	m.streamEntryIndex = -1
 }
 
 func (m *TimelineModel) CompleteStreaming(text string) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed != "" {
-		if m.streamMessageIndex == -1 {
+		if m.streamEntryIndex == -1 {
 			m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: trimmed})
-		} else if m.streamMessageIndex >= 0 && m.streamMessageIndex < len(m.messages) {
-			wrapped := wrapText(trimmed, m.assistantWidth())
-			m.messages[m.streamMessageIndex] = styles.AssistantBlockStyle.Width(m.assistantWidth()).Render(wrapped)
+		} else if m.streamEntryIndex >= 0 && m.streamEntryIndex < len(m.entries) {
+			m.entries[m.streamEntryIndex].Text = trimmed
 		}
 	}
 	m.streaming = false
 	m.streamedRunes = nil
-	m.streamMessageIndex = -1
+	m.streamEntryIndex = -1
 	m.renderMessages()
 }
 
@@ -292,13 +304,14 @@ func (m TimelineModel) CopySelected() tea.Cmd {
 
 // renderUserMessage renders a user prompt between two thin horizontal rules.
 func renderUserMessage(text string, width int) string {
-	w := max(20, width)
+	w := max(20, width) - 3
 	ruleStyle := lipgloss.NewStyle().Foreground(styles.AccentViolet)
 	rule := ruleStyle.Render(strings.Repeat("─", w))
 	body := " " + styles.UserPromptStyle.Render(">") + "  " +
 		lipgloss.NewStyle().Foreground(styles.White).Render(text)
 	return strings.Join([]string{rule, body, rule}, "\n")
 }
+
 // assistantWidth returns the inner text width for AssistantBlockStyle rendering.
 // AssistantBlockStyle has BorderLeft(1) + PaddingLeft(2) = 3 chars overhead.
 func (m *TimelineModel) assistantWidth() int {

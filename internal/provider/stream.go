@@ -18,60 +18,37 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
-	reqBody := map[string]any{
-		"model":       c.model,
-		"temperature": 0.2,
-		"messages":    toOpenAIMessages(systemPrompt, messages),
-		"response_format": map[string]any{
-			"type": "json_object",
-		},
-		"stream": true,
-		"stream_options": map[string]any{
-			"include_usage": true,
-		},
-	}
-	// o-series models use reasoning_effort instead of temperature.
-	if c.thinkingBudget > 0 && isOpenAIReasoningModel(c.model) {
-		delete(reqBody, "temperature")
-		reqBody["reasoning_effort"] = budgetToReasoningEffort(c.thinkingBudget)
-	}
+
+	params := buildResponseParams(c.model, systemPrompt, messages, c.thinkingBudget)
+	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
+	defer stream.Close()
+
 	var raw strings.Builder
 	usage := Usage{}
-	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", reqBody, map[string]string{
-		"Authorization": "Bearer " + c.apiKey,
-	}, func(data string) error {
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
-			} `json:"usage,omitempty"`
-		}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return err
-		}
-		if chunk.Usage != nil {
-			usage = Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens, TotalTokens: chunk.Usage.TotalTokens}
-		}
-		for _, choice := range chunk.Choices {
-			if choice.Delta.Content == "" {
+	for stream.Next() {
+		event := stream.Current()
+		switch event.Type {
+		case "response.output_text.delta":
+			delta := event.Delta
+			if delta == "" {
 				continue
 			}
-			raw.WriteString(choice.Delta.Content)
+			raw.WriteString(delta)
 			if onDelta != nil {
-				if err := onDelta(choice.Delta.Content); err != nil {
-					return err
+				if err := onDelta(delta); err != nil {
+					return Response{}, err
 				}
 			}
+		case "response.completed":
+			u := event.Response.Usage
+			usage = Usage{
+				InputTokens:  int(u.InputTokens),
+				OutputTokens: int(u.OutputTokens),
+				TotalTokens:  int(u.TotalTokens),
+			}
 		}
-		return nil
-	})
-	if err != nil {
+	}
+	if err := stream.Err(); err != nil {
 		return Response{}, err
 	}
 	return parseStreamResponse(strings.TrimSpace(raw.String()), usage), nil
@@ -94,9 +71,18 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		if c.thinkingBudget >= maxTokens {
 			reqBody["max_tokens"] = c.thinkingBudget + 1024
 		}
-		reqBody["thinking"] = map[string]any{
-			"type":         "enabled",
-			"budget_tokens": c.thinkingBudget,
+		if isAnthropicAdaptiveThinkingModel(c.model) {
+			// claude-opus-4-7+ uses adaptive thinking; budget_tokens is still accepted
+			// as a hint for the maximum thinking tokens to use.
+			reqBody["thinking"] = map[string]any{
+				"type":          "adaptive",
+				"budget_tokens": c.thinkingBudget,
+			}
+		} else {
+			reqBody["thinking"] = map[string]any{
+				"type":          "enabled",
+				"budget_tokens": c.thinkingBudget,
+			}
 		}
 	}
 	var raw strings.Builder
@@ -162,8 +148,16 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		"temperature":      0.2,
 	}
 	if c.thinkingBudget > 0 {
-		genConfig["thinkingConfig"] = map[string]any{
-			"thinkingBudget": c.thinkingBudget,
+		if isGemini3Model(c.model) {
+			// Gemini 3.x uses thinkingLevel; thinkingBudget causes unexpected behaviour.
+			genConfig["thinkingConfig"] = map[string]any{
+				"thinkingLevel": budgetToGeminiThinkingLevel(c.thinkingBudget),
+			}
+		} else {
+			// Gemini 2.5 series uses thinkingBudget.
+			genConfig["thinkingConfig"] = map[string]any{
+				"thinkingBudget": c.thinkingBudget,
+			}
 		}
 	}
 	body := map[string]any{
@@ -218,21 +212,53 @@ func parseStreamResponse(raw string, usage Usage) Response {
 	return Response{Message: raw, Usage: usage}
 }
 
-// isOpenAIReasoningModel reports whether the model name belongs to the
-// o-series (o1, o3, o4, etc.) that use reasoning_effort.
+// isOpenAIReasoningModel reports whether the model name is a reasoning model
+// that supports reasoning_effort. This includes the legacy o-series (o1, o3, o4)
+// and the current gpt-5.x reasoning models (gpt-5.5, gpt-5.4, gpt-5.5-pro, etc.).
 func isOpenAIReasoningModel(model string) bool {
 	lower := strings.ToLower(model)
 	return strings.HasPrefix(lower, "o1") ||
 		strings.HasPrefix(lower, "o3") ||
-		strings.HasPrefix(lower, "o4")
+		strings.HasPrefix(lower, "o4") ||
+		strings.HasPrefix(lower, "gpt-5")
 }
 
 // budgetToReasoningEffort maps a token budget to an OpenAI reasoning_effort string.
+// Thresholds align with ThinkingBudgetLevels: low=1024, medium=8192, high=24576, xhigh=65536.
 func budgetToReasoningEffort(budget int) string {
 	switch {
-	case budget >= 16000:
+	case budget >= 65536:
+		return "xhigh"
+	case budget >= 24576:
 		return "high"
-	case budget >= 4096:
+	case budget >= 8192:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// isAnthropicAdaptiveThinkingModel reports whether the model uses the newer
+// adaptive thinking API ({type:"adaptive"}) instead of the manual budget API.
+// claude-opus-4-7 and newer generation models require adaptive thinking.
+func isAnthropicAdaptiveThinkingModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "opus-4-7")
+}
+
+// isGemini3Model reports whether the model belongs to the Gemini 3.x series,
+// which uses thinkingLevel instead of thinkingBudget.
+func isGemini3Model(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.HasPrefix(lower, "gemini-3")
+}
+
+// budgetToGeminiThinkingLevel maps a token budget to a Gemini 3 thinkingLevel string.
+func budgetToGeminiThinkingLevel(budget int) string {
+	switch {
+	case budget >= 24576:
+		return "high"
+	case budget >= 8192:
 		return "medium"
 	default:
 		return "low"

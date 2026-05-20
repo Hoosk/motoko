@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -13,6 +14,7 @@ import (
 type ComposerModel struct {
 	textarea           textarea.Model
 	suggestions        []string
+	suggestionBase     []string
 	selectedSuggestion int
 	runtime            *app.Runtime
 	width              int
@@ -62,34 +64,41 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.syncLayout()
-		
+
 	case ResponseAppliedMsg:
 		m.thinking = false
 		m.refreshSuggestions()
-		
+
 	case AgentResultMsg, ShellResultMsg:
 		m.thinking = false
 		m.refreshSuggestions()
-		
+
 	case tea.KeyMsg:
 		if m.thinking {
 			return nil
 		}
-		
+
 		switch msg.String() {
 		case "tab", "right":
 			if len(m.suggestions) > 0 {
-				m.applySelectedSuggestion()
+				m.advanceSuggestion(1)
+				return nil
+			}
+		case "shift+tab", "left":
+			if len(m.suggestions) > 0 {
+				m.advanceSuggestion(-1)
 				return nil
 			}
 		case "down", "ctrl+n":
+			m.clearSuggestionCycle()
 			m.navigateHistoryDown()
 			return nil
 		case "up", "ctrl+p":
+			m.clearSuggestionCycle()
 			m.navigateHistoryUp()
 			return nil
 		case "enter":
-			if len(m.suggestions) > 0 && strings.TrimSpace(m.textarea.Value()) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) {
+			if len(m.suggestions) > 0 && strings.TrimSpace(m.textarea.Value()) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) && !suggestionHasPlaceholder(m.suggestions[m.selectedSuggestion]) {
 				m.applySelectedSuggestion()
 				return nil
 			}
@@ -114,6 +123,7 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.Type {
 		case tea.KeyRunes, tea.KeyBackspace, tea.KeyDelete:
+			m.clearSuggestionCycle()
 			m.historyIndex = -1
 			m.savedInput = ""
 		}
@@ -173,6 +183,7 @@ func (m *ComposerModel) refreshSuggestions() {
 		return
 	}
 	m.suggestions = m.runtime.Completions(m.textarea.Value())
+	m.suggestionBase = nil
 	if len(m.suggestions) == 0 {
 		m.selectedSuggestion = 0
 		return
@@ -191,7 +202,26 @@ func (m *ComposerModel) applySelectedSuggestion() {
 	}
 	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
 	m.textarea.CursorEnd()
-	m.refreshSuggestions()
+}
+
+func (m *ComposerModel) advanceSuggestion(step int) {
+	if len(m.suggestions) == 0 {
+		return
+	}
+	if len(m.suggestionBase) == 0 {
+		m.suggestionBase = append([]string(nil), m.suggestions...)
+	}
+	m.suggestions = append([]string(nil), m.suggestionBase...)
+	current := strings.TrimSpace(m.textarea.Value())
+	selected := strings.TrimSpace(m.suggestions[m.selectedSuggestion])
+	if current == "" || current == selected {
+		m.selectedSuggestion = (m.selectedSuggestion + step + len(m.suggestions)) % len(m.suggestions)
+	}
+	m.applySelectedSuggestion()
+}
+
+func (m *ComposerModel) clearSuggestionCycle() {
+	m.suggestionBase = nil
 }
 
 func (m *ComposerModel) syncInputChrome() {
@@ -210,14 +240,19 @@ func (m ComposerModel) renderInputPrompt() string {
 }
 
 func (m ComposerModel) renderSuggestionsLine() string {
+	statusWidth := 22
+	status := lipgloss.NewStyle().Width(statusWidth).Render("")
 	if m.thinking {
-		return styles.InputHintStyle.Render("Esperando respuesta del agente...")
+		status = lipgloss.NewStyle().Width(statusWidth).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
 	}
+	var detail string
 	if len(m.suggestions) == 0 {
 		if m.runtime.InputMode() == app.InputModeShell {
-			return styles.InputHintStyle.Render("Shell directo activo. Enter ejecuta. /chat sale. Ctrl+T abre la paleta.")
+			detail = styles.InputHintStyle.Render("Shell directo activo. Enter ejecuta. /chat sale. Ctrl+T abre la paleta.")
+			return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
 		}
-		return styles.InputHintStyle.Render("Tab completa. /provider add abre el formulario. /models tiene autocompletado con modelos cacheados.")
+		detail = styles.InputHintStyle.Render("Tab rota y completa. /provider add abre el formulario. /models tiene autocompletado con modelos cacheados.")
+		return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
 	}
 	limit := min(3, len(m.suggestions))
 	items := make([]string, 0, limit)
@@ -228,11 +263,20 @@ func (m ComposerModel) renderSuggestionsLine() string {
 		}
 		items = append(items, styles.SuggestionStyle.Render(m.suggestions[i]))
 	}
-	return strings.Join(items, "   ")
+	detail = strings.Join(items, "   ")
+	return lipgloss.JoinHorizontal(lipgloss.Left, status, detail)
 }
 
 func (m *ComposerModel) SetThinking(thinking bool) {
 	m.thinking = thinking
+}
+
+func suggestionHasPlaceholder(value string) bool {
+	return strings.Contains(value, "<") && strings.Contains(value, ">")
+}
+
+func composerActivityLabel(agentName string) string {
+	return fmt.Sprintf("%s", agentActivityLabel(agentName))
 }
 
 func (m ComposerModel) Height() int {

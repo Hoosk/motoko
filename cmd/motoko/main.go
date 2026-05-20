@@ -18,7 +18,13 @@ func main() {
 		cancel()
 	}()
 
-	runtime := app.NewRuntime()
+	resume := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--resume" {
+			resume = true
+		}
+	}
+	runtime := app.NewRuntime(app.RuntimeOptions{Resume: resume})
 
 	mgr := newTachikomaManager(runtime)
 

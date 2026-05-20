@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
 )
@@ -47,8 +49,9 @@ type Entry struct {
 type ActionType string
 
 const (
-	ActionShell ActionType = "shell"
-	ActionAgent ActionType = "agent"
+	ActionShell   ActionType = "shell"
+	ActionAgent   ActionType = "agent"
+	ActionCompact ActionType = "compact"
 )
 
 type Action struct {
@@ -79,6 +82,14 @@ type Runtime struct {
 	semantic         *semantic.Index
 	currentAgentName string
 	availableAgents  []agent.AgentDef
+	currentSession   *session.Session
+	workspaceID      string
+	contextWindow    int
+	wasResumed       bool
+}
+
+type RuntimeOptions struct {
+	Resume bool
 }
 
 type AgentStreamEvent struct {
@@ -87,12 +98,18 @@ type AgentStreamEvent struct {
 	Content string
 }
 
-func NewRuntime() *Runtime {
+func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	toolsRegistry := tools.NewRegistry()
 	cfg, _ := config.Load()
 	if cfg == nil {
 		cfg = &config.AppConfig{}
 	}
+	runtimeOpts := RuntimeOptions{}
+	if len(opts) > 0 {
+		runtimeOpts = opts[0]
+	}
+	workspacePath, _ := os.Getwd()
+	workspaceID := session.WorkspaceIDFor(workspacePath)
 
 	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
 	if customAgents, err := agent.LoadAgentsFile(".agents"); err == nil && len(customAgents) > 0 {
@@ -107,6 +124,16 @@ func NewRuntime() *Runtime {
 		semantic:         semantic.NewIndex(),
 		currentAgentName: "plan",
 		availableAgents:  allAgents,
+		workspaceID:      workspaceID,
+	}
+	if runtimeOpts.Resume {
+		if last, err := session.Last(workspaceID); err == nil && last != nil {
+			r.currentSession = last
+			r.wasResumed = true
+		}
+	}
+	if r.currentSession == nil {
+		r.currentSession = session.New(workspaceID, workspacePath)
 	}
 	r.refreshAgent()
 	return r
@@ -201,8 +228,8 @@ func (r *Runtime) GetActiveProviderConfig() (config.ProviderConfig, bool) {
 	return r.config.Active()
 }
 
-// SetActiveModel updates the model field for the active provider and saves.
-func (r *Runtime) SetActiveModel(model string) error {
+// SetActiveModelInfo updates the model field for the active provider and saves.
+func (r *Runtime) SetActiveModelInfo(model provider.ModelInfo) error {
 	if r.config == nil {
 		return fmt.Errorf("no hay configuracion")
 	}
@@ -210,8 +237,9 @@ func (r *Runtime) SetActiveModel(model string) error {
 	if !ok {
 		return fmt.Errorf("no hay provider activo")
 	}
-	active.Model = model
-	active.Models = config.UniqueSortedKeep(active.Models, model)
+	active.Model = model.ID
+	active.Models = config.UniqueSortedKeep(active.Models, model.ID)
+	active.ContextWindow = model.ContextWindow
 	r.config.UpsertProvider(active)
 	if err := r.config.Save(); err != nil {
 		return err
@@ -240,11 +268,13 @@ func (r *Runtime) SetThinkingBudget(budget int) error {
 }
 
 // ThinkingBudgetLevels returns the ordered token-budget values for thinking modes.
-// Index: 0=off, 1=low, 2=medium, 3=high.
-var ThinkingBudgetLevels = []int{0, 1024, 4096, 16000}
-var ThinkingBudgetLabels = []string{"off", "low (1k)", "medium (4k)", "high (16k)"}
+// Index: 0=off, 1=low, 2=medium, 3=high, 4=xhigh.
+// Values match the official Gemini/OpenAI reasoning mapping.
+// xhigh (65536) maps to reasoning_effort="xhigh" on OpenAI o-series/gpt-5 models.
+var ThinkingBudgetLevels = []int{0, 1024, 8192, 24576, 65536}
+var ThinkingBudgetLabels = []string{"off", "low (1k)", "medium (8k)", "high (24k)", "xhigh (64k)"}
 
-func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]string, error) {
+func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]provider.ModelInfo, error) {
 	client, err := provider.NewClient(providerCfg)
 	if err != nil {
 		return nil, err
@@ -253,8 +283,70 @@ func (r *Runtime) ListModelsForProvider(ctx context.Context, providerCfg config.
 	if err != nil {
 		return nil, err
 	}
-	r.cacheProviderModels(providerCfg.Name, models)
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	r.cacheProviderModels(providerCfg.Name, ids)
 	return models, nil
+}
+
+func (r *Runtime) ContextWindow() int {
+	return r.contextWindow
+}
+
+func (r *Runtime) HistoryInputTokens() int {
+	if r.currentSession == nil {
+		return 0
+	}
+	return r.currentSession.LastInputTokens
+}
+
+func (r *Runtime) SessionTitle() string {
+	if r.currentSession == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.currentSession.Title)
+}
+
+func (r *Runtime) StartupEntries() []Entry {
+	if !r.wasResumed || r.currentSession == nil {
+		return nil
+	}
+	entries := []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Sesion resumida: %s", r.currentSession.Title)}}
+	entries = append(entries, r.CurrentSessionEntries()...)
+	return entries
+}
+
+func (r *Runtime) ListSessions() ([]*session.Session, error) {
+	return session.List(r.workspaceID)
+}
+
+func (r *Runtime) LoadSession(id string) error {
+	s, err := session.Load(r.workspaceID, id)
+	if err != nil {
+		return err
+	}
+	r.currentSession = s
+	return nil
+}
+
+func (r *Runtime) CurrentSessionEntries() []Entry {
+	if r.currentSession == nil || len(r.currentSession.Messages) == 0 {
+		return nil
+	}
+	entries := make([]Entry, 0, len(r.currentSession.Messages))
+	for _, msg := range r.currentSession.Messages {
+		switch msg.Role {
+		case "user":
+			entries = append(entries, Entry{Kind: EntryUser, Text: msg.Content})
+		case "assistant":
+			entries = append(entries, Entry{Kind: EntryAssistant, Text: msg.Content})
+		default:
+			entries = append(entries, Entry{Kind: EntrySystem, Text: msg.Content})
+		}
+	}
+	return entries
 }
 
 func (r *Runtime) Completions(input string) []string {
@@ -264,7 +356,7 @@ func (r *Runtime) Completions(input string) []string {
 		if r.inputMode == InputModeShell {
 			return []string{"ls", "pwd", "git status", "go build ./...", "/chat"}
 		}
-		return []string{"/help", "/provider add", "/models", "/tool read README.md", "!git status"}
+		return []string{"/help", "/provider add", "/models", "/sessions", "/tool read README.md", "!git status"}
 	}
 
 	if r.inputMode == InputModeShell && !strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "!") {
@@ -401,6 +493,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"Comandos disponibles:",
 			"/help     muestra esta ayuda",
 			"/clear    limpia la timeline",
+			"/compact  compacta manualmente la sesion activa",
 			"/mode     abre el selector de modo/agente",
 			"/plan     activa modo de solo lectura",
 			"/build    activa modo de trabajo",
@@ -411,6 +504,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/context  muestra contexto local y git",
 			"/provider gestiona providers configurados",
 			"/models   lista o selecciona modelos del provider activo",
+			"/sessions lista o cambia de sesion del workspace",
 			"/tools    muestra las tools registradas",
 			"/tool     ejecuta una tool real del runtime",
 			"/approve  ejecuta la accion pendiente",
@@ -418,7 +512,17 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"!<cmd>    ejecuta un comando shell explicito",
 		}, "\n")}}}
 	case "clear":
+		if r.currentSession != nil {
+			r.currentSession.Messages = nil
+			r.currentSession.LastInputTokens = 0
+			_ = r.currentSession.Save()
+		}
 		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reiniciada."}}}
+	case "compact":
+		return Response{
+			Entries: []Entry{{Kind: EntrySystem, Text: "Compactando sesion..."}},
+			Action:  &Action{Type: ActionCompact},
+		}
 	case "plan":
 		r.SetAgentMode("plan")
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: plan. Los comandos shell requieren aprobacion explicita."}}}
@@ -461,6 +565,8 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return r.handleProviderCommand(parts[1:])
 	case "models":
 		return r.handleModelsCommand(parts[1:])
+	case "sessions":
+		return Response{Signal: "open-sessions-popup"}
 	case "tools":
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.tools.Specs())}}}
 	case "tool":
@@ -518,7 +624,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", "clear", "mode", "plan", "build", "shell", "chat", "status", "debug", "context", "provider", "models", "tools", "tool", "approve", "deny"}
+	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "shell", "chat", "status", "debug", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {
@@ -679,6 +785,7 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 	model := strings.TrimSpace(strings.Join(args, " "))
 	active.Model = model
 	active.Models = config.UniqueSortedKeep(active.Models, model)
+	active.ContextWindow = 0
 	r.config.UpsertProvider(active)
 	if err := r.config.Save(); err != nil {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
@@ -714,18 +821,22 @@ func (r *Runtime) providerListText() string {
 func (r *Runtime) refreshAgent() {
 	if r.config == nil {
 		r.agent = nil
+		r.contextWindow = 0
 		return
 	}
 	active, ok := r.config.Active()
 	if !ok {
 		r.agent = nil
+		r.contextWindow = 0
 		return
 	}
 	client, err := provider.NewClient(active)
 	if err != nil {
 		r.agent = nil
+		r.contextWindow = 0
 		return
 	}
+	r.contextWindow = active.ContextWindow
 	r.agent = agent.New(client, r.tools)
 	r.agent.SetDebug(r.debug)
 	// Re-apply the current agent mode system prompt.
@@ -742,7 +853,16 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 		return agent.Result{}, fmt.Errorf("agente no configurado")
 	}
 	info = r.enrichContext(ctx, info, input)
-	return r.agent.Run(ctx, info, input)
+	priorHistory := []provider.Message(nil)
+	if r.currentSession != nil {
+		priorHistory = append(priorHistory, r.currentSession.Messages...)
+	}
+	result, err := r.agent.Run(ctx, info, input, priorHistory)
+	if err != nil {
+		return result, err
+	}
+	r.persistTurn(result)
+	return result, r.maybeAutoCompact(ctx, nil)
 }
 
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
@@ -750,12 +870,117 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 		return agent.Result{}, fmt.Errorf("agente no configurado")
 	}
 	info = r.enrichContext(ctx, info, input)
-	return r.agent.RunStream(ctx, info, input, func(event agent.StreamEvent) error {
+	priorHistory := []provider.Message(nil)
+	firstTurn := r.currentSession == nil || len(r.currentSession.Messages) == 0
+	if r.currentSession != nil {
+		priorHistory = append(priorHistory, r.currentSession.Messages...)
+	}
+	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
 			return nil
 		}
 		return onEvent(AgentStreamEvent{Kind: event.Kind, Title: event.Title, Content: event.Content})
 	})
+	if err != nil {
+		return result, err
+	}
+	r.persistTurn(result)
+	if firstTurn {
+		go r.generateTitle(context.Background(), input, result.Assistant)
+	}
+	if err := r.maybeAutoCompact(ctx, onEvent); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (r *Runtime) CompactSession(ctx context.Context) Response {
+	if err := r.doCompact(ctx); err != nil {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+	}
+	return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Sesion compactada."}}}
+}
+
+func (r *Runtime) persistTurn(result agent.Result) {
+	if r.currentSession == nil {
+		workspacePath, _ := os.Getwd()
+		r.currentSession = session.New(r.workspaceID, workspacePath)
+	}
+	r.currentSession.Messages = append([]provider.Message(nil), result.Messages...)
+	r.currentSession.LastInputTokens = result.Usage.InputTokens
+	_ = r.currentSession.Save()
+}
+
+func (r *Runtime) maybeAutoCompact(ctx context.Context, onEvent func(AgentStreamEvent) error) error {
+	if r.currentSession == nil || r.contextWindow <= 0 || r.currentSession.LastInputTokens <= 0 {
+		return nil
+	}
+	if float64(r.currentSession.LastInputTokens)/float64(r.contextWindow) < 0.80 {
+		return nil
+	}
+	if onEvent != nil {
+		_ = onEvent(AgentStreamEvent{Kind: "compacting", Content: "Compactando sesion..."})
+	}
+	err := r.doCompact(ctx)
+	if err == nil && onEvent != nil {
+		_ = onEvent(AgentStreamEvent{Kind: "status", Content: "Sesion compactada automaticamente."})
+	}
+	return err
+}
+
+func (r *Runtime) doCompact(ctx context.Context) error {
+	if r.currentSession == nil || len(r.currentSession.Messages) == 0 {
+		return nil
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		return fmt.Errorf("no hay provider activo")
+	}
+	client, err := provider.NewClient(active)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Complete(ctx,
+		"Resume la conversacion para continuarla despues. Devuelve un resumen concreto, con decisiones, estado actual y siguientes pasos.",
+		r.currentSession.Messages,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+	r.currentSession.CompactWith(resp.Message)
+	return r.currentSession.Save()
+}
+
+func (r *Runtime) generateTitle(ctx context.Context, userInput, assistantResponse string) {
+	if r.currentSession == nil {
+		return
+	}
+	if strings.TrimSpace(r.currentSession.Title) != "" && !strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "Nueva sesion") {
+		return
+	}
+	active, ok := r.config.Active()
+	if !ok {
+		return
+	}
+	client, err := provider.NewClient(active)
+	if err != nil {
+		return
+	}
+	resp, err := client.Complete(ctx,
+		"Genera un titulo corto de 4 a 8 palabras para esta sesion. Devuelve solo el titulo en el campo message.",
+		[]provider.Message{{Role: "user", Content: userInput}, {Role: "assistant", Content: assistantResponse}},
+		nil,
+	)
+	if err != nil {
+		return
+	}
+	title := strings.TrimSpace(resp.Message)
+	if title == "" {
+		return
+	}
+	r.currentSession.Title = title
+	_ = r.currentSession.Save()
 }
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
 	if r.semantic == nil {

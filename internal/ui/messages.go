@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/Hoosk/motoko/internal/app"
+import (
+	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/session"
+)
 
 // SubmitPromptMsg is emitted by the Composer when the user presses Enter
 // to submit a valid prompt or command.
@@ -41,4 +44,18 @@ type AgentChangedMsg struct {
 type ModelChangedMsg struct {
 	Provider string
 	Model    string
+}
+
+type SessionsMsg struct {
+	Sessions []*session.Session
+	Err      error
+}
+
+type SessionLoadedMsg struct {
+	Session *session.Session
+	Err     error
+}
+
+type CompactResultMsg struct {
+	Response app.Response
 }

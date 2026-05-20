@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -17,6 +18,8 @@ type FooterModel struct {
 	width         int
 	thinking      bool
 	thinkingFrame int
+	contextTokens int
+	contextWindow int
 }
 
 func NewFooterModel(runtime *app.Runtime) FooterModel {
@@ -76,6 +79,11 @@ func (m *FooterModel) SetThinking(thinking bool) {
 	}
 }
 
+func (m *FooterModel) SetContextStats(tokens, window int) {
+	m.contextTokens = tokens
+	m.contextWindow = window
+}
+
 func (m FooterModel) View() string {
 	if m.width == 0 {
 		return ""
@@ -90,6 +98,14 @@ func (m FooterModel) View() string {
 	}
 	parts = append(parts, agent)
 	parts = append(parts, styles.SystemStyle.Render(m.runtime.ProviderSummary()))
+	if m.contextWindow > 0 {
+		parts = append(parts, styles.SystemStyle.Render(fmt.Sprintf("%dk/%dk", m.contextTokens/1000, m.contextWindow/1000)))
+	} else if m.contextTokens > 0 {
+		parts = append(parts, styles.SystemStyle.Render(fmt.Sprintf("%dk", m.contextTokens/1000)))
+	}
+	if title := strings.TrimSpace(m.runtime.SessionTitle()); title != "" {
+		parts = append(parts, styles.SystemStyle.Render("» "+title))
+	}
 
 	if m.thinking {
 		spinner := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(thinkingFrames[m.thinkingFrame])
@@ -109,6 +125,9 @@ func (m FooterModel) GetSysInfo() system.ContextInfo {
 }
 
 func agentActivityLabel(agentName string) string {
+	if strings.EqualFold(agentName, "compact") {
+		return "compacting"
+	}
 	switch agentName {
 	case "build":
 		return "building"

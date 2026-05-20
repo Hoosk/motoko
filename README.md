@@ -48,7 +48,7 @@ Run the application from your project root:
 ## Project Documentation
 
 - **DESIGN.md**: Standards for design and interface consistency.
-- **AGENT.md**: AI behavior protocols and system instructions.
+- **AGENTS.md**: AI behavior protocols and system instructions.
 - **internal/**: Core implementation details of the Tachikoma engine and TUI.
 
 ---

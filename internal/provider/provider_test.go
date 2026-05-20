@@ -1,10 +1,10 @@
 package provider
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 func TestNewClientUsesNormalizedProviderKinds(t *testing.T) {
@@ -32,10 +32,18 @@ func TestParseStructuredResponseExtractsJSONFromSurroundingText(t *testing.T) {
 }
 
 func TestMessageSerializationHelpers(t *testing.T) {
-	openAI := toOpenAIMessages("sys", []Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})
-	if len(openAI) != 3 || openAI[0]["role"] != "system" {
-		t.Fatalf("unexpected openai messages %#v", openAI)
+	// OpenAI Responses API: toResponsesInputItems maps messages to input item params.
+	items := toResponsesInputItems([]Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+	if items[0].OfMessage == nil || items[0].OfMessage.Role != responses.EasyInputMessageRoleUser {
+		t.Fatalf("expected user role on first item, got %#v", items[0])
+	}
+	if items[1].OfMessage == nil || items[1].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
+		t.Fatalf("expected assistant role on second item, got %#v", items[1])
+	}
+
 	anthropic := toAnthropicMessages([]Message{{Role: "system", Content: "ignored"}, {Role: "user", Content: "hola"}})
 	if len(anthropic) != 1 || anthropic[0]["role"] != "user" {
 		t.Fatalf("unexpected anthropic messages %#v", anthropic)
@@ -43,16 +51,6 @@ func TestMessageSerializationHelpers(t *testing.T) {
 	gemini := toGeminiMessages([]Message{{Role: "assistant", Content: "hola"}})
 	if len(gemini) != 1 || gemini[0]["role"] != "model" {
 		t.Fatalf("unexpected gemini messages %#v", gemini)
-	}
-}
-
-func TestCollectModelsAndUniqueSorted(t *testing.T) {
-	models := collectModels([]struct{ ID string }{{ID: " gpt-4.1 "}, {ID: "gpt-4.1"}, {ID: "o4-mini"}}, func(item struct{ ID string }) string { return item.ID })
-	if !reflect.DeepEqual(models, []string{"gpt-4.1", "o4-mini"}) {
-		t.Fatalf("unexpected collected models %#v", models)
-	}
-	if got := uniqueSorted([]string{"b", "a", "a"}); !reflect.DeepEqual(got, []string{"a", "b"}) {
-		t.Fatalf("unexpected uniqueSorted result %#v", got)
 	}
 }
 

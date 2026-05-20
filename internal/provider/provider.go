@@ -6,9 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
+	"sort"
 	"strings"
 	"time"
+
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/Hoosk/motoko/internal/config"
 )
@@ -41,20 +47,25 @@ type Message struct {
 	Content string
 }
 
+type ModelInfo struct {
+	ID            string
+	ContextWindow int
+}
+
 type Client interface {
 	Configured() bool
 	Complete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition) (Response, error)
 	StreamComplete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition, onDelta func(string) error) (Response, error)
 	Summary() string
-	ListModels(ctx context.Context) ([]string, error)
+	ListModels(ctx context.Context) ([]ModelInfo, error)
 }
 
 type clientFactory func(config.ProviderConfig) Client
 
 var clientFactories = map[config.ProviderKind]clientFactory{
 	config.ProviderKindOpenAICompatible: newOpenAIClient,
-	config.ProviderKindAnthropic:       newAnthropicClient,
-	config.ProviderKindGemini:          newGeminiClient,
+	config.ProviderKindAnthropic:        newAnthropicClient,
+	config.ProviderKindGemini:           newGeminiClient,
 }
 
 func NewClient(cfg config.ProviderConfig) (Client, error) {
@@ -101,6 +112,7 @@ func (c baseClient) Summary() string {
 type openAIClient struct {
 	baseClient
 	thinkingBudget int
+	sdkClient      openai.Client
 }
 type anthropicClient struct {
 	baseClient
@@ -112,9 +124,16 @@ type geminiClient struct {
 }
 
 func newOpenAIClient(cfg config.ProviderConfig) Client {
+	base := newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)
+	sdkClient := openai.NewClient(
+		option.WithAPIKey(cfg.APIKey),
+		option.WithBaseURL(cfg.BaseURL),
+		option.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
+	)
 	return &openAIClient{
-		baseClient:     newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		baseClient:     base,
 		thinkingBudget: cfg.ThinkingBudget,
+		sdkClient:      sdkClient,
 	}
 }
 
@@ -137,46 +156,34 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
 
-	reqBody := map[string]any{
-		"model":       c.model,
-		"temperature": 0.2,
-		"messages":    toOpenAIMessages(systemPrompt, messages),
-		"response_format": map[string]any{
-			"type": "json_object",
-		},
-	}
-
-	var decoded openAIResponse
-	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", reqBody, map[string]string{
-		"Authorization": "Bearer " + c.apiKey,
-	}, &decoded); err != nil {
+	params := buildResponseParams(c.model, systemPrompt, messages, c.thinkingBudget)
+	resp, err := c.sdkClient.Responses.New(ctx, params)
+	if err != nil {
 		return Response{}, err
 	}
-	if len(decoded.Choices) == 0 {
-		return Response{}, fmt.Errorf("respuesta vacia del provider")
-	}
 
-	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
+	content := strings.TrimSpace(resp.OutputText())
+	usage := Usage{
+		InputTokens:  int(resp.Usage.InputTokens),
+		OutputTokens: int(resp.Usage.OutputTokens),
+		TotalTokens:  int(resp.Usage.TotalTokens),
+	}
 	parsed := parseStructuredResponse(content)
 	if parsed.ToolCall != nil || parsed.Message != "" {
-		parsed.Usage = Usage{
-			InputTokens:  decoded.Usage.PromptTokens,
-			OutputTokens: decoded.Usage.CompletionTokens,
-			TotalTokens:  decoded.Usage.TotalTokens,
-		}
+		parsed.Usage = usage
 		return parsed, nil
 	}
-	return Response{Message: content, Usage: Usage{InputTokens: decoded.Usage.PromptTokens, OutputTokens: decoded.Usage.CompletionTokens, TotalTokens: decoded.Usage.TotalTokens}}, nil
+	return Response{Message: content, Usage: usage}, nil
 }
 
-func (c *openAIClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if !c.listReady() {
 		return nil, fmt.Errorf("provider no configurado")
 	}
-
 	var decoded struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
 		} `json:"data"`
 	}
 	if err := getJSON(ctx, c.httpClient, c.baseURL+"/models", map[string]string{
@@ -184,11 +191,60 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]string, error) {
 	}, &decoded); err != nil {
 		return nil, err
 	}
-	return collectModels(decoded.Data, func(item struct {
-		ID string "json:\"id\""
-	}) string {
-		return item.ID
-	}), nil
+	result := make([]ModelInfo, 0, len(decoded.Data))
+	seen := make(map[string]struct{})
+	for _, item := range decoded.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, ModelInfo{ID: id, ContextWindow: item.ContextLength})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+// buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
+// The system prompt goes into Instructions; messages become the Input item list.
+func buildResponseParams(model, systemPrompt string, messages []Message, thinkingBudget int) responses.ResponseNewParams {
+	p := responses.ResponseNewParams{
+		Model:        model,
+		Instructions: param.NewOpt(systemPrompt),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: toResponsesInputItems(messages),
+		},
+		Text: responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
+			},
+		},
+	}
+	if isOpenAIReasoningModel(model) {
+		// Reasoning models (o-series, gpt-5.x) don't support temperature.
+		if thinkingBudget > 0 {
+			p.Reasoning = shared.ReasoningParam{
+				Effort: shared.ReasoningEffort(budgetToReasoningEffort(thinkingBudget)),
+			}
+		}
+	} else {
+		p.Temperature = param.NewOpt(0.2)
+	}
+	return p
+}
+
+// toResponsesInputItems converts []Message to a ResponseInputParam (slice of
+// ResponseInputItemUnionParam) for use in the Responses API.
+func toResponsesInputItems(messages []Message) responses.ResponseInputParam {
+	items := make(responses.ResponseInputParam, 0, len(messages))
+	for _, msg := range messages {
+		role := responses.EasyInputMessageRole(msg.Role)
+		items = append(items, responses.ResponseInputItemParamOfMessage(msg.Content, role))
+	}
+	return items
 }
 
 func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition) (Response, error) {
@@ -207,9 +263,16 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 		if c.thinkingBudget >= maxTokens {
 			reqBody["max_tokens"] = c.thinkingBudget + 1024
 		}
-		reqBody["thinking"] = map[string]any{
-			"type":          "enabled",
-			"budget_tokens": c.thinkingBudget,
+		if isAnthropicAdaptiveThinkingModel(c.model) {
+			reqBody["thinking"] = map[string]any{
+				"type":          "adaptive",
+				"budget_tokens": c.thinkingBudget,
+			}
+		} else {
+			reqBody["thinking"] = map[string]any{
+				"type":          "enabled",
+				"budget_tokens": c.thinkingBudget,
+			}
 		}
 	}
 
@@ -234,14 +297,15 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	return Response{Message: strings.TrimSpace(content), Usage: Usage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens, TotalTokens: decoded.Usage.InputTokens + decoded.Usage.OutputTokens}}, nil
 }
 
-func (c *anthropicClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *anthropicClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if !c.listReady() {
 		return nil, fmt.Errorf("provider no configurado")
 	}
 
 	var decoded struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID             string `json:"id"`
+			MaxInputTokens int    `json:"max_input_tokens"`
 		} `json:"data"`
 	}
 	if err := getJSON(ctx, c.httpClient, c.baseURL+"/v1/models", map[string]string{
@@ -250,11 +314,16 @@ func (c *anthropicClient) ListModels(ctx context.Context) ([]string, error) {
 	}, &decoded); err != nil {
 		return nil, err
 	}
-	return collectModels(decoded.Data, func(item struct {
-		ID string "json:\"id\""
-	}) string {
-		return item.ID
-	}), nil
+	result := make([]ModelInfo, 0, len(decoded.Data))
+	for _, item := range decoded.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		result = append(result, ModelInfo{ID: id, ContextWindow: item.MaxInputTokens})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
 }
 
 func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition) (Response, error) {
@@ -271,6 +340,18 @@ func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messag
 			"responseMimeType": "application/json",
 			"temperature":      0.2,
 		},
+	}
+	if c.thinkingBudget > 0 {
+		genConfig := body["generationConfig"].(map[string]any)
+		if isGemini3Model(c.model) {
+			genConfig["thinkingConfig"] = map[string]any{
+				"thinkingLevel": budgetToGeminiThinkingLevel(c.thinkingBudget),
+			}
+		} else {
+			genConfig["thinkingConfig"] = map[string]any{
+				"thinkingBudget": c.thinkingBudget,
+			}
+		}
 	}
 
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
@@ -292,7 +373,7 @@ func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messag
 	return Response{Message: strings.TrimSpace(content), Usage: Usage{InputTokens: decoded.UsageMetadata.PromptTokenCount, OutputTokens: decoded.UsageMetadata.CandidatesTokenCount, TotalTokens: decoded.UsageMetadata.TotalTokenCount}}, nil
 }
 
-func (c *geminiClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *geminiClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if !c.listReady() {
 		return nil, fmt.Errorf("provider no configurado")
 	}
@@ -300,21 +381,23 @@ func (c *geminiClient) ListModels(ctx context.Context) ([]string, error) {
 	url := fmt.Sprintf("%s/models?key=%s", c.baseURL, c.apiKey)
 	var decoded struct {
 		Models []struct {
-			Name string `json:"name"`
+			Name            string `json:"name"`
+			InputTokenLimit int    `json:"inputTokenLimit"`
 		} `json:"models"`
 	}
 	if err := getJSON(ctx, c.httpClient, url, nil, &decoded); err != nil {
 		return nil, err
 	}
 
-	models := make([]string, 0, len(decoded.Models))
+	models := make([]ModelInfo, 0, len(decoded.Models))
 	for _, model := range decoded.Models {
 		name := strings.TrimPrefix(model.Name, "models/")
 		if strings.Contains(name, "gemini") {
-			models = append(models, name)
+			models = append(models, ModelInfo{ID: name, ContextWindow: model.InputTokenLimit})
 		}
 	}
-	return uniqueSorted(models), nil
+	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+	return models, nil
 }
 
 func postJSON(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, out any) error {
@@ -371,39 +454,6 @@ func getJSON(ctx context.Context, client *http.Client, url string, headers map[s
 	return nil
 }
 
-func collectModels[T any](items []T, getter func(T) string) []string {
-	models := make([]string, 0, len(items))
-	for _, item := range items {
-		name := strings.TrimSpace(getter(item))
-		if name != "" {
-			models = append(models, name)
-		}
-	}
-	return uniqueSorted(models)
-}
-
-func uniqueSorted(items []string) []string {
-	seen := make(map[string]struct{})
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		result = append(result, item)
-	}
-	slices.Sort(result)
-	return result
-}
-
-func toOpenAIMessages(systemPrompt string, messages []Message) []map[string]string {
-	result := []map[string]string{{"role": "system", "content": systemPrompt}}
-	for _, message := range messages {
-		result = append(result, map[string]string{"role": message.Role, "content": message.Content})
-	}
-	return result
-}
-
 func toAnthropicMessages(messages []Message) []map[string]string {
 	result := make([]map[string]string, 0, len(messages))
 	for _, message := range messages {
@@ -429,19 +479,6 @@ func toGeminiMessages(messages []Message) []map[string]any {
 		})
 	}
 	return result
-}
-
-type openAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
 }
 
 type anthropicResponse struct {
