@@ -21,15 +21,13 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
 
-	_ = tools
-
 	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
 	// We fall back to Chat Completions if we detect Gemini in the URL.
 	if strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, c.thinkingBudget)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
 	defer stream.Close()
 
@@ -64,47 +62,58 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
 	payload := map[string]interface{}{
 		"model": c.model,
-		"messages": append([]map[string]string{
+		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 		"stream":      true,
 	}
+	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
+		payload["tools"] = toolDefs
+		payload["tool_choice"] = "auto"
+		payload["parallel_tool_calls"] = false
+	}
 
 	var raw strings.Builder
+	toolCalls := map[int]*chatCompletionToolCall{}
 	usage := Usage{}
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, map[string]string{
 		"Authorization": "Bearer " + c.apiKey,
 	}, func(data string) error {
 		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-			} `json:"choices"`
-			Usage *Usage `json:"usage"`
+			Choices []chatCompletionChoice `json:"choices"`
+			Usage   *chatCompletionUsage   `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
 		}
 		if len(chunk.Choices) > 0 {
-			content := chunk.Choices[0].Delta.Content
+			delta := chunk.Choices[0].Delta
+			content := delta.Content
 			if content != "" {
 				raw.WriteString(content)
 				if onDelta != nil {
 					return onDelta(content)
 				}
 			}
+			mergeChatToolCallDeltas(toolCalls, delta.ToolCalls)
 		}
 		if chunk.Usage != nil {
-			usage = *chunk.Usage
+			usage = chunk.Usage.providerUsage()
 		}
 		return nil
 	})
 	if err != nil {
 		return Response{}, err
 	}
-	return responseFromText(raw.String(), usage), nil
+	return responseFromChatCompletion(chatCompletionResponse{
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Usage: chatCompletionUsage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+		},
+	}), nil
 }
 
 func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
@@ -194,7 +203,16 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 }
 
 func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
-	return c.compatibleClient().StreamComplete(ctx, systemPrompt, messages, tools, onDelta)
+	resp, err := c.Complete(ctx, systemPrompt, messages, tools)
+	if err != nil {
+		return Response{}, err
+	}
+	if onDelta != nil && strings.TrimSpace(resp.FinalText) != "" {
+		if err := onDelta(resp.FinalText); err != nil {
+			return Response{}, err
+		}
+	}
+	return resp, nil
 }
 
 func postJSONStream(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, onData func(string) error) error {

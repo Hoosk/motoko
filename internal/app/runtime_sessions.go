@@ -31,11 +31,19 @@ func (r *Runtime) CurrentSessionEntries() []Entry {
 	}
 	entries := make([]Entry, 0, len(r.currentSession.History))
 	for _, msg := range r.currentSession.History {
+		if _, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
+			continue
+		}
 		switch msg.Role {
 		case "user":
 			entries = append(entries, Entry{Kind: EntryUser, Text: msg.Content})
 		case "assistant":
 			entries = append(entries, Entry{Kind: EntryAssistant, Text: msg.Content})
+		case "tool":
+			_, output := provider.ParseToolResultContent(msg.Content)
+			if strings.TrimSpace(output) != "" {
+				entries = append(entries, Entry{Kind: EntrySystem, Text: output})
+			}
 		default:
 			entries = append(entries, Entry{Kind: EntrySystem, Text: msg.Content})
 		}

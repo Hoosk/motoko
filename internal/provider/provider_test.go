@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strings"
@@ -115,7 +116,7 @@ func TestNewBaseClientNormalizesFieldsAndStatus(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", []ConversationItem{UserText("hola")}, 8192)
+	params := buildResponseParams("gpt-4.1-mini", "system", []ConversationItem{UserText("hola")}, ToolSet{}, 8192)
 	if params.Temperature.Value != 0.2 {
 		t.Fatalf("expected temperature for non-reasoning model, got %#v", params.Temperature)
 	}
@@ -131,7 +132,7 @@ func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-5.4", "system", []ConversationItem{AssistantText("hola")}, 24576)
+	params := buildResponseParams("gpt-5.4", "system", []ConversationItem{AssistantText("hola")}, ToolSet{}, 24576)
 	if params.Reasoning.Effort != "high" {
 		t.Fatalf("expected high reasoning effort, got %#v", params.Reasoning)
 	}
@@ -140,6 +141,19 @@ func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) 
 	}
 	if params.Input.OfInputItemList[0].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
 		t.Fatalf("expected assistant role, got %#v", params.Input.OfInputItemList[0].OfMessage)
+	}
+}
+
+func TestBuildResponseParamsIncludesTools(t *testing.T) {
+	params := buildResponseParams("gpt-4.1-mini", "system", nil, ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0)
+	if len(params.Tools) != 1 {
+		t.Fatalf("expected one tool, got %#v", params.Tools)
+	}
+	if params.MaxToolCalls.Value != 1 || params.ParallelToolCalls.Value {
+		t.Fatalf("unexpected tool execution params %#v %#v", params.MaxToolCalls, params.ParallelToolCalls)
+	}
+	if params.ToolChoice.OfToolChoiceMode.Value != responses.ToolChoiceOptionsAuto {
+		t.Fatalf("expected auto tool choice, got %#v", params.ToolChoice)
 	}
 }
 
@@ -161,6 +175,37 @@ func TestFormatToolResultContentIncludesMetadata(t *testing.T) {
 	}
 	if !strings.Contains(content, "tool_output:\nok") {
 		t.Fatalf("expected tool output in %q", content)
+	}
+}
+
+func TestParseToolResultContentRoundTripsMetadata(t *testing.T) {
+	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
+	parsedCall, output := parseToolResultContent(formatToolResultContent(call, "ok"))
+	if parsedCall.Name != call.Name || parsedCall.Input != call.Input || parsedCall.CallID != call.CallID {
+		t.Fatalf("unexpected parsed tool call %#v", parsedCall)
+	}
+	if string(parsedCall.Arguments) != string(call.Arguments) {
+		t.Fatalf("unexpected parsed arguments %s", string(parsedCall.Arguments))
+	}
+	if output != "ok" {
+		t.Fatalf("unexpected parsed output %q", output)
+	}
+}
+
+func TestAssistantToolCallContentRoundTrips(t *testing.T) {
+	call := ToolInvocation{Kind: InvokeCustomTool, Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123", Raw: []byte(`{"id":"call_123","type":"function","function":{"name":"read","arguments":"{\"input\":\"README.md\"}"},"thought_signature":"sig"}`)}
+	parsed, ok := parseAssistantToolCallContent(formatAssistantToolCallContent(call))
+	if !ok {
+		t.Fatal("expected assistant tool call metadata")
+	}
+	if parsed.Name != call.Name || parsed.Input != call.Input || parsed.CallID != call.CallID {
+		t.Fatalf("unexpected parsed call %#v", parsed)
+	}
+	if string(parsed.Arguments) != string(call.Arguments) {
+		t.Fatalf("unexpected parsed arguments %s", string(parsed.Arguments))
+	}
+	if string(parsed.Raw) != string(call.Raw) {
+		t.Fatalf("unexpected parsed raw payload %s", string(parsed.Raw))
 	}
 }
 
@@ -230,8 +275,64 @@ func TestResponsesInputItemsNormalizeUnknownRoleToUser(t *testing.T) {
 	}
 }
 
+func TestResponsesInputItemsSerializeToolResultsAsFunctionOutputs(t *testing.T) {
+	item := ToolResultForInvocation(ToolInvocation{Name: "read", CallID: "call_123"}, "contenido")
+	items := toResponsesInputItems([]ConversationItem{item})
+	if len(items) != 1 {
+		t.Fatalf("expected one input item, got %#v", items)
+	}
+	encoded, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"type":"function_call_output"`) || !strings.Contains(text, `"call_id":"call_123"`) || !strings.Contains(text, `"output":"contenido"`) {
+		t.Fatalf("unexpected function call output payload %s", text)
+	}
+}
+
+func TestResponsesInputItemsSerializeAssistantToolCalls(t *testing.T) {
+	items := toResponsesInputItems(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789"}}))
+	if len(items) != 1 {
+		t.Fatalf("expected one input item, got %#v", items)
+	}
+	encoded, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"type":"function_call"`) || !strings.Contains(text, `"call_id":"call_789"`) || !strings.Contains(text, `"name":"bash"`) {
+		t.Fatalf("unexpected function call payload %s", text)
+	}
+}
+
+func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
+	resp := responseFromChatCompletion(chatCompletionResponse{
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: "hola"}}},
+		Usage:   chatCompletionUsage{PromptTokens: 11, CompletionTokens: 7, TotalTokens: 18},
+	})
+	if resp.Usage.InputTokens != 11 || resp.Usage.OutputTokens != 7 || resp.Usage.TotalTokens != 18 {
+		t.Fatalf("unexpected chat completion usage %#v", resp.Usage)
+	}
+}
+
+func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
+	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
+	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
+	if len(messages) != 1 {
+		t.Fatalf("expected one chat message, got %#v", messages)
+	}
+	toolCalls, ok := messages[0]["tool_calls"].([]map[string]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("expected raw tool call payload, got %#v", messages[0])
+	}
+	if toolCalls[0]["thought_signature"] != "sig" {
+		t.Fatalf("expected raw thought signature preserved, got %#v", toolCalls[0])
+	}
+}
+
 func TestBuildResponseParamsLeavesReasoningEmptyWithoutBudget(t *testing.T) {
-	params := buildResponseParams("o4-mini", "system", nil, 0)
+	params := buildResponseParams("o4-mini", "system", nil, ToolSet{}, 0)
 	if params.Reasoning.Effort != "" {
 		t.Fatalf("expected empty reasoning effort without budget, got %#v", params.Reasoning)
 	}

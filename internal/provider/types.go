@@ -44,6 +44,7 @@ type ToolInvocation struct {
 	Input     string
 	Arguments json.RawMessage
 	CallID    string
+	Raw       json.RawMessage
 }
 
 type Response struct {

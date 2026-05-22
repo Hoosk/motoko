@@ -22,6 +22,7 @@ func responseFromOpenAI(resp *responses.Response) Response {
 	}
 	result.PendingCalls = pendingCallsFromOpenAI(resp.Output)
 	if len(result.PendingCalls) > 0 {
+		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	if len(result.OutputItems) == 0 && result.FinalText != "" {
@@ -91,6 +92,7 @@ func openAIFunctionCall(call responses.ResponseFunctionToolCall) ToolInvocation 
 		Kind:   InvokeCustomTool,
 		Name:   strings.TrimSpace(call.Name),
 		CallID: strings.TrimSpace(call.CallID),
+		Raw:    json.RawMessage(call.RawJSON()),
 	}
 	if arguments == "" {
 		return invocation

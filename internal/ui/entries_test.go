@@ -93,3 +93,12 @@ func TestEstimateTextareaHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestNewModelInitializesFooterContextStatsFromRuntime(t *testing.T) {
+	r := app.NewRuntime()
+
+	m := NewModel(r, func() {}, nil)
+	if m.footer.contextTokens != r.HistoryInputTokens() || m.footer.contextWindow != r.ContextWindow() {
+		t.Fatalf("unexpected footer context stats tokens=%d window=%d", m.footer.contextTokens, m.footer.contextWindow)
+	}
+}

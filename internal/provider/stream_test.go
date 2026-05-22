@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+func TestMergeChatToolCallDeltasBuildsPendingCall(t *testing.T) {
+	acc := map[int]*chatCompletionToolCall{}
+	mergeChatToolCallDeltas(acc, []chatCompletionToolCallDelta{{Index: 0, ID: "call_1", Type: "function", Function: chatCompletionToolFunction{Name: "bash", Arguments: `{"input":"ls`}}})
+	mergeChatToolCallDeltas(acc, []chatCompletionToolCallDelta{{Index: 0, Function: chatCompletionToolFunction{Arguments: ` -F"}`}}})
+	resp := responseFromChatCompletion(chatCompletionResponse{Choices: []chatCompletionChoice{{Message: chatCompletionMessage{ToolCalls: sortedChatToolCalls(acc)}}}})
+	if len(resp.PendingCalls) != 1 || resp.PendingCalls[0].Name != "bash" || resp.PendingCalls[0].Input != "ls -F" {
+		t.Fatalf("unexpected streamed tool response %#v", resp)
+	}
+	if len(resp.OutputItems) != 1 {
+		t.Fatalf("expected assistant tool call item preserved, got %#v", resp.OutputItems)
+	}
+}
+
 func TestPostJSONStreamParsesSSEPayloads(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		body := "data: {\"message\":\"ho\"}\n\ndata: {\"message\":\"la\"}\n\ndata: [DONE]\n\n"

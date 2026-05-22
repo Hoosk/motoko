@@ -42,15 +42,13 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
 
-	_ = tools
-
 	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
 	// We fall back to Chat Completions if we detect Gemini in the URL.
 	if strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
 		return c.completeChat(ctx, systemPrompt, messages, tools)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, c.thinkingBudget)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	resp, err := c.sdkClient.Responses.New(ctx, params)
 	if err != nil {
 		return Response{}, err
@@ -59,22 +57,19 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 }
 
 func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
-	// Simple chat completion fallback
-	var decoded struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage Usage `json:"usage"`
-	}
+	var decoded chatCompletionResponse
 
 	payload := map[string]interface{}{
 		"model": c.model,
-		"messages": append([]map[string]string{
+		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
+	}
+	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
+		payload["tools"] = toolDefs
+		payload["tool_choice"] = "auto"
+		payload["parallel_tool_calls"] = false
 	}
 
 	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, map[string]string{
@@ -86,24 +81,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	if len(decoded.Choices) == 0 {
 		return Response{}, fmt.Errorf("no hay respuesta del modelo")
 	}
-
-	text := decoded.Choices[0].Message.Content
-	return Response{
-		FinalText:   text,
-		OutputItems: []ConversationItem{AssistantText(text)},
-		Usage:       decoded.Usage,
-	}, nil
-}
-
-func toChatMessages(messages []ConversationItem) []map[string]string {
-	res := make([]map[string]string, 0, len(messages))
-	for _, msg := range messages {
-		res = append(res, map[string]string{
-			"role":    normalizeConversationRole(msg.Role),
-			"content": msg.Content,
-		})
-	}
-	return res
+	return responseFromChatCompletion(decoded), nil
 }
 
 func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
@@ -140,7 +118,7 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 
 // buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
 // The system prompt goes into Instructions; messages become the Input item list.
-func buildResponseParams(model, systemPrompt string, messages []ConversationItem, thinkingBudget int) responses.ResponseNewParams {
+func buildResponseParams(model, systemPrompt string, messages []ConversationItem, tools ToolSet, thinkingBudget int) responses.ResponseNewParams {
 	p := responses.ResponseNewParams{
 		Model:        model,
 		Instructions: param.NewOpt(systemPrompt),
@@ -153,6 +131,12 @@ func buildResponseParams(model, systemPrompt string, messages []ConversationItem
 			},
 		},
 	}
+	if toolDefs := responseTools(tools); len(toolDefs) > 0 {
+		p.Tools = toolDefs
+		p.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto)}
+		p.MaxToolCalls = param.NewOpt(int64(1))
+		p.ParallelToolCalls = param.NewOpt(false)
+	}
 	if isOpenAIReasoningModel(model) {
 		// Reasoning models (o-series, gpt-5.x) don't support temperature.
 		if thinkingBudget > 0 {
@@ -164,14 +148,4 @@ func buildResponseParams(model, systemPrompt string, messages []ConversationItem
 		p.Temperature = param.NewOpt(0.2)
 	}
 	return p
-}
-
-// toResponsesInputItems converts []ConversationItem to input item params for the Responses API.
-func toResponsesInputItems(messages []ConversationItem) responses.ResponseInputParam {
-	items := make(responses.ResponseInputParam, 0, len(messages))
-	for _, msg := range messages {
-		role := responses.EasyInputMessageRole(normalizeConversationRole(msg.Role))
-		items = append(items, responses.ResponseInputItemParamOfMessage(msg.Content, role))
-	}
-	return items
 }

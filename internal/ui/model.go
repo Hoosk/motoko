@@ -83,10 +83,12 @@ func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context)
 	if tachikomaCtx == nil {
 		tachikomaCtx = context.Background()
 	}
+	footer := NewFooterModel(runtime)
+	footer.SetContextStats(runtime.HistoryInputTokens(), runtime.ContextWindow())
 	return Model{
 		timeline:     NewTimelineModel(),
 		composer:     NewComposerModel(runtime),
-		footer:       NewFooterModel(runtime),
+		footer:       footer,
 		runtime:      runtime,
 		cancel:       cancel,
 		tachikomaCtx: tachikomaCtx,
