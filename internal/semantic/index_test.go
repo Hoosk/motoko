@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildSnapshotExtractsGoSymbols(t *testing.T) {
@@ -102,6 +103,83 @@ func TestBuildSnapshotSkipsGitIgnoredFiles(t *testing.T) {
 	}
 	if len(snapshot.Files) != 1 || snapshot.Files[0].Path != "internal/app/runtime.go" {
 		t.Fatalf("expected ignored files skipped, got %#v", snapshot.Files)
+	}
+}
+
+func TestBuildSnapshotExtractsGoImportsAndExports(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal", "app")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("package app\n\nimport \"fmt\"\n\ntype Runtime struct{}\n\nfunc NewRuntime() *Runtime { fmt.Println(\"ok\"); return &Runtime{} }\n")
+	if err := os.WriteFile(filepath.Join(path, "runtime.go"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := BuildSnapshot(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Files) != 1 {
+		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Files))
+	}
+	file := snapshot.Files[0]
+	if len(file.Imports) != 1 || file.Imports[0] != "fmt" {
+		t.Fatalf("expected fmt import, got %#v", file.Imports)
+	}
+	if len(file.Exports) == 0 || file.Exports[0] != "Runtime" {
+		t.Fatalf("expected exported Runtime symbol, got %#v", file.Exports)
+	}
+}
+
+func TestRelevantFilesFallsBackToChangedFilesWithoutPromptMatches(t *testing.T) {
+	snapshot := Snapshot{Files: []FileSummary{
+		{Path: "internal/ui/model.go", Language: "go", Symbols: []Symbol{{Name: "Model", Kind: "type"}}},
+		{Path: "internal/app/runtime.go", Language: "go", Changed: true, Symbols: []Symbol{{Name: "RunAgent", Kind: "func"}}},
+	}}
+
+	relevant := snapshot.RelevantFiles("zzqv", 1)
+	if len(relevant) != 1 {
+		t.Fatalf("expected 1 relevant file, got %#v", relevant)
+	}
+	if relevant[0].Path != "internal/app/runtime.go" {
+		t.Fatalf("expected changed runtime fallback first, got %#v", relevant)
+	}
+}
+
+func TestSnapshotSummaryIncludesDirectoriesLanguagesAndChangedPaths(t *testing.T) {
+	snapshot := Snapshot{
+		Directories:    []string{"internal/app", "internal/ui"},
+		LanguageCounts: map[string]int{"go": 2},
+		ChangedPaths:   []string{"internal/app/runtime.go"},
+		Files:          []FileSummary{{Path: "internal/app/runtime.go", Language: "go"}, {Path: "internal/ui/model.go", Language: "go"}},
+	}
+
+	summary := snapshot.Summary()
+	if !strings.Contains(summary, "files:2") || !strings.Contains(summary, "dirs:internal/app, internal/ui") || !strings.Contains(summary, "langs:go:2") || !strings.Contains(summary, "changed:internal/app/runtime.go") {
+		t.Fatalf("unexpected summary %q", summary)
+	}
+}
+
+func TestSetSnapshotForTestMakesEnsureReturnFreshSnapshot(t *testing.T) {
+	idx := NewIndex()
+	snapshot := &Snapshot{GeneratedAt: time.Now(), Files: []FileSummary{{Path: "internal/app/runtime.go", Language: "go"}}}
+	idx.SetSnapshotForTest(snapshot)
+
+	got, err := idx.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != snapshot {
+		t.Fatalf("expected Ensure to reuse injected snapshot, got %#v", got)
+	}
+}
+
+func TestBoundedRangeCapsToMaxSnippetLines(t *testing.T) {
+	start, end := boundedRange(10, 12, 200, maxSnippetLines+20)
+	if end-start+1 > maxSnippetLines {
+		t.Fatalf("expected bounded range capped to %d lines, got %d-%d", maxSnippetLines, start, end)
 	}
 }
 

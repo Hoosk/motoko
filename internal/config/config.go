@@ -163,7 +163,7 @@ func NormalizeProvider(provider ProviderConfig) ProviderConfig {
 }
 
 func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
-	switch normalizePreset(preset, kind) {
+	switch preset {
 	case ProviderPresetOpenAI:
 		return "https://api.openai.com/v1"
 	case ProviderPresetOpenRouter:
@@ -171,18 +171,9 @@ func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
 	case ProviderPresetAnthropic:
 		return "https://api.anthropic.com"
 	case ProviderPresetGemini:
-		return "https://generativelanguage.googleapis.com/v1beta"
+		return "https://generativelanguage.googleapis.com/v1beta/openai/"
 	default:
-		switch normalizeKind(kind, preset) {
-		case ProviderKindOpenAICompatible:
-			return "https://api.openai.com/v1"
-		case ProviderKindAnthropic:
-			return "https://api.anthropic.com"
-		case ProviderKindGemini:
-			return "https://generativelanguage.googleapis.com/v1beta"
-		default:
-			return ""
-		}
+		return ""
 	}
 }
 
@@ -214,54 +205,46 @@ func ValidProviderPresets() []ProviderPreset {
 }
 
 func DefaultProviderName(preset ProviderPreset) string {
-	switch preset {
-	case ProviderPresetOpenAI:
-		return "openai"
-	case ProviderPresetOpenRouter:
-		return "openrouter"
-	case ProviderPresetAnthropic:
-		return "anthropic"
-	case ProviderPresetGemini:
-		return "gemini"
-	default:
-		return ""
-	}
+	return string(preset)
 }
 
 func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
-	switch strings.TrimSpace(string(preset)) {
-	case string(ProviderPresetOpenAI):
+	p := ProviderPreset(strings.ToLower(strings.TrimSpace(string(preset))))
+	k := ProviderKind(strings.ToLower(strings.TrimSpace(string(kind))))
+
+	// 1. Exact preset match
+	switch p {
+	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini:
+		return p
+	}
+
+	// 2. Preset from kind
+	switch k {
+	case "openai", ProviderKindOpenAICompatible:
 		return ProviderPresetOpenAI
-	case string(ProviderPresetOpenRouter):
-		return ProviderPresetOpenRouter
-	case string(ProviderPresetAnthropic):
+	case ProviderKindAnthropic:
 		return ProviderPresetAnthropic
-	case string(ProviderPresetGemini):
+	case ProviderKindGemini:
 		return ProviderPresetGemini
 	}
-	switch strings.TrimSpace(string(kind)) {
-	case "openai", string(ProviderKindOpenAICompatible):
-		return ProviderPresetOpenAI
-	case string(ProviderPresetOpenRouter):
-		return ProviderPresetOpenRouter
-	case string(ProviderKindAnthropic):
-		return ProviderPresetAnthropic
-	case string(ProviderKindGemini):
-		return ProviderPresetGemini
-	default:
-		return ""
-	}
+
+	return ""
 }
 
 func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
-	switch strings.TrimSpace(string(kind)) {
-	case string(ProviderKindOpenAICompatible), "openai":
+	k := ProviderKind(strings.ToLower(strings.TrimSpace(string(kind))))
+
+	// 1. Exact kind match
+	switch k {
+	case ProviderKindOpenAICompatible, "openai":
 		return ProviderKindOpenAICompatible
-	case string(ProviderKindAnthropic):
+	case ProviderKindAnthropic:
 		return ProviderKindAnthropic
-	case string(ProviderKindGemini):
+	case ProviderKindGemini:
 		return ProviderKindGemini
 	}
+
+	// 2. Kind from normalized preset
 	switch normalizePreset(preset, kind) {
 	case ProviderPresetOpenAI, ProviderPresetOpenRouter:
 		return ProviderKindOpenAICompatible
@@ -269,9 +252,9 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 		return ProviderKindAnthropic
 	case ProviderPresetGemini:
 		return ProviderKindGemini
-	default:
-		return ""
 	}
+
+	return ""
 }
 
 func (c *AppConfig) sortProviders() {

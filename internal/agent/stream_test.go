@@ -17,13 +17,13 @@ func (f *fakeStreamingProvider) Summary() string  { return "fake:test" }
 func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
 }
-func (f *fakeStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
-	return provider.Response{Message: "hola"}, nil
+func (f *fakeStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
+	return provider.Response{FinalText: "hola", OutputItems: []provider.ConversationItem{provider.AssistantText("hola")}}, nil
 }
-func (f *fakeStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
-	_ = onDelta("{\"message\":\"ho")
-	_ = onDelta("la\"}")
-	return provider.Response{Message: "hola"}, nil
+func (f *fakeStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
+	_ = onDelta("ho")
+	_ = onDelta("la")
+	return provider.Response{FinalText: "hola", OutputItems: []provider.ConversationItem{provider.AssistantText("hola")}}, nil
 }
 
 func TestRunStreamEmitsAssistantDeltas(t *testing.T) {
@@ -51,14 +51,14 @@ func (f *fakePlainStreamingProvider) Summary() string  { return "fake:plain" }
 func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
 }
-func (f *fakePlainStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
-	return provider.Response{Message: "hola mundo"}, nil
+func (f *fakePlainStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
+	return provider.Response{FinalText: "hola mundo", OutputItems: []provider.ConversationItem{provider.AssistantText("hola mundo")}}, nil
 }
-func (f *fakePlainStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
+func (f *fakePlainStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
 	_ = onDelta("hola")
 	_ = onDelta(" ")
 	_ = onDelta("mundo")
-	return provider.Response{Message: "hola mundo"}, nil
+	return provider.Response{FinalText: "hola mundo", OutputItems: []provider.ConversationItem{provider.AssistantText("hola mundo")}}, nil
 }
 
 func TestRunStreamFallsBackToPlainDeltas(t *testing.T) {
@@ -88,18 +88,18 @@ func (f *fakeToolStreamingProvider) Summary() string  { return "fake:tool-stream
 func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
 }
-func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
+func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
 }
-func (f *fakeToolStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
+func (f *fakeToolStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	f.count++
 	if f.count == 1 {
 		_ = systemPrompt
 		_ = messages
 		_ = tools
-		return provider.Response{ToolCall: &provider.ToolCall{Name: "fake", Input: "README.md"}}, nil
+		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "fake", Input: "README.md"}}}, nil
 	}
-	return provider.Response{Message: "hecho"}, nil
+	return provider.Response{FinalText: "hecho", OutputItems: []provider.ConversationItem{provider.AssistantText("hecho")}}, nil
 }
 
 type fakeStreamTool struct{}
@@ -134,27 +134,5 @@ func TestRunStreamSuppressesToolCallJSONAndEmitsToolEvents(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotKinds, wantKinds) {
 		t.Fatalf("unexpected stream events: %#v", events)
-	}
-}
-
-func TestStructuredStreamExtractorPreservesWhitespace(t *testing.T) {
-	extractor := structuredStreamExtractor{}
-	var got string
-	for _, chunk := range []string{"{\"message\":\"hola", " ", "mundo\"}"} {
-		got += extractor.Feed(chunk)
-	}
-	if got != "hola mundo" {
-		t.Fatalf("expected whitespace preserved, got %q", got)
-	}
-}
-
-func TestStructuredStreamExtractorSuppressesToolJSON(t *testing.T) {
-	extractor := structuredStreamExtractor{}
-	var got string
-	for _, chunk := range []string{"{\"tool_name\":\"read\"", ",\"tool_input\":\"README.md\"}"} {
-		got += extractor.Feed(chunk)
-	}
-	if got != "" {
-		t.Fatalf("expected no text emitted for tool json, got %q", got)
 	}
 }

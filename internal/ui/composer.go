@@ -15,7 +15,8 @@ type ComposerModel struct {
 	textarea           textarea.Model
 	suggestions        []string
 	suggestionBase     []string
-	suggestionSource   string
+	mentionSuggestions []string
+	mentionIndex       int
 	selectedSuggestion int
 	runtime            *app.Runtime
 	width              int
@@ -81,28 +82,49 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 
 		switch msg.String() {
 		case "tab", "right":
+			if len(m.mentionSuggestions) > 0 {
+				m.advanceMention(1)
+				return nil
+			}
 			if len(m.suggestions) > 0 {
 				m.advanceSuggestion(1)
 				return nil
 			}
 		case "shift+tab", "left":
+			if len(m.mentionSuggestions) > 0 {
+				m.advanceMention(-1)
+				return nil
+			}
 			if len(m.suggestions) > 0 {
 				m.advanceSuggestion(-1)
 				return nil
 			}
 		case "down", "ctrl+n":
+			if len(m.mentionSuggestions) > 0 {
+				m.advanceMention(1)
+				return nil
+			}
 			m.clearSuggestionCycle()
 			m.navigateHistoryDown()
 			return nil
 		case "up", "ctrl+p":
+			if len(m.mentionSuggestions) > 0 {
+				m.advanceMention(-1)
+				return nil
+			}
 			m.clearSuggestionCycle()
 			m.navigateHistoryUp()
 			return nil
 		case "enter":
-			if len(m.suggestions) > 0 && strings.TrimSpace(m.textarea.Value()) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) && !suggestionHasPlaceholder(m.suggestions[m.selectedSuggestion]) {
+			if len(m.mentionSuggestions) > 0 {
+				m.applySelectedMention()
+				return nil
+			}
+			if len(m.suggestions) > 0 && shouldApplySuggestionOnEnter(m.textarea.Value(), m.suggestions[m.selectedSuggestion]) {
 				m.applySelectedSuggestion()
 				return nil
 			}
+			m.clearSuggestionCycle()
 			input := m.textarea.Value()
 			if strings.TrimSpace(input) != "" {
 				m.history = append(m.history, input)
@@ -150,13 +172,14 @@ func (m ComposerModel) View() string {
 	}
 
 	promptBlock := lipgloss.NewStyle().Width(3).Render(strings.Join(promptLines, "\n"))
+	mentionDropdown := m.renderMentionDropdownBlock()
 	suggestions := m.renderSuggestionsLine()
 	suggestionsBlock := lipgloss.NewStyle().MarginTop(1).Render(suggestions)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
 	return styles.InputChromeStyle.Width(m.width - 6).Render(
-		lipgloss.JoinVertical(lipgloss.Left, body, suggestionsBlock),
+		lipgloss.JoinVertical(lipgloss.Left, body, mentionDropdown, suggestionsBlock),
 	)
 }
 
@@ -180,18 +203,22 @@ func (m *ComposerModel) refreshSuggestions() {
 	m.syncInputChrome()
 	if m.thinking {
 		m.suggestions = nil
+		m.mentionSuggestions = nil
 		m.selectedSuggestion = 0
+		m.mentionIndex = 0
 		return
 	}
-	if mentionSuggestions := m.runtime.MentionSuggestions(m.textarea.Value()); len(mentionSuggestions) > 0 {
-		m.suggestions = mentionSuggestions
-		m.suggestionSource = "mention"
-	} else {
+	m.mentionSuggestions = m.runtime.MentionSuggestions(m.textarea.Value())
+	if len(m.mentionSuggestions) == 0 {
 		m.suggestions = m.runtime.Completions(m.textarea.Value())
-		m.suggestionSource = "default"
+	} else {
+		m.suggestions = nil
+		if m.mentionIndex >= len(m.mentionSuggestions) {
+			m.mentionIndex = 0
+		}
 	}
 	m.suggestionBase = nil
-	if len(m.suggestions) == 0 {
+	if len(m.suggestions) == 0 && len(m.mentionSuggestions) == 0 {
 		m.selectedSuggestion = 0
 		return
 	}
@@ -208,12 +235,8 @@ func (m *ComposerModel) applySelectedSuggestion() {
 		return
 	}
 	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
-	if m.suggestionSource == "mention" {
-		m.textarea.SetValue(m.runtime.ReplaceTrailingMention(m.textarea.Value(), m.suggestions[m.selectedSuggestion]))
-	} else {
-		m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
-	}
 	m.textarea.CursorEnd()
+	m.clearSuggestionCycle()
 }
 
 func (m *ComposerModel) advanceSuggestion(step int) {
@@ -222,19 +245,38 @@ func (m *ComposerModel) advanceSuggestion(step int) {
 	}
 	if len(m.suggestionBase) == 0 {
 		m.suggestionBase = append([]string(nil), m.suggestions...)
+		current := strings.TrimSpace(m.textarea.Value())
+		for i, suggestion := range m.suggestionBase {
+			if strings.TrimSpace(suggestion) == current {
+				m.selectedSuggestion = i
+				break
+			}
+		}
 	}
 	m.suggestions = append([]string(nil), m.suggestionBase...)
-	current := strings.TrimSpace(m.textarea.Value())
-	selected := strings.TrimSpace(m.suggestions[m.selectedSuggestion])
-	if current == "" || current == selected {
-		m.selectedSuggestion = (m.selectedSuggestion + step + len(m.suggestions)) % len(m.suggestions)
-	}
-	m.applySelectedSuggestion()
+	m.selectedSuggestion = (m.selectedSuggestion + step + len(m.suggestions)) % len(m.suggestions)
+	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
+	m.textarea.CursorEnd()
 }
 
 func (m *ComposerModel) clearSuggestionCycle() {
 	m.suggestionBase = nil
-	m.suggestionSource = ""
+}
+
+func (m *ComposerModel) advanceMention(step int) {
+	if len(m.mentionSuggestions) == 0 {
+		return
+	}
+	m.mentionIndex = (m.mentionIndex + step + len(m.mentionSuggestions)) % len(m.mentionSuggestions)
+}
+
+func (m *ComposerModel) applySelectedMention() {
+	if len(m.mentionSuggestions) == 0 {
+		return
+	}
+	m.textarea.SetValue(m.runtime.ReplaceTrailingMention(m.textarea.Value(), m.mentionSuggestions[m.mentionIndex]))
+	m.textarea.CursorEnd()
+	m.refreshSuggestions()
 }
 
 func (m *ComposerModel) syncInputChrome() {
@@ -280,12 +322,55 @@ func (m ComposerModel) renderSuggestionsLine() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 }
 
+func (m ComposerModel) renderMentionDropdownBlock() string {
+	if len(m.mentionSuggestions) == 0 {
+		return ""
+	}
+	rows := make([]string, 0, min(4, len(m.mentionSuggestions))+1)
+	rows = append(rows, styles.PopupMutedStyle.Render("Mentions"))
+	limit := min(4, len(m.mentionSuggestions))
+	for i := 0; i < limit; i++ {
+		line := m.mentionSuggestions[i]
+		if i == m.mentionIndex {
+			rows = append(rows, styles.PopupSelectionStyle.Render(line))
+		} else {
+			rows = append(rows, styles.PopupFieldLabelStyle.Render(line))
+		}
+	}
+	return lipgloss.NewStyle().MarginTop(1).Render(strings.Join(rows, "\n"))
+}
+
+func (m ComposerModel) renderMentionDropdown() string {
+	limit := min(4, len(m.mentionSuggestions))
+	items := make([]string, 0, limit)
+	for i := 0; i < limit; i++ {
+		if i == m.mentionIndex {
+			items = append(items, styles.PopupSelectionStyle.Render(m.mentionSuggestions[i]))
+		} else {
+			items = append(items, styles.SuggestionStyle.Render(m.mentionSuggestions[i]))
+		}
+	}
+	return strings.Join(items, "   ")
+}
+
 func (m *ComposerModel) SetThinking(thinking bool) {
 	m.thinking = thinking
 }
 
 func suggestionHasPlaceholder(value string) bool {
 	return strings.Contains(value, "<") && strings.Contains(value, ">")
+}
+
+func shouldApplySuggestionOnEnter(current, suggestion string) bool {
+	current = strings.TrimSpace(current)
+	suggestion = strings.TrimSpace(suggestion)
+	if current == "" || suggestion == "" || current == suggestion {
+		return false
+	}
+	if suggestionHasPlaceholder(suggestion) {
+		return false
+	}
+	return true
 }
 
 func composerActivityLabel(agentName string) string {

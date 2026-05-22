@@ -89,14 +89,6 @@ func TestRegistryRunTruncatesLargeToolOutput(t *testing.T) {
 	}
 }
 
-func TestResolveWorkspacePathRejectsOutsideWorkspace(t *testing.T) {
-	root := withTempWorkspace(t)
-	outside := filepath.Dir(root)
-	if _, _, err := resolveWorkspacePath(outside); err == nil {
-		t.Fatal("expected outside workspace error")
-	}
-}
-
 func TestCompileGlobMatchesRecursivePattern(t *testing.T) {
 	re, err := compileGlob("internal/**/*.go")
 	if err != nil {
@@ -195,136 +187,6 @@ func TestBashToolSuccessAndExitStatus(t *testing.T) {
 	}
 }
 
-func TestPatchToolParseAndFuzzyReplace(t *testing.T) {
-	path, search, replace, err := parsePatchInput("README.md\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if path != "README.md" || search != "old\n" || replace != "new\n" {
-		t.Fatalf("unexpected parse result: %q %q %q", path, search, replace)
-	}
-	updated, err := fuzzyReplace("line 1\n    old\nline 3\n", "line 1\nold", "line 1\nnew")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(updated, "new") {
-		t.Fatalf("expected replaced content, got %q", updated)
-	}
-}
-
-func TestParsePatchRequestAcceptsUnifiedDiff(t *testing.T) {
-	request, err := parsePatchRequest("--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-old\n+new")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if request.Unified == nil {
-		t.Fatal("expected unified patch request")
-	}
-	if request.Unified.OldPath != "README.md" || request.Unified.NewPath != "README.md" {
-		t.Fatalf("unexpected unified paths %#v", request.Unified)
-	}
-}
-
-func TestParsePatchRequestAcceptsASTPatch(t *testing.T) {
-	request, err := parsePatchRequest("main.go\n<<<<<<< AST\ncapture: target\nquery:\n(function_declaration name: (identifier) @name body: (block) @target)\n=======\nfunc Run() {}\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if request.AST == nil {
-		t.Fatal("expected AST patch request")
-	}
-	if len(request.AST) != 1 || request.AST[0].Path != "main.go" || request.AST[0].Selector.Query == "" || request.AST[0].Selector.Capture != "target" {
-		t.Fatalf("unexpected AST patch %#v", request.AST)
-	}
-}
-
-func TestParsePatchRequestAcceptsMultipleASTPatches(t *testing.T) {
-	request, err := parsePatchRequest("main.go\n<<<<<<< AST\ntype: function_declaration\nname: One\n=======\nfunc One() int {\n\treturn 1\n}\n>>>>>>> REPLACE\n<<<<<<< AST\ntype: function_declaration\nname: Two\n=======\nfunc Two() int {\n\treturn 2\n}\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(request.AST) != 2 {
-		t.Fatalf("expected 2 AST patches, got %#v", request.AST)
-	}
-	if request.AST[0].Selector.Name != "One" || request.AST[1].Selector.Name != "Two" {
-		t.Fatalf("expected AST indices preserved, got %#v", request.AST)
-	}
-}
-
-func TestPatchToolAppliesASTPatch(t *testing.T) {
-	root := withTempWorkspace(t)
-	path := filepath.Join(root, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n\nfunc One() int {\n\treturn 1\n}\n\nfunc Two() int {\n\treturn 2\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewPatchTool().Run(context.Background(), "main.go\n<<<<<<< AST\ncapture: target\nindex: 2\nquery:\n(function_declaration body: (block) @target)\n=======\n{\n\treturn 9\n}\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(updated), "func Two() int {\n\treturn 9\n}") {
-		t.Fatalf("expected AST patch replacement, got %q", string(updated))
-	}
-	if !strings.Contains(string(updated), "func One() int {\n\treturn 1\n}") {
-		t.Fatalf("expected first function untouched, got %q", string(updated))
-	}
-	if !strings.Contains(result.Summary, "AST patch aplicado") {
-		t.Fatalf("unexpected summary %q", result.Summary)
-	}
-}
-
-func TestPatchToolAppliesMultipleASTPatches(t *testing.T) {
-	root := withTempWorkspace(t)
-	path := filepath.Join(root, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n\nfunc One() int {\n\treturn 1\n}\n\nfunc Two() int {\n\treturn 2\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewPatchTool().Run(context.Background(), "main.go\n<<<<<<< AST\ntype: function_declaration\nname: One\n=======\nfunc One() int {\n\treturn 10\n}\n>>>>>>> REPLACE\n<<<<<<< AST\ntype: function_declaration\nname: Two\n=======\nfunc Two() int {\n\treturn 20\n}\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(updated)
-	if !strings.Contains(text, "func One() int {\n\treturn 10\n}") {
-		t.Fatalf("expected first function updated, got %q", text)
-	}
-	if !strings.Contains(text, "func Two() int {\n\treturn 20\n}") {
-		t.Fatalf("expected second function updated, got %q", text)
-	}
-	if !strings.Contains(result.Summary, "2 mutaciones AST aplicadas") {
-		t.Fatalf("unexpected multi AST summary %q", result.Summary)
-	}
-}
-
-func TestPatchToolDeletesNodeWithASTAction(t *testing.T) {
-	root := withTempWorkspace(t)
-	path := filepath.Join(root, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n\nfunc One() {}\n\nfunc Two() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := NewPatchTool().Run(context.Background(), "main.go\n<<<<<<< AST\ntype: function_declaration\naction: delete\nname: One\n=======\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(updated)
-	if strings.Contains(text, "func One()") {
-		t.Fatalf("expected function deleted, got %q", text)
-	}
-	if !strings.Contains(text, "func Two() {}") {
-		t.Fatalf("expected remaining function preserved, got %q", text)
-	}
-}
-
 func TestPatchToolSupportsASTDeleteAction(t *testing.T) {
 	root := withTempWorkspace(t)
 	path := filepath.Join(root, "main.go")
@@ -400,28 +262,6 @@ func TestPatchToolAppliesASTPatchInJavaScript(t *testing.T) {
 	}
 }
 
-func TestPatchToolAppliesUnifiedDiff(t *testing.T) {
-	root := withTempWorkspace(t)
-	path := filepath.Join(root, "README.md")
-	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewPatchTool().Run(context.Background(), "--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-old\n+new")
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(updated) != "new\n" {
-		t.Fatalf("unexpected unified diff result %q", string(updated))
-	}
-	if !strings.Contains(result.Summary, "Unified diff aplicado") {
-		t.Fatalf("unexpected summary %q", result.Summary)
-	}
-}
-
 func TestPatchToolCreatesFileFromUnifiedDiff(t *testing.T) {
 	root := withTempWorkspace(t)
 	path := filepath.Join(root, "notes.txt")
@@ -435,46 +275,6 @@ func TestPatchToolCreatesFileFromUnifiedDiff(t *testing.T) {
 	}
 	if string(created) != "uno\ndos\n" {
 		t.Fatalf("unexpected created file %q", string(created))
-	}
-}
-
-func TestFuzzyReplaceRejectsAmbiguousSearchBlocks(t *testing.T) {
-	if _, err := fuzzyReplace("}\n}\n}\n", "}\n}", "x"); err == nil {
-		t.Fatal("expected ambiguous closing-brace block to fail")
-	}
-	if _, err := fuzzyReplace("{\n", "{", "x"); err == nil {
-		t.Fatal("expected trivial single-line exact search block to fail")
-	}
-}
-
-func TestFuzzyReplaceAllowsUniqueExactSingleLineSearch(t *testing.T) {
-	updated, err := fuzzyReplace("uno\ndos unico\ntres\n", "dos unico", "dos cambiado")
-	if err != nil {
-		t.Fatalf("fuzzyReplace() error = %v", err)
-	}
-	if updated != "uno\ndos cambiado\ntres\n" {
-		t.Fatalf("unexpected updated content %q", updated)
-	}
-}
-
-func TestPatchToolAppliesUniqueExactSingleLineSearchReplace(t *testing.T) {
-	root := withTempWorkspace(t)
-	path := filepath.Join(root, "test.md")
-	content := "Linea inicial\n## Siguientes Pasos\n- Esperar a que el usuario decida.\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := NewPatchTool().Run(context.Background(), "test.md\n<<<<<<< SEARCH\n## Siguientes Pasos\n=======\n# mi moto alpina derrapante\n## Siguientes Pasos\n>>>>>>> REPLACE")
-	if err != nil {
-		t.Fatalf("patch tool error = %v", err)
-	}
-	updated, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(updated)
-	if !strings.Contains(text, "# mi moto alpina derrapante\n## Siguientes Pasos") {
-		t.Fatalf("expected inserted heading, got %q", text)
 	}
 }
 

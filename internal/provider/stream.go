@@ -10,21 +10,30 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/openai/openai-go/v3/responses"
 )
 
 var errSSEDone = errors.New("sse done")
 
-func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition, onDelta func(string) error) (Response, error) {
+func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
+	}
+
+	_ = tools
+
+	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
+	// We fall back to Chat Completions if we detect Gemini in the URL.
+	if strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
+		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
 	params := buildResponseParams(c.model, systemPrompt, messages, c.thinkingBudget)
 	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
 	defer stream.Close()
 
-	var raw strings.Builder
-	usage := Usage{}
+	var completed *responses.Response
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
@@ -33,31 +42,76 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 			if delta == "" {
 				continue
 			}
-			raw.WriteString(delta)
 			if onDelta != nil {
 				if err := onDelta(delta); err != nil {
 					return Response{}, err
 				}
 			}
 		case "response.completed":
-			u := event.Response.Usage
-			usage = Usage{
-				InputTokens:  int(u.InputTokens),
-				OutputTokens: int(u.OutputTokens),
-				TotalTokens:  int(u.TotalTokens),
-			}
+			resp := event.AsResponseCompleted().Response
+			completed = &resp
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return Response{}, err
 	}
-	return parseStreamResponse(strings.TrimSpace(raw.String()), usage), nil
+	if completed != nil {
+		return responseFromOpenAI(completed), nil
+	}
+	return Response{}, nil
 }
 
-func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition, onDelta func(string) error) (Response, error) {
+func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
+	payload := map[string]interface{}{
+		"model": c.model,
+		"messages": append([]map[string]string{
+			{"role": "system", "content": systemPrompt},
+		}, toChatMessages(messages)...),
+		"temperature": 0.2,
+		"stream":      true,
+	}
+
+	var raw strings.Builder
+	usage := Usage{}
+	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, map[string]string{
+		"Authorization": "Bearer " + c.apiKey,
+	}, func(data string) error {
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+			Usage *Usage `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return err
+		}
+		if len(chunk.Choices) > 0 {
+			content := chunk.Choices[0].Delta.Content
+			if content != "" {
+				raw.WriteString(content)
+				if onDelta != nil {
+					return onDelta(content)
+				}
+			}
+		}
+		if chunk.Usage != nil {
+			usage = *chunk.Usage
+		}
+		return nil
+	})
+	if err != nil {
+		return Response{}, err
+	}
+	return responseFromText(raw.String(), usage), nil
+}
+
+func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
+	_ = tools
 	maxTokens := 4096
 	reqBody := map[string]any{
 		"model":      c.model,
@@ -136,133 +190,11 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
-	return parseStreamResponse(strings.TrimSpace(raw.String()), usage), nil
+	return responseFromText(raw.String(), usage), nil
 }
 
-func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, messages []Message, tools []ToolDefinition, onDelta func(string) error) (Response, error) {
-	if !c.Configured() {
-		return Response{}, fmt.Errorf("provider no configurado")
-	}
-	genConfig := map[string]any{
-		"responseMimeType": "application/json",
-		"temperature":      0.2,
-	}
-	if c.thinkingBudget > 0 {
-		if isGemini3Model(c.model) {
-			// Gemini 3.x uses thinkingLevel; thinkingBudget causes unexpected behaviour.
-			genConfig["thinkingConfig"] = map[string]any{
-				"thinkingLevel": budgetToGeminiThinkingLevel(c.thinkingBudget),
-			}
-		} else {
-			// Gemini 2.5 series uses thinkingBudget.
-			genConfig["thinkingConfig"] = map[string]any{
-				"thinkingBudget": c.thinkingBudget,
-			}
-		}
-	}
-	body := map[string]any{
-		"system_instruction": map[string]any{
-			"parts": []map[string]string{{"text": systemPrompt}},
-		},
-		"contents":         toGeminiMessages(messages),
-		"generationConfig": genConfig,
-	}
-	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s", c.baseURL, c.model, c.apiKey)
-	var raw strings.Builder
-	seen := ""
-	usage := Usage{}
-	err := postJSONStream(ctx, c.httpClient, url, body, nil, func(data string) error {
-		var chunk geminiResponse
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return err
-		}
-		usage = Usage{InputTokens: chunk.UsageMetadata.PromptTokenCount, OutputTokens: chunk.UsageMetadata.CandidatesTokenCount, TotalTokens: chunk.UsageMetadata.TotalTokenCount}
-		text := chunk.Text()
-		if text == "" {
-			return nil
-		}
-		delta := text
-		if strings.HasPrefix(text, seen) {
-			delta = text[len(seen):]
-			seen = text
-		} else {
-			seen += text
-		}
-		if delta == "" {
-			return nil
-		}
-		raw.WriteString(delta)
-		if onDelta != nil {
-			return onDelta(delta)
-		}
-		return nil
-	})
-	if err != nil {
-		return Response{}, err
-	}
-	return parseStreamResponse(strings.TrimSpace(raw.String()), usage), nil
-}
-
-func parseStreamResponse(raw string, usage Usage) Response {
-	parsed := parseStructuredResponse(raw)
-	if parsed.ToolCall != nil || parsed.Message != "" {
-		parsed.Usage = usage
-		return parsed
-	}
-	return Response{Message: raw, Usage: usage}
-}
-
-// isOpenAIReasoningModel reports whether the model name is a reasoning model
-// that supports reasoning_effort. This includes the legacy o-series (o1, o3, o4)
-// and the current gpt-5.x reasoning models (gpt-5.5, gpt-5.4, gpt-5.5-pro, etc.).
-func isOpenAIReasoningModel(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "o1") ||
-		strings.HasPrefix(lower, "o3") ||
-		strings.HasPrefix(lower, "o4") ||
-		strings.HasPrefix(lower, "gpt-5")
-}
-
-// budgetToReasoningEffort maps a token budget to an OpenAI reasoning_effort string.
-// Thresholds align with ThinkingBudgetLevels: low=1024, medium=8192, high=24576, xhigh=65536.
-func budgetToReasoningEffort(budget int) string {
-	switch {
-	case budget >= 65536:
-		return "xhigh"
-	case budget >= 24576:
-		return "high"
-	case budget >= 8192:
-		return "medium"
-	default:
-		return "low"
-	}
-}
-
-// isAnthropicAdaptiveThinkingModel reports whether the model uses the newer
-// adaptive thinking API ({type:"adaptive"}) instead of the manual budget API.
-// claude-opus-4-7 and newer generation models require adaptive thinking.
-func isAnthropicAdaptiveThinkingModel(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.Contains(lower, "opus-4-7")
-}
-
-// isGemini3Model reports whether the model belongs to the Gemini 3.x series,
-// which uses thinkingLevel instead of thinkingBudget.
-func isGemini3Model(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "gemini-3")
-}
-
-// budgetToGeminiThinkingLevel maps a token budget to a Gemini 3 thinkingLevel string.
-func budgetToGeminiThinkingLevel(budget int) string {
-	switch {
-	case budget >= 24576:
-		return "high"
-	case budget >= 8192:
-		return "medium"
-	default:
-		return "low"
-	}
+func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
+	return c.compatibleClient().StreamComplete(ctx, systemPrompt, messages, tools, onDelta)
 }
 
 func postJSONStream(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, onData func(string) error) error {

@@ -14,7 +14,7 @@ func TestSessionSaveLoad(t *testing.T) {
 
 	s := New("abc", "/tmp/work")
 	s.Title = "Titulo"
-	s.Messages = []provider.Message{{Role: "user", Content: "hola"}}
+	s.History = []provider.ConversationItem{provider.UserText("hola")}
 	s.LastInputTokens = 42
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -24,7 +24,7 @@ func TestSessionSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if loaded.Title != "Titulo" || len(loaded.Messages) != 1 || loaded.LastInputTokens != 42 {
+	if loaded.Title != "Titulo" || len(loaded.History) != 1 || loaded.LastInputTokens != 42 {
 		t.Fatalf("loaded session = %#v", loaded)
 	}
 	if got := WorkspaceIDFor("/tmp/work"); got == "" {
@@ -70,14 +70,14 @@ func TestSessionListAndLast(t *testing.T) {
 
 func TestSessionCompactWith(t *testing.T) {
 	s := New("abc", "/tmp/work")
-	s.Messages = []provider.Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}}
+	s.History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
 	s.LastInputTokens = 99
 	s.CompactWith("resumen")
-	if len(s.Messages) != 2 {
-		t.Fatalf("len(Messages) = %d, want 2", len(s.Messages))
+	if len(s.History) != 2 {
+		t.Fatalf("len(History) = %d, want 2", len(s.History))
 	}
-	if s.Messages[0].Role != "user" || s.Messages[1].Role != "assistant" {
-		t.Fatalf("unexpected compacted messages = %#v", s.Messages)
+	if s.History[0].Role != provider.RoleUser || s.History[1].Role != provider.RoleAssistant {
+		t.Fatalf("unexpected compacted history = %#v", s.History)
 	}
 	if s.LastInputTokens != 0 {
 		t.Fatalf("LastInputTokens = %d, want 0", s.LastInputTokens)

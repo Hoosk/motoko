@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,9 +10,70 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tools"
 )
+
+type fakeRuntimeTool struct {
+	name string
+}
+
+type fakeProviderClient struct {
+	complete func(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error)
+	models   []provider.ModelInfo
+}
+
+func (f fakeRuntimeTool) Spec() tools.Spec {
+	return tools.Spec{Name: f.name, Summary: "fake", Usage: f.name + " <arg>"}
+}
+
+func (f fakeRuntimeTool) Run(ctx context.Context, args string) (tools.Result, error) {
+	return tools.Result{Spec: f.Spec(), Summary: "ok", Output: args}, nil
+}
+
+func (f fakeProviderClient) Configured() bool {
+	return true
+}
+
+func (f fakeProviderClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+	if f.complete == nil {
+		return provider.Response{}, nil
+	}
+	return f.complete(ctx, systemPrompt, messages, toolSet)
+}
+
+func (f fakeProviderClient) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
+	resp, err := f.Complete(ctx, systemPrompt, messages, toolSet)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	if onDelta != nil && strings.TrimSpace(resp.FinalText) != "" {
+		if err := onDelta(resp.FinalText); err != nil {
+			return provider.Response{}, err
+		}
+	}
+	return resp, nil
+}
+
+func (f fakeProviderClient) Summary() string {
+	return "fake:test"
+}
+
+func (f fakeProviderClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return append([]provider.ModelInfo(nil), f.models...), nil
+}
+
+func withSessionBaseDir(t *testing.T) {
+	t.Helper()
+	prev := session.SessionsBaseDir
+	session.SessionsBaseDir = t.TempDir()
+	t.Cleanup(func() {
+		session.SessionsBaseDir = prev
+	})
+}
 
 func TestCompletionsModelsKeepsTrailingSpaceContext(t *testing.T) {
 	r := NewRuntime()
@@ -106,5 +168,373 @@ func TestMentionSuggestionsPreferAgentsAndFiles(t *testing.T) {
 	got = r.MentionSuggestions("revisa @runtime")
 	if len(got) == 0 || !strings.Contains(strings.Join(got, " "), "@internal/app/runtime.go") {
 		t.Fatalf("expected file mention suggestion, got %#v", got)
+	}
+}
+
+func TestSanitizeSessionTitlePrefersCleanFinalTitle(t *testing.T) {
+	raw := `(The user wants a title for the session. The session is just starting, so it's a general programming session.)
+
+* *Option 1:* Sesion de programacion con Motoko
+* *Option 2:* Asistencia experta en desarrollo de software
+* *Option 3:* Tu asistente personal de programacion
+
+* *Constraint Check:* "4 a 8 palabras".
+
+Asistencia experta en desarrollo de software`
+	got := sanitizeSessionTitle(raw)
+	if got != "Asistencia experta en desarrollo de software" {
+		t.Fatalf("sanitizeSessionTitle() = %q", got)
+	}
+}
+
+func TestSanitizeSessionTitleKeepsSingleLineTitle(t *testing.T) {
+	got := sanitizeSessionTitle("Depuracion de tools en Gemini")
+	if got != "Depuracion de tools en Gemini" {
+		t.Fatalf("sanitizeSessionTitle() = %q", got)
+	}
+}
+
+func TestTitleFromModelResponsePrefersStructuredMessage(t *testing.T) {
+	resp := provider.Response{FinalText: `{"message":"Depuracion de tools en Gemini"}`}
+	got := titleFromModelResponse(resp)
+	if got != "Depuracion de tools en Gemini" {
+		t.Fatalf("titleFromModelResponse() = %q", got)
+	}
+}
+
+func TestExtractStructuredMessageAcceptsFencedJSON(t *testing.T) {
+	raw := "```json\n{\"message\":\"Asistencia experta en desarrollo de software\"}\n```"
+	got := extractStructuredMessage(raw)
+	if got != "Asistencia experta en desarrollo de software" {
+		t.Fatalf("extractStructuredMessage() = %q", got)
+	}
+}
+
+func TestCurrentSessionEntriesMapsRolesToEntryKinds(t *testing.T) {
+	r := NewRuntime()
+	r.currentSession = &session.Session{History: []provider.ConversationItem{
+		{Role: "user", Content: "hola"},
+		{Role: "assistant", Content: "mundo"},
+		{Role: "system", Content: "nota"},
+	}}
+
+	got := r.CurrentSessionEntries()
+	want := []Entry{
+		{Kind: EntryUser, Text: "hola"},
+		{Kind: EntryAssistant, Text: "mundo"},
+		{Kind: EntrySystem, Text: "nota"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CurrentSessionEntries() = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandleInputBangDispatchesImmediateShellInBuildMode(t *testing.T) {
+	r := NewRuntime()
+	r.mode = ModeBuild
+
+	resp := r.HandleInput("!pwd", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != ActionShell || resp.Action.ShellCommand != "pwd" {
+		t.Fatalf("HandleInput(!pwd) action = %#v", resp.Action)
+	}
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != EntryCommand {
+		t.Fatalf("expected shell command entry, got %#v", resp.Entries)
+	}
+}
+
+func TestHandleInputTracksAgentAndFileMentions(t *testing.T) {
+	r := NewRuntime()
+	r.availableAgents = append(r.availableAgents, agent.AgentDef{Name: "explore", System: "Busca codigo"})
+
+	_ = r.HandleInput("revisa @explore @internal/app/runtime.go", system.ContextInfo{})
+
+	if r.AgentName() != "explore" {
+		t.Fatalf("expected agent mode switched to explore, got %q", r.AgentName())
+	}
+	if !reflect.DeepEqual(r.mentionedFiles, []string{"internal/app/runtime.go"}) {
+		t.Fatalf("expected mentioned files tracked, got %#v", r.mentionedFiles)
+	}
+}
+
+func TestHandleShellResultFormatsSuccessAndFailure(t *testing.T) {
+	r := NewRuntime()
+	success := r.HandleShellResult(ShellResult{Output: "ok", ExitCode: 0, Duration: time.Second})
+	if len(success.Entries) != 2 || success.Entries[1].Kind != EntryOutput || success.Entries[1].Text != "ok" {
+		t.Fatalf("unexpected success shell response %#v", success)
+	}
+
+	failure := r.HandleShellResult(ShellResult{Output: "boom", ExitCode: 7, Duration: time.Second})
+	if len(failure.Entries) != 2 || failure.Entries[1].Kind != EntryError || failure.Entries[1].Text != "boom" {
+		t.Fatalf("unexpected failure shell response %#v", failure)
+	}
+}
+
+func TestHandleModelsCommandUpdatesActiveModel(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "old-model",
+		}},
+	}
+
+	resp := r.handleModelsCommand([]string{"gpt-4.1"})
+	active, ok := r.config.Active()
+	if !ok {
+		t.Fatal("expected active provider config")
+	}
+	if active.Model != "gpt-4.1" {
+		t.Fatalf("expected active model updated, got %#v", active)
+	}
+	if len(resp.Entries) != 1 || !strings.Contains(resp.Entries[0].Text, "gpt-4.1") {
+		t.Fatalf("unexpected models response %#v", resp)
+	}
+}
+
+func TestProviderListTextMarksActiveProvider(t *testing.T) {
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Model:  "gpt-4.1",
+		}, {
+			Name:   "anthropic",
+			Preset: config.ProviderPresetAnthropic,
+			Model:  "claude-sonnet",
+		}},
+	}
+
+	text := r.providerListText()
+	if !strings.Contains(text, "* openai [openai] gpt-4.1") {
+		t.Fatalf("expected active provider marker, got %q", text)
+	}
+	if !strings.Contains(text, "  anthropic [anthropic] claude-sonnet") {
+		t.Fatalf("expected secondary provider listed, got %q", text)
+	}
+}
+
+func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) {
+	r := NewRuntime()
+	r.mode = ModePlan
+	r.inputMode = InputModeShell
+	r.pending = &pendingShell{Command: "git status"}
+
+	resp := r.HandleInput("/status", system.ContextInfo{Workspace: "motoko"})
+	if len(resp.Entries) != 1 {
+		t.Fatalf("expected one status entry, got %#v", resp)
+	}
+	text := resp.Entries[0].Text
+	for _, want := range []string{"modo: plan", "entrada: shell", "workspace: motoko", "aprobacion pendiente: git status"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in status text %q", want, text)
+		}
+	}
+}
+
+func TestHandleInputProviderListUsesFormattedProviderSummary(t *testing.T) {
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Model:  "gpt-4.1",
+		}, {
+			Name:   "anthropic",
+			Preset: config.ProviderPresetAnthropic,
+			Model:  "claude-sonnet",
+		}},
+	}
+
+	resp := r.HandleInput("/provider list", system.ContextInfo{})
+	if len(resp.Entries) != 1 || resp.Entries[0].Kind != EntrySystem {
+		t.Fatalf("unexpected provider list response %#v", resp)
+	}
+	text := resp.Entries[0].Text
+	if !strings.Contains(text, "* openai [openai] gpt-4.1") {
+		t.Fatalf("expected active provider in list, got %q", text)
+	}
+	if !strings.Contains(text, "  anthropic [anthropic] claude-sonnet") {
+		t.Fatalf("expected secondary provider in list, got %q", text)
+	}
+}
+
+func TestHandleInputToolRunsRegisteredTool(t *testing.T) {
+	r := NewRuntime()
+	r.tools.Register(fakeRuntimeTool{name: "fake"})
+
+	resp := r.HandleInput("/tool fake hola mundo", system.ContextInfo{})
+	if len(resp.Entries) != 3 {
+		t.Fatalf("expected command, summary and output entries, got %#v", resp)
+	}
+	if resp.Entries[0] != (Entry{Kind: EntryCommand, Text: "tool fake hola mundo"}) {
+		t.Fatalf("unexpected command entry %#v", resp.Entries[0])
+	}
+	if resp.Entries[1] != (Entry{Kind: EntrySystem, Text: "ok"}) {
+		t.Fatalf("unexpected summary entry %#v", resp.Entries[1])
+	}
+	if resp.Entries[2] != (Entry{Kind: EntryOutput, Text: "hola mundo"}) {
+		t.Fatalf("unexpected output entry %#v", resp.Entries[2])
+	}
+}
+
+func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *testing.T) {
+	r := NewRuntime()
+	r.config = &config.AppConfig{}
+	r.currentSession = &session.Session{
+		History: []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")},
+	}
+
+	resp := r.CompactSession(context.Background())
+	if len(resp.Entries) != 1 || resp.Entries[0].Kind != EntryError {
+		t.Fatalf("expected compact error response, got %#v", resp)
+	}
+	if !strings.Contains(resp.Entries[0].Text, "no hay provider activo") {
+		t.Fatalf("unexpected compact error %q", resp.Entries[0].Text)
+	}
+}
+
+func TestMaybeAutoCompactSkipsWhenHistoryUsageBelowThreshold(t *testing.T) {
+	r := NewRuntime()
+	r.contextWindow = 1000
+	r.currentSession = &session.Session{
+		History:         []provider.ConversationItem{provider.UserText("hola")},
+		LastInputTokens: 799,
+	}
+	events := 0
+
+	err := r.maybeAutoCompact(context.Background(), func(AgentStreamEvent) error {
+		events++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("maybeAutoCompact() error = %v", err)
+	}
+	if events != 0 {
+		t.Fatalf("expected no compact events below threshold, got %d", events)
+	}
+	if len(r.currentSession.History) != 1 || r.currentSession.LastInputTokens != 799 {
+		t.Fatalf("expected session unchanged, got %#v", r.currentSession)
+	}
+}
+
+func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "gpt-4.1",
+		}},
+	}
+	r.currentSession = session.New("ws", "/workspace")
+	r.currentSession.History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
+	r.currentSession.LastInputTokens = 900
+	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
+		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+			if !strings.Contains(systemPrompt, "Resume la conversacion") {
+				return provider.Response{}, fmt.Errorf("unexpected system prompt %q", systemPrompt)
+			}
+			if len(messages) != 2 {
+				return provider.Response{}, fmt.Errorf("unexpected message count %d", len(messages))
+			}
+			return provider.Response{FinalText: "resumen breve"}, nil
+		}}, nil
+	}
+
+	resp := r.CompactSession(context.Background())
+	if len(resp.Entries) != 1 || resp.Entries[0] != (Entry{Kind: EntrySystem, Text: "Sesion compactada."}) {
+		t.Fatalf("unexpected compact response %#v", resp)
+	}
+	if len(r.currentSession.History) != 2 {
+		t.Fatalf("expected compacted two-message history, got %#v", r.currentSession.History)
+	}
+	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen breve") {
+		t.Fatalf("expected compacted summary in history, got %q", got)
+	}
+	if r.currentSession.LastInputTokens != 0 {
+		t.Fatalf("expected input tokens reset, got %d", r.currentSession.LastInputTokens)
+	}
+}
+
+func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	r.contextWindow = 1000
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "gpt-4.1",
+		}},
+	}
+	r.currentSession = session.New("ws", "/workspace")
+	r.currentSession.History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
+	r.currentSession.LastInputTokens = 800
+	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
+		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+			return provider.Response{FinalText: "resumen automatico"}, nil
+		}}, nil
+	}
+
+	var events []AgentStreamEvent
+	err := r.maybeAutoCompact(context.Background(), func(event AgentStreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("maybeAutoCompact() error = %v", err)
+	}
+	if !reflect.DeepEqual(events, []AgentStreamEvent{{Kind: "compacting", Content: "Compactando sesion..."}, {Kind: "status", Content: "Sesion compactada automaticamente."}}) {
+		t.Fatalf("unexpected compact events %#v", events)
+	}
+	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen automatico") {
+		t.Fatalf("expected auto-compact summary in history, got %q", got)
+	}
+}
+
+func TestGenerateTitleUpdatesCurrentSessionFromStructuredResponse(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "gpt-4.1",
+		}},
+	}
+	r.currentSession = session.New("ws", "/workspace")
+	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
+		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+			if !strings.Contains(systemPrompt, "Genera un titulo corto") {
+				return provider.Response{}, fmt.Errorf("unexpected title prompt %q", systemPrompt)
+			}
+			if len(messages) != 2 || messages[0].Role != provider.RoleUser || messages[1].Role != provider.RoleAssistant {
+				return provider.Response{}, fmt.Errorf("unexpected title messages %#v", messages)
+			}
+			return provider.Response{FinalText: "```json\n{\"message\":\"Sesion de pruebas runtime\"}\n```"}, nil
+		}}, nil
+	}
+
+	r.generateTitle(context.Background(), "haz pruebas", "hecho")
+	if r.currentSession.Title != "Sesion de pruebas runtime" {
+		t.Fatalf("expected generated title, got %q", r.currentSession.Title)
 	}
 }

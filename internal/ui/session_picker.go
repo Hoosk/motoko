@@ -67,7 +67,7 @@ func (m Model) renderSessionPicker() string {
 		return strings.Join(rows, "\n")
 	}
 	for i, s := range m.sessionList {
-		line := fmt.Sprintf("%s  %s  (%d mensajes)", s.Title, s.UpdatedAt.Format("2006-01-02 15:04"), len(s.Messages))
+		line := fmt.Sprintf("%s  %s  (%d mensajes)", s.Title, s.UpdatedAt.Format("2006-01-02 15:04"), len(s.History))
 		if i == m.sessionListIndex {
 			rows = append(rows, styles.PopupSelectionStyle.Render(line))
 		} else {

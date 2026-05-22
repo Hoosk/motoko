@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestComposerAppliesSuggestionAndHandlesPrompt(t *testing.T) {
+func TestComposerTabRotatesAndEnterSubmitsSelectedSuggestion(t *testing.T) {
 	m := NewComposerModel(app.NewRuntime())
 	m.SyncLayout(80, 30)
 	m.textarea.SetValue("/he")
@@ -18,11 +18,38 @@ func TestComposerAppliesSuggestionAndHandlesPrompt(t *testing.T) {
 		t.Fatal("expected suggestions")
 	}
 	_ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.Value() == "/he" {
-		t.Fatalf("expected selected suggestion applied, got %q", m.Value())
+	if m.Value() != m.suggestions[m.selectedSuggestion] {
+		t.Fatalf("expected tab to rotate visible selection, got %q", m.Value())
 	}
-	if !strings.HasPrefix(m.Value(), "/") {
-		t.Fatalf("expected selected suggestion applied, got %q", m.Value())
+	cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected enter to submit selected suggestion")
+	}
+	got := cmd()
+	prompt, ok := got.(SubmitPromptMsg)
+	if !ok {
+		t.Fatalf("expected SubmitPromptMsg, got %T", got)
+	}
+	if strings.TrimSpace(prompt.Prompt) != strings.TrimSpace(m.suggestions[m.selectedSuggestion]) {
+		t.Fatalf("expected submitted prompt %q, got %q", m.suggestions[m.selectedSuggestion], prompt.Prompt)
+	}
+}
+
+func TestComposerEnterAppliesSuggestionBeforeSubmitting(t *testing.T) {
+	m := NewComposerModel(app.NewRuntime())
+	m.SyncLayout(80, 30)
+	m.textarea.SetValue("/he")
+	m.refreshSuggestions()
+	if len(m.suggestions) == 0 {
+		t.Fatal("expected suggestions")
+	}
+	selected := m.suggestions[m.selectedSuggestion]
+	cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected first enter to apply suggestion only, got cmd %T", cmd)
+	}
+	if m.Value() != selected {
+		t.Fatalf("expected first enter to apply suggestion %q, got %q", selected, m.Value())
 	}
 }
 
@@ -45,7 +72,7 @@ func TestComposerTabRotatesSuggestions(t *testing.T) {
 	if afterFirstTab == afterSecondTab {
 		t.Fatalf("expected tab to rotate suggestions, got same value %q", afterFirstTab)
 	}
-	if afterSecondTab == first {
+	if strings.TrimSpace(afterSecondTab) == strings.TrimSpace(first) {
 		t.Fatalf("expected second tab to move off first suggestion, got %q", afterSecondTab)
 	}
 }
@@ -55,12 +82,30 @@ func TestComposerMentionSuggestionsApplyAtTokenPosition(t *testing.T) {
 	m.SyncLayout(80, 30)
 	m.textarea.SetValue("revisa @pl")
 	m.refreshSuggestions()
-	if len(m.suggestions) == 0 {
+	if len(m.mentionSuggestions) == 0 {
 		t.Fatal("expected mention suggestions")
 	}
 	_ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if !strings.Contains(m.Value(), "@plan") {
-		t.Fatalf("expected @ mention replacement, got %q", m.Value())
+	if m.mentionIndex != 0 && len(m.mentionSuggestions) > 1 {
+		t.Fatalf("unexpected mention index after first tab: %d", m.mentionIndex)
+	}
+	_ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(m.Value(), "@plan") && !strings.Contains(m.Value(), "@build") {
+		t.Fatalf("expected @ mention confirmation, got %q", m.Value())
+	}
+}
+
+func TestComposerMentionDropdownRendersDedicatedSuggestions(t *testing.T) {
+	m := NewComposerModel(app.NewRuntime())
+	m.SyncLayout(80, 30)
+	m.textarea.SetValue("revisa @")
+	m.refreshSuggestions()
+	if len(m.mentionSuggestions) == 0 {
+		t.Fatalf("expected mention suggestions, got %#v", m.mentionSuggestions)
+	}
+	block := stripANSI(m.renderMentionDropdownBlock())
+	if !strings.Contains(block, "Mentions") || !strings.Contains(block, "@") {
+		t.Fatalf("expected dedicated mention dropdown block, got %q", block)
 	}
 }
 
@@ -115,6 +160,24 @@ func TestComposerEnterDoesNotApplyPlaceholderSuggestion(t *testing.T) {
 	}
 	if prompt.Prompt != "/tool bash echo hola" {
 		t.Fatalf("expected submitted prompt preserved, got %q", prompt.Prompt)
+	}
+}
+
+func TestComposerArrowsNavigateMentionDropdownWithoutApplying(t *testing.T) {
+	m := NewComposerModel(app.NewRuntime())
+	m.SyncLayout(80, 30)
+	m.textarea.SetValue("revisa @")
+	m.refreshSuggestions()
+	if len(m.mentionSuggestions) < 2 {
+		t.Fatalf("expected multiple mention suggestions, got %#v", m.mentionSuggestions)
+	}
+	before := m.Value()
+	_ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.Value() != before {
+		t.Fatalf("expected down to navigate only, got %q", m.Value())
+	}
+	if m.mentionIndex != 1 {
+		t.Fatalf("expected mention index 1 after down, got %d", m.mentionIndex)
 	}
 }
 

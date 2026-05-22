@@ -19,12 +19,12 @@ func (f *fakeLoopProvider) Summary() string  { return "fake:loop" }
 func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "loop"}}, nil
 }
-func (f *fakeLoopProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition, onDelta func(string) error) (provider.Response, error) {
+func (f *fakeLoopProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
 }
-func (f *fakeLoopProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools []provider.ToolDefinition) (provider.Response, error) {
+func (f *fakeLoopProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	f.count++
-	return provider.Response{ToolCall: &provider.ToolCall{Name: "looptool", Input: "same"}}, nil
+	return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", Input: "same"}}}, nil
 }
 
 type fakeLoopTool struct{}
@@ -35,6 +35,26 @@ func (f *fakeLoopTool) Spec() tools.Spec {
 
 func (f *fakeLoopTool) Run(ctx context.Context, args string) (tools.Result, error) {
 	return tools.Result{Spec: f.Spec(), Summary: "ok", Output: "ok"}, nil
+}
+
+type fakeMultiProvider struct {
+	count int
+}
+
+func (f *fakeMultiProvider) Configured() bool { return true }
+func (f *fakeMultiProvider) Summary() string  { return "fake:multi" }
+func (f *fakeMultiProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{{ID: "multi"}}, nil
+}
+func (f *fakeMultiProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
+	return f.Complete(ctx, systemPrompt, messages, tools)
+}
+func (f *fakeMultiProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
+	f.count++
+	if f.count == 1 {
+		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "1", Input: "a"}, {Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "2", Input: "b"}}}, nil
+	}
+	return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
 }
 
 func TestRunDetectsRepeatedToolLoop(t *testing.T) {
@@ -72,5 +92,21 @@ func TestMaxToolIterationsFallsBackOnInvalidEnv(t *testing.T) {
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "0")
 	if got := maxToolIterations(); got != defaultMaxToolIterations {
 		t.Fatalf("expected non-positive env to fall back, got %d", got)
+	}
+}
+
+func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(&fakeLoopTool{})
+	a := New(&fakeMultiProvider{}, registry)
+	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Assistant != "ok" {
+		t.Fatalf("expected final assistant answer, got %#v", result)
+	}
+	if len(result.History) < 4 {
+		t.Fatalf("expected tool history entries persisted, got %#v", result.History)
 	}
 }

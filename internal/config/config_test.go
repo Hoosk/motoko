@@ -46,6 +46,19 @@ func TestNormalizeProviderSupportsOpenRouterPreset(t *testing.T) {
 	}
 }
 
+func TestNormalizeProviderSupportsGeminiPresetWithCompatibleBaseURL(t *testing.T) {
+	got := NormalizeProvider(ProviderConfig{Preset: ProviderPresetGemini})
+	if got.Kind != ProviderKindGemini {
+		t.Fatalf("expected gemini kind, got %q", got.Kind)
+	}
+	if got.BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai/" {
+		t.Fatalf("expected gemini base url, got %q", got.BaseURL)
+	}
+	if got.Name != "gemini" {
+		t.Fatalf("expected gemini default name, got %q", got.Name)
+	}
+}
+
 func TestAppConfigUpsertProviderReplacesCaseInsensitiveMatch(t *testing.T) {
 	cfg := &AppConfig{Providers: []ProviderConfig{{Name: "OpenAI", Preset: ProviderPresetOpenAI, Kind: ProviderKindOpenAICompatible, Model: "gpt-4.1"}}}
 	cfg.UpsertProvider(ProviderConfig{Name: "openai", Preset: ProviderPresetOpenRouter, APIKey: "k"})

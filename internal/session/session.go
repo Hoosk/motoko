@@ -18,14 +18,14 @@ import (
 var SessionsBaseDir string
 
 type Session struct {
-	ID              string             `json:"id"`
-	Title           string             `json:"title"`
-	WorkspaceID     string             `json:"workspace_id"`
-	Workspace       string             `json:"workspace"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	Messages        []provider.Message `json:"messages,omitempty"`
-	LastInputTokens int                `json:"last_input_tokens,omitempty"`
+	ID              string                      `json:"id"`
+	Title           string                      `json:"title"`
+	WorkspaceID     string                      `json:"workspace_id"`
+	Workspace       string                      `json:"workspace"`
+	CreatedAt       time.Time                   `json:"created_at"`
+	UpdatedAt       time.Time                   `json:"updated_at"`
+	History         []provider.ConversationItem `json:"history,omitempty"`
+	LastInputTokens int                         `json:"last_input_tokens,omitempty"`
 }
 
 func WorkspaceIDFor(path string) string {
@@ -89,9 +89,9 @@ func (s *Session) CompactWith(summary string) {
 	if summary == "" {
 		return
 	}
-	s.Messages = []provider.Message{
-		{Role: "user", Content: "[Resumen de la conversacion previa]\n" + summary},
-		{Role: "assistant", Content: "Entendido, continuo desde este resumen."},
+	s.History = []provider.ConversationItem{
+		provider.UserText("[Resumen de la conversacion previa]\n" + summary),
+		provider.AssistantText("Entendido, continuo desde este resumen."),
 	}
 	s.LastInputTokens = 0
 }
