@@ -36,7 +36,7 @@ Unlike traditional AI agents that "blindly" search through files, Motoko relies 
 Run our installer script to build and install Motoko to your local path:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/master/install.sh | bash
 ```
 
 ### Manual Installation
