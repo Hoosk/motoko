@@ -7,6 +7,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/provider"
+	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
@@ -14,6 +15,9 @@ import (
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
 	if r.agent == nil || !r.agent.Configured() {
 		return agent.Result{}, fmt.Errorf("agente no configurado")
+	}
+	if info.Path == "" {
+		info = r.GetContextInfo()
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
@@ -31,6 +35,9 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
 	if r.agent == nil || !r.agent.Configured() {
 		return agent.Result{}, fmt.Errorf("agente no configurado")
+	}
+	if info.Path == "" {
+		info = r.GetContextInfo()
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
@@ -61,15 +68,28 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 	if r.semantic == nil {
 		return info
 	}
-	snapshot, err := r.semantic.Ensure(ctx)
-	if err != nil {
-		if info.Signals == nil {
-			info.Signals = make(map[string]string)
+
+	var snapshot *semantic.Snapshot
+	var err error
+
+	if info.SemanticSummary == "" {
+		snapshot, err = r.semantic.Ensure(ctx)
+		if err != nil {
+			if info.Signals == nil {
+				info.Signals = make(map[string]string)
+			}
+			info.Signals["semantic_error"] = err.Error()
+			return info
 		}
-		info.Signals["semantic"] = err.Error()
+		info.SemanticSummary = snapshot.Summary()
+	} else {
+		snapshot = r.semantic.LatestSnapshot()
+	}
+
+	if snapshot == nil {
 		return info
 	}
-	info.SemanticSummary = snapshot.Summary()
+
 	relevant := snapshot.RelevantFiles(input, 4)
 	info.RelevantFiles = make([]string, 0, len(relevant))
 	for _, file := range relevant {

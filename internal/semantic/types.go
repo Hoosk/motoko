@@ -58,6 +58,21 @@ func (f FileSummary) Descriptor() string {
 	return strings.Join(parts, " | ")
 }
 
+// SymbolAtLine returns the symbol that contains the given 1-based line number.
+func (f FileSummary) SymbolAtLine(line int) *Symbol {
+	var best *Symbol
+	for i := range f.Symbols {
+		s := &f.Symbols[i]
+		if line >= s.Range.Start && line <= s.Range.End {
+			// If we find nested symbols, we want the most specific one (smallest range)
+			if best == nil || (s.Range.End-s.Range.Start < best.Range.End-best.Range.Start) {
+				best = s
+			}
+		}
+	}
+	return best
+}
+
 type Snapshot struct {
 	GeneratedAt    time.Time
 	Root           string

@@ -78,21 +78,8 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Debug agente: %t", r.debug)}}}
 	case "context":
-		enriched := r.enrichContext(context.Background(), info, "")
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
-			fmt.Sprintf("workspace: %s", enriched.Workspace),
-			fmt.Sprintf("path: %s", enriched.Path),
-			fmt.Sprintf("git: %s", enriched.GitSummary()),
-			fmt.Sprintf("provider: %s", r.ProviderSummary()),
-			"signals:",
-			enriched.SignalSummary(),
-			"semantic:",
-			enriched.SemanticSummary,
-			"relevant files:",
-			enriched.RelevantFilesSummary(),
-			"relevant snippets:",
-			enriched.RelevantSnippetsSummary(),
-		}, "\n")}}}
+		rawPrompt := r.SystemPrompt(info)
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "--- RAW AGENT SYSTEM PROMPT ---\n\n" + rawPrompt}}}
 	case "provider":
 		return r.handleProviderCommand(parts[1:])
 	case "models":

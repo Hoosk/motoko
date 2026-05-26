@@ -183,6 +183,12 @@ func (idx *Index) SetSnapshotForTest(s *Snapshot) {
 	idx.mu.Unlock()
 }
 
+func (idx *Index) LatestSnapshot() *Snapshot {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.lastSnapshot
+}
+
 func BuildSnapshot(ctx context.Context, root string) (*Snapshot, error) {
 	idx := NewIndex()
 	return idx.RefreshDir(ctx, root)

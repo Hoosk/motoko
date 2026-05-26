@@ -24,12 +24,10 @@ func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	// Watch for changes in the workspace recursively, respecting .gitignore
+	events, _ := WatchHelper(ctx, []string{"."}, 500*time.Millisecond)
+
+	refresh := func() {
 		status := "semantic index unavailable"
 		var payload any
 		if c.index != nil {
@@ -42,11 +40,19 @@ func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 			}
 		}
 		publish(Update{Name: c.Name(), Status: status, Payload: payload})
+	}
 
+	// Initial refresh
+	refresh()
+
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			refresh()
+		case <-events:
+			refresh()
 		}
 	}
 }

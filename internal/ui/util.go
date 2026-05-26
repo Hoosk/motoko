@@ -59,36 +59,68 @@ func pendingLabel(pending string) string {
 	return pending
 }
 
-func renderToolPalette(specs []tools.Spec, showTachikomas bool, tachikomaInfo map[string]string) string {
-	sections := []string{styles.PopupTitleStyle.Render("Tools"), styles.PopupMutedStyle.Render("Ctrl+T cierra esta paleta. Usa /tool <nombre> <args> para ejecutarlas."), renderToolList(specs)}
-	if showTachikomas {
-		sections = append(sections, "", styles.PopupTitleStyle.Render("Tachikomas"), renderTachikomaList(tachikomaInfo))
+func renderToolPalette(specs []tools.Spec, tachikomaInfo map[string]string) string {
+	title := styles.PopupTitleStyle.Render("TOOL CATALOG")
+	help := styles.PopupMutedStyle.Render("Press Ctrl+T to close. Use /tool <name> <args> to execute.")
+	
+	toolList := renderToolList(specs)
+	
+	sections := []string{
+		title,
+		help,
+		"",
+		toolList,
 	}
+	
 	return strings.Join(sections, "\n")
 }
 
 func renderToolList(specs []tools.Spec) string {
-	lines := make([]string, 0, len(specs))
+	if len(specs) == 0 {
+		return styles.SystemStyle.Render("No tools registered.")
+	}
+
+	var lines []string
 	for _, spec := range specs {
-		lines = append(lines, fmt.Sprintf("%s\n  %s\n  %s", styles.SelectionStyle.Render(spec.Name), styles.PopupMutedStyle.Render(spec.Summary), styles.SystemStyle.Render(spec.Usage)))
+		name := styles.SelectionStyle.Width(12).Render(spec.Name)
+		usage := styles.CommandStyle.Render(spec.Usage)
+		summary := styles.PopupMutedStyle.Render(spec.Summary)
+		
+		// Create a clean block for each tool
+		toolBlock := fmt.Sprintf("%s  %s\n              %s", name, usage, summary)
+		lines = append(lines, toolBlock)
 	}
 	return strings.Join(lines, "\n\n")
 }
 
 func renderTachikomaList(statuses map[string]string) string {
 	if len(statuses) == 0 {
-		return styles.SystemStyle.Render("Sin datos.")
+		return styles.SystemStyle.Render("No background workers active.")
 	}
+	
 	names := make([]string, 0, len(statuses))
 	for name := range statuses {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	lines := make([]string, 0, len(names))
+	
+	whiteStyle := lipgloss.NewStyle().Foreground(styles.White)
+	grayStyle := lipgloss.NewStyle().Foreground(styles.Gray)
+	neonStyle := lipgloss.NewStyle().Foreground(styles.MainNeon)
+	pinkStyle := lipgloss.NewStyle().Foreground(styles.AlertPink)
+
+	var lines []string
 	for _, name := range names {
-		lines = append(lines, styles.SelectionStyle.Render(name)+"\n"+styles.SystemStyle.Render(statuses[name]))
+		status := statuses[name]
+		indicator := neonStyle.Render("●")
+		if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "fail") {
+			indicator = pinkStyle.Render("●")
+		}
+		
+		line := fmt.Sprintf("%s %-15s %s", indicator, whiteStyle.Render(name), grayStyle.Render(status))
+		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n\n")
+	return strings.Join(lines, "\n")
 }
 
 func trimLastRune(value string) string {

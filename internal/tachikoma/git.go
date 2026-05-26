@@ -23,24 +23,30 @@ func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error
 	ticker := time.NewTicker(g.interval)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	// Watch for git changes and workspace changes recursively
+	events, _ := WatchHelper(ctx, []string{".", ".git"}, 1*time.Second)
+
+	refresh := func() {
 		info := system.GetContextInfo()
-		status := "git no detectado"
+		status := "git not detected"
 		if info.HasGit {
 			status = info.GitSummary()
 		}
 
-		publish(Update{Name: g.Name(), Status: status})
+		publish(Update{Name: g.Name(), Status: status, Payload: info})
+	}
 
+	// Initial refresh
+	refresh()
+
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			refresh()
+		case <-events:
+			refresh()
 		}
 	}
 }

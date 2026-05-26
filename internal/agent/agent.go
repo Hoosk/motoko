@@ -69,6 +69,14 @@ func (a *Agent) Configured() bool {
 	return a != nil && a.provider != nil && a.provider.Configured() && a.tools != nil
 }
 
+// SystemPrompt returns the current system prompt that would be sent to the provider.
+func (a *Agent) SystemPrompt(info system.ContextInfo) string {
+	if a == nil {
+		return ""
+	}
+	return buildSystemPrompt(info, a.tools.Specs(), a.agentSystem)
+}
+
 func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem) (Result, error) {
 	return a.run(ctx, info, userInput, priorHistory, nil)
 }
@@ -202,7 +210,9 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		"When you need a tool, use the provider's native tool/function call mechanism instead of printing JSON that describes a tool call.",
 		"",
 		"--- OPERATING RULES ---",
-		"- Use tools to explore the codebase before assuming how it works.",
+		"- TACHIKOMA FIRST: Always check '[Background Signals]' and '[Context]' sections before using any tool.",
+		"- If a signal mentions 'available on-demand', use the 'inspect' tool for that worker before using 'read', 'grep', or 'bash'.",
+		"- Use tools only to explore parts of the codebase NOT already covered by the provided context.",
 		"- If you use a tool, request only one tool at a time. The system will return the result to you.",
 		"- DO NOT invent file names, functions, or command outputs.",
 		"- Prefer finishing the task end-to-end instead of stopping at analysis.",
@@ -215,6 +225,8 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 	lines = append(lines,
 		"--- CONTEXT ---",
 		"The following context was prepared automatically. Use it before doing blind searches.",
+		"Some background information might be summarized as 'available on-demand' to save space.",
+		"If you see an on-demand signal, use your tools (read, grep, etc.) to fetch the specific details you need.",
 		"",
 		fmt.Sprintf("[Workspace]: %s (%s)", info.Workspace, info.Path),
 		fmt.Sprintf("[Git Status]: %s", info.GitSummary()),

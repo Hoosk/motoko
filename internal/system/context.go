@@ -17,10 +17,15 @@ type ContextInfo struct {
 	Staged           int
 	Unstaged         int
 	Untracked        int
+	ModifiedFiles    []string // List of files with changes
 	Signals          map[string]string
 	SemanticSummary  string
 	RelevantFiles    []string
 	RelevantSnippets []string
+
+	// OnDemandSignals contains references to heavy data that isn't included in the prompt
+	// but is available if the agent requests it via tools.
+	OnDemandSignals map[string]string
 }
 
 func GetContextInfo() ContextInfo {
@@ -65,38 +70,46 @@ func GetContextInfo() ContextInfo {
 
 func (c ContextInfo) GitSummary() string {
 	if !c.HasGit {
-		return "sin repositorio git"
+		return "no git repository"
 	}
 
 	status := "clean"
 	if c.GitDirty {
 		status = fmt.Sprintf("dirty staged:%d unstaged:%d untracked:%d", c.Staged, c.Unstaged, c.Untracked)
+		if len(c.ModifiedFiles) > 0 && len(c.ModifiedFiles) <= 10 {
+			status += " | files: " + strings.Join(c.ModifiedFiles, ", ")
+		} else if len(c.ModifiedFiles) > 10 {
+			status += " | many files modified, use 'inspect GitTachikoma' for full list"
+		}
 	}
 
 	return fmt.Sprintf("%s (%s)", c.GitBranch, status)
 }
 
 func (c ContextInfo) SignalSummary() string {
-	if len(c.Signals) == 0 {
-		return "sin senales extra"
+	if len(c.Signals) == 0 && len(c.OnDemandSignals) == 0 {
+		return "no extra signals"
 	}
-	parts := make([]string, 0, len(c.Signals))
+	parts := make([]string, 0, len(c.Signals)+len(c.OnDemandSignals))
 	for name, status := range c.Signals {
 		parts = append(parts, fmt.Sprintf("%s: %s", name, status))
+	}
+	for name, hint := range c.OnDemandSignals {
+		parts = append(parts, fmt.Sprintf("%s (available on-demand): %s", name, hint))
 	}
 	return strings.Join(parts, " | ")
 }
 
 func (c ContextInfo) RelevantFilesSummary() string {
 	if len(c.RelevantFiles) == 0 {
-		return "sin archivos relevantes sugeridos"
+		return "no suggested relevant files"
 	}
 	return strings.Join(c.RelevantFiles, "\n")
 }
 
 func (c ContextInfo) RelevantSnippetsSummary() string {
 	if len(c.RelevantSnippets) == 0 {
-		return "sin snippets relevantes"
+		return "no relevant snippets"
 	}
 	return strings.Join(c.RelevantSnippets, "\n\n")
 }
@@ -118,8 +131,14 @@ func populateGitStatus(info *ContextInfo) {
 	}
 
 	for _, line := range lines {
-		if len(line) < 2 {
+		if len(line) < 3 {
 			continue
+		}
+
+		// Capture file name (status is 2 chars + space)
+		fileName := strings.TrimSpace(line[3:])
+		if fileName != "" {
+			info.ModifiedFiles = append(info.ModifiedFiles, fileName)
 		}
 
 		if strings.HasPrefix(line, "??") {

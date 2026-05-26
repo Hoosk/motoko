@@ -54,12 +54,14 @@ type Model struct {
 	timeline           TimelineModel
 	composer           ComposerModel
 	footer             FooterModel
+	sidebar            SidebarModel
 	providerForm       providerForm
 	runtime            *app.Runtime
 	manager            *tachikoma.Manager
 	cancel             func()
-	showTachikomas     bool
 	showToolPalette    bool
+	showSidebar        bool
+	autoSidebar        bool
 	modePickerOpen     bool
 	agentList          []agent.AgentDef
 	agentListIndex     int
@@ -85,17 +87,24 @@ func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context)
 	}
 	footer := NewFooterModel(runtime)
 	footer.SetContextStats(runtime.HistoryInputTokens(), runtime.ContextWindow())
+	
+	var manager *tachikoma.Manager
+	if runtime != nil {
+		manager = runtime.Tachikomas()
+	}
+
 	return Model{
 		timeline:     NewTimelineModel(),
 		composer:     NewComposerModel(runtime),
 		footer:       footer,
+		sidebar:      NewSidebarModel(runtime),
 		runtime:      runtime,
+		manager:      manager,
 		cancel:       cancel,
 		tachikomaCtx: tachikomaCtx,
+		autoSidebar:  true,
 	}
 }
-
-func (m *Model) SetManager(mgr *tachikoma.Manager) { m.manager = mgr }
 
 func (m Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
@@ -149,8 +158,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.cancel()
 			return m, tea.Quit
-		case "alt+t":
-			m.showTachikomas = !m.showTachikomas
+		case "alt+s":
+			m.showSidebar = !m.showSidebar
+			m.autoSidebar = false // Disable auto-mode once user interacts
 			return m, nil
 		case "ctrl+t":
 			m.showToolPalette = !m.showToolPalette
@@ -225,7 +235,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					waitAgentStream(m.agentStream),
 					thinkingTick(),
 					func() tea.Msg {
-						result, err := m.runtime.RunAgentStream(context.Background(), m.footer.GetSysInfo(), response.Action.AgentPrompt, func(event app.AgentStreamEvent) error {
+						result, err := m.runtime.RunAgentStream(context.Background(), m.runtime.GetContextInfo(), response.Action.AgentPrompt, func(event app.AgentStreamEvent) error {
 							m.agentStream.push(event)
 							return nil
 						})
@@ -383,7 +393,18 @@ func (m Model) View() string {
 	composerView := m.composer.View()
 	footerView := m.footer.View()
 
-	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView, footerView))
+	var mainContent string
+	if m.showSidebar {
+		sidebarView := m.sidebar.View()
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, 
+			lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView),
+			sidebarView,
+		)
+	} else {
+		mainContent = lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
+	}
+
+	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, mainContent, footerView))
 
 	if m.providerForm.active {
 		popup := styles.PopupStyle.Render(m.renderProviderForm())
@@ -404,7 +425,7 @@ func (m Model) View() string {
 	if !m.showToolPalette {
 		return base
 	}
-	popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.showTachikomas, m.footer.tachikomaInfo))
+	popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
 }
 
@@ -413,11 +434,29 @@ func (m *Model) syncLayout() {
 		return
 	}
 
-	composerHeight := m.composer.Height()
-	viewportHeight := max(6, m.height-(composerHeight+5))
+	// Automatic sidebar detection
+	if m.autoSidebar {
+		m.showSidebar = m.width > 120
+	}
 
-	m.composer.SyncLayout(m.width, composerHeight)
-	m.timeline.SyncLayout(m.width, viewportHeight)
+	composerHeight := m.composer.Height()
+	// Total height - (composer + footer + paddings)
+	footerHeight := 1
+	viewportHeight := max(6, m.height-(composerHeight+footerHeight+5))
+
+	timelineWidth := m.width
+	if m.showSidebar {
+		sidebarWidth := 30
+		if m.width > 150 {
+			sidebarWidth = 40
+		}
+		timelineWidth = m.width - sidebarWidth
+		m.sidebar.width = sidebarWidth
+		m.sidebar.height = viewportHeight + composerHeight
+	}
+
+	m.composer.SyncLayout(timelineWidth, composerHeight)
+	m.timeline.SyncLayout(timelineWidth, viewportHeight)
 }
 
 func runShellCommand(command string) tea.Cmd {

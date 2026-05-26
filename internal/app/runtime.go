@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
+	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
@@ -80,6 +83,7 @@ type Runtime struct {
 	config            *config.AppConfig
 	debug             bool
 	semantic          *semantic.Index
+	tachikomas        *tachikoma.Manager
 	currentAgentName  string
 	availableAgents   []agent.AgentDef
 	currentSession    *session.Session
@@ -124,10 +128,20 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		newProviderClient: provider.NewClient,
 		config:            cfg,
 		semantic:          semantic.NewIndex(),
+		tachikomas:        tachikoma.NewManager(),
 		currentAgentName:  "plan",
 		availableAgents:   allAgents,
 		workspaceID:       workspaceID,
 	}
+
+	// Setup default tachikomas
+	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
+	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30 * time.Second))
+	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15 * time.Second))
+
+	// Register tools that depend on tachikomas
+	r.tools.Register(tools.NewInspectTool(r.tachikomas))
+
 	if runtimeOpts.Resume {
 		if last, err := session.Last(workspaceID); err == nil && last != nil {
 			r.currentSession = last
@@ -374,6 +388,34 @@ func (r *Runtime) refreshAgent() {
 			break
 		}
 	}
+}
+
+func (r *Runtime) Start(ctx context.Context) {
+	if r.tachikomas != nil {
+		r.tachikomas.Start(ctx)
+	}
+}
+
+// Tachikomas returns the background worker manager.
+func (r *Runtime) Tachikomas() *tachikoma.Manager {
+	return r.tachikomas
+}
+
+func (r *Runtime) GetContextInfo() system.ContextInfo {
+	if r.tachikomas != nil {
+		return r.tachikomas.GetContextInfo()
+	}
+	return system.GetContextInfo()
+}
+
+// SystemPrompt returns the current raw system prompt for debugging purposes.
+func (r *Runtime) SystemPrompt(info system.ContextInfo) string {
+	if r.agent == nil {
+		return "Agent not configured."
+	}
+	// Make sure we enrich it first like we do in RunAgent
+	enriched := r.enrichContext(context.Background(), info, "")
+	return r.agent.SystemPrompt(enriched)
 }
 
 func (r *Runtime) providerClient(cfg config.ProviderConfig) (provider.Client, error) {
