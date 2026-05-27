@@ -31,16 +31,16 @@ func TestContextInfoSummaries(t *testing.T) {
 
 func TestContextInfoFallbackSummaries(t *testing.T) {
 	info := ContextInfo{}
-	if got := info.GitSummary(); got != "sin repositorio git" {
+	if got := info.GitSummary(); got != "no git repository" {
 		t.Fatalf("unexpected git fallback %q", got)
 	}
-	if got := info.SignalSummary(); got != "sin senales extra" {
+	if got := info.SignalSummary(); got != "no extra signals" {
 		t.Fatalf("unexpected signal fallback %q", got)
 	}
-	if got := info.RelevantFilesSummary(); got != "sin archivos relevantes sugeridos" {
+	if got := info.RelevantFilesSummary(); got != "no suggested relevant files" {
 		t.Fatalf("unexpected files fallback %q", got)
 	}
-	if got := info.RelevantSnippetsSummary(); got != "sin snippets relevantes" {
+	if got := info.RelevantSnippetsSummary(); got != "no relevant snippets" {
 		t.Fatalf("unexpected snippets fallback %q", got)
 	}
 }

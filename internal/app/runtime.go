@@ -36,6 +36,7 @@ type EntryKind string
 const (
 	EntryUser      EntryKind = "user"
 	EntryAssistant EntryKind = "assistant"
+	EntryReasoning EntryKind = "reasoning"
 	EntrySystem    EntryKind = "system"
 	EntryCommand   EntryKind = "command"
 	EntryOutput    EntryKind = "output"
@@ -98,9 +99,10 @@ type RuntimeOptions struct {
 }
 
 type AgentStreamEvent struct {
-	Kind    string
-	Title   string
-	Content string
+	Kind             string
+	Title            string
+	Content          string
+	ReasoningContent string
 }
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {

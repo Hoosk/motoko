@@ -3,18 +3,19 @@ package styles
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	Background   = lipgloss.Color("#0B121C")
-	Surface      = lipgloss.Color("#10161E")
-	SurfaceSoft  = lipgloss.Color("#0E141B")
-	MainNeon     = lipgloss.Color("#71F7A5")
-	AccentBlue   = lipgloss.Color("#74C7FF")
-	AccentViolet = lipgloss.Color("#B18CFF")
-	Gray         = lipgloss.Color("#6080A0")
-	White        = lipgloss.Color("#E6EDF3")
-	SoftBlue     = lipgloss.Color("#A9D8FF")
-	AlertPink    = lipgloss.Color("#FF7BCB")
-	WarmGold     = lipgloss.Color("#F4C96B")
-	BorderColor  = lipgloss.Color("#22303D")
+	Background        = lipgloss.Color("#0B121C")
+	Surface           = lipgloss.Color("#10161E")
+	SurfaceSoft       = lipgloss.Color("#0E141B")
+	MainNeon          = lipgloss.Color("#71F7A5")
+	AccentBlue        = lipgloss.Color("#74C7FF")
+	AccentViolet      = lipgloss.Color("#B18CFF")
+	Gray              = lipgloss.Color("#6080A0")
+	White             = lipgloss.Color("#E6EDF3")
+	SoftBlue          = lipgloss.Color("#A9D8FF")
+	AlertPink         = lipgloss.Color("#FF7BCB")
+	WarmGold          = lipgloss.Color("#F4C96B")
+	BorderColor       = lipgloss.Color("#22303D")
+	SelectionHighlight = lipgloss.Color("#1E3D58")
 )
 
 var (
@@ -53,8 +54,22 @@ var (
 
 	AssistantBlockStyle = lipgloss.NewStyle().
 		Foreground(White).
+		BorderStyle(lipgloss.NormalBorder()).
 		BorderLeft(true).
+		BorderRight(false).
+		BorderTop(false).
+		BorderBottom(false).
 		BorderForeground(MainNeon).
+		PaddingLeft(2)
+
+	ReasoningBlockStyle = lipgloss.NewStyle().
+		Foreground(Gray).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderLeft(true).
+		BorderRight(false).
+		BorderTop(false).
+		BorderBottom(false).
+		BorderForeground(Gray).
 		PaddingLeft(2)
 
 	AssistantLabelStyle = lipgloss.NewStyle().
@@ -126,6 +141,9 @@ var (
 
 	SelectedMessageStyle = lipgloss.NewStyle().
 		BorderLeft(true).
+		BorderRight(false).
+		BorderTop(false).
+		BorderBottom(false).
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(MainNeon).
 		PaddingLeft(1)

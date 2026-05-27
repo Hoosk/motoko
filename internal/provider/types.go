@@ -94,6 +94,11 @@ func ToolResultForInvocation(call ToolInvocation, output string) ConversationIte
 	}
 }
 
+type Delta struct {
+	Content          string
+	ReasoningContent string
+}
+
 type ModelInfo struct {
 	ID            string
 	ContextWindow int
@@ -102,7 +107,7 @@ type ModelInfo struct {
 type Client interface {
 	Configured() bool
 	Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error)
-	StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error)
+	StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error)
 	Summary() string
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 }

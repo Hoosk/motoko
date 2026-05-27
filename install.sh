@@ -37,16 +37,31 @@ fi
 
 # 2. Try to fetch the latest release from GitHub API
 echo -e "${BLUE}Checking for pre-built binaries for ${OS}/${ARCH}...${NC}"
+
+# First try /releases/latest, then fallback to /releases (which includes pre-releases)
 LATEST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases/latest)
-TAG=$(echo "$LATEST_RELEASE" | grep -m1 '"tag_name":' | cut -d'"' -f4)
+if echo "$LATEST_RELEASE" | grep -q "Not Found"; then
+    LATEST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases | grep -v '\[\]' | head -n 50 | tr -d '\n' | sed 's/},{/}\n{/g' | head -n 1)
+fi
+
+TAG=$(echo "$LATEST_RELEASE" | grep -oP '"tag_name":\s*"\K[^"]+' || echo "")
+
+if [[ -z "$TAG" ]]; then
+    # Fallback for very simple environments without grep -P
+    TAG=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | cut -d'"' -f4)
+fi
 
 if [[ -n "$TAG" ]]; then
-    echo -e "${GREEN}Found latest version: $TAG${NC}"
+    echo -e "${GREEN}Found version: $TAG${NC}"
     
-    # Construct the asset name (assuming standard naming: motoko_Linux_x86_64.tar.gz etc.)
-    # Note: Adjust naming convention if your GitHub Action uses a different one
+    # Construct the asset name pattern
     ASSET_PATTERN="motoko_${OS}_${ARCH}"
-    DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url" | grep "$ASSET_PATTERN" | cut -d'"' -f4 | head -n 1)
+    DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep "$ASSET_PATTERN" | head -n 1)
+    
+    if [[ -z "$DOWNLOAD_URL" ]]; then
+        # Fallback parsing
+        DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url" | grep "$ASSET_PATTERN" | cut -d'"' -f4 | head -n 1)
+    fi
 
     if [[ -n "$DOWNLOAD_URL" ]]; then
         echo -e "${BLUE}Downloading $DOWNLOAD_URL...${NC}"

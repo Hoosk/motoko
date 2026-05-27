@@ -77,8 +77,12 @@ type Model struct {
 	sessionLoading     bool
 	width              int
 	height             int
+	timelineWidth      int
+	viewportHeight     int
 	agentStream        *agentStreamBuffer
 	tachikomaCtx       context.Context
+	notificationText   string
+	notificationShow   bool
 }
 
 func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context) Model {
@@ -127,13 +131,50 @@ func waitForTachikoma(ctx context.Context, manager *tachikoma.Manager) tea.Cmd {
 		return TachikomaMsg(result.Update)
 	}
 }
+type HideNotificationMsg struct{}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if m.providerForm.active {
+	case CopySelectionMsg:
+		if msg.Err != nil {
+			m.notificationText = "Clipboard error"
+			m.notificationShow = true
+		} else {
+			m.notificationText = "Copied"
+			m.notificationShow = true
+		}
+		cmds = append(cmds, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+			return HideNotificationMsg{}
+		}))
+		// Don't forward to timeline to avoid spamming the log with copy status
+
+	case HideNotificationMsg:
+		m.notificationShow = false
+
+	case tea.MouseMsg:
+		switch msg.Action {
+		case tea.MouseActionPress:
+			contentX, contentY, ok := m.timeline.MouseContentCoords(msg.X, msg.Y)
+			if ok {
+				m.timeline.BeginSelection(contentX, contentY)
+			} else {
+				m.timeline.CancelSelection()
+			}
+
+		case tea.MouseActionMotion:
+			contentX, contentY := m.timeline.ClampMouseContentCoords(msg.X, msg.Y)
+			m.timeline.UpdateSelection(contentX, contentY)
+
+		case tea.MouseActionRelease:
+			contentX, contentY := m.timeline.ClampMouseContentCoords(msg.X, msg.Y)
+			if cmd := m.timeline.EndSelection(contentX, contentY); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case tea.KeyMsg:		if m.providerForm.active {
 			cmd := m.handleProviderFormKey(msg)
 			return m, cmd
 		}
@@ -165,11 +206,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+t":
 			m.showToolPalette = !m.showToolPalette
 			return m, nil
-		case "c":
-			if m.composer.Value() == "" {
-				cmds = append(cmds, m.timeline.CopySelected())
-				return m, tea.Batch(cmds...)
-			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -386,7 +422,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.width == 0 {
-		return "inicializando..."
+		return "initializing..."
 	}
 
 	timelineView := m.timeline.View()
@@ -405,6 +441,17 @@ func (m Model) View() string {
 	}
 
 	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, mainContent, footerView))
+
+	if m.notificationShow {
+		toast := styles.PopupStyle.
+			Padding(0, 1).
+			Width(30).
+			BorderForeground(styles.MainNeon).
+			Render(lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render("✓ ") + 
+				lipgloss.NewStyle().Foreground(styles.White).Render(m.notificationText))
+		
+		return overlayBase(base, toast, m.width, m.height)
+	}
 
 	if m.providerForm.active {
 		popup := styles.PopupStyle.Render(m.renderProviderForm())
@@ -444,17 +491,21 @@ func (m *Model) syncLayout() {
 	footerHeight := 1
 	viewportHeight := max(6, m.height-(composerHeight+footerHeight+5))
 
-	timelineWidth := m.width
+	// Account for MainContainerStyle padding (0,1) -> 2 columns overhead
+	availableWidth := m.width - 2
+	timelineWidth := availableWidth
 	if m.showSidebar {
 		sidebarWidth := 30
 		if m.width > 150 {
 			sidebarWidth = 40
 		}
-		timelineWidth = m.width - sidebarWidth
+		timelineWidth = availableWidth - sidebarWidth
 		m.sidebar.width = sidebarWidth
-		m.sidebar.height = viewportHeight + composerHeight
+		m.sidebar.height = viewportHeight + composerHeight + 4
 	}
 
+	m.timelineWidth = timelineWidth
+	m.viewportHeight = viewportHeight
 	m.composer.SyncLayout(timelineWidth, composerHeight)
 	m.timeline.SyncLayout(timelineWidth, viewportHeight)
 }

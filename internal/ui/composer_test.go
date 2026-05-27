@@ -117,7 +117,7 @@ func TestComposerHintsAndPromptReflectMode(t *testing.T) {
 	}
 	r.HandleInput("/shell", system.ContextInfo{})
 	m.syncInputChrome()
-	if got := m.textarea.Placeholder; !strings.Contains(got, "Modo shell activo") {
+	if got := m.textarea.Placeholder; !strings.Contains(got, "Shell mode active") {
 		t.Fatalf("expected shell placeholder, got %q", got)
 	}
 	if got := stripANSI(m.renderInputPrompt()); !strings.Contains(got, "$") {

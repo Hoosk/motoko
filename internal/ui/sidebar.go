@@ -109,6 +109,10 @@ func (m SidebarModel) View() string {
 	content := append(fileLines, gitLines...)
 	content = append(content, tachikomaLines...)
 
+	if m.height > 0 && len(content) > m.height {
+		content = content[:m.height]
+	}
+
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
 		BorderForeground(styles.Gray).

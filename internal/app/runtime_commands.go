@@ -22,26 +22,26 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	switch command {
 	case "help":
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
-			"Comandos disponibles:",
-			"/help     muestra esta ayuda",
-			"/clear    limpia la timeline",
-			"/compact  compacta manualmente la sesion activa",
-			"/mode     abre el selector de modo/agente",
-			"/plan     activa modo de solo lectura",
-			"/build    activa modo de trabajo",
-			"/shell    activa modo shell para ejecutar comandos directos",
-			"/chat     vuelve al modo normal de chat",
-			"/status   resume modo, permisos y aprobaciones",
-			"/trace    alterna log a fichero (solo si compilado con -tags motoko_trace)",
-			"/context  muestra contexto local y git",
-			"/provider gestiona providers configurados",
-			"/models   lista o selecciona modelos del provider activo",
-			"/sessions lista o cambia de sesion del workspace",
-			"/tools    muestra las tools registradas",
-			"/tool     ejecuta una tool real del runtime",
-			"/approve  ejecuta la accion pendiente",
-			"/deny     cancela la accion pendiente",
-			"!<cmd>    ejecuta un comando shell explicito",
+			"Available commands:",
+			"/help     Show this help message",
+			"/clear    Clear the timeline history",
+			"/compact  Manually compact the active session",
+			"/mode     Open the agent mode selector",
+			"/plan     Activate read-only plan mode",
+			"/build    Activate active build mode",
+			"/shell    Activate direct shell execution mode",
+			"/chat     Return to normal chat mode",
+			"/status   Summarize mode, permissions, and approvals",
+			"/trace    Toggle trace logging to file (if compiled with -tags motoko_trace)",
+			"/context  Show raw system prompt being sent to the agent",
+			"/provider Manage configured LLM providers",
+			"/models   List or select models from the active provider",
+			"/sessions List or switch between workspace sessions",
+			"/tools    Show all registered tools",
+			"/tool     Execute a specific runtime tool",
+			"/approve  Execute the pending shell action",
+			"/deny     Cancel the pending shell action",
+			"!<cmd>    Execute an explicit shell command",
 		}, "\n")}}}
 	case "clear":
 		if r.currentSession != nil {
@@ -49,26 +49,26 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			r.currentSession.LastInputTokens = 0
 			_ = r.currentSession.Save()
 		}
-		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reiniciada."}}}
+		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reset."}}}
 	case "compact":
 		return Response{
-			Entries: []Entry{{Kind: EntrySystem, Text: "Compactando sesion..."}},
+			Entries: []Entry{{Kind: EntrySystem, Text: "Compacting session..."}},
 			Action:  &Action{Type: ActionCompact},
 		}
 	case "plan":
 		r.SetAgentMode("plan")
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: plan. Los comandos shell requieren aprobacion explicita."}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
 	case "build":
 		r.SetAgentMode("build")
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo activo: build. Los comandos seguros se ejecutan directamente; los sensibles se quedan pendientes de aprobacion."}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
 	case "mode":
 		return Response{Signal: "open-mode-popup"}
 	case "shell":
 		r.inputMode = InputModeShell
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo de entrada: shell. Cualquier linea que no empiece por / se ejecuta como comando."}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Input mode: shell. Any line not starting with / will be executed as a command."}}}
 	case "chat":
 		r.inputMode = InputModeChat
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Modo de entrada: chat. La entrada normal vuelve a tratarse como prompt."}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Input mode: chat. Normal input will be treated as a prompt."}}}
 	case "status":
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.statusText(info)}}}
 	case "debug":
@@ -76,7 +76,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		if r.agent != nil {
 			r.agent.SetDebug(r.debug)
 		}
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Debug agente: %t", r.debug)}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agent debug: %t", r.debug)}}}
 	case "context":
 		rawPrompt := r.SystemPrompt(info)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "--- RAW AGENT SYSTEM PROMPT ---\n\n" + rawPrompt}}}
@@ -90,7 +90,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.tools.Specs())}}}
 	case "tool":
 		if len(parts) < 2 {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /tool <nombre> <args>. Usa /tools para listar disponibles."}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
 		}
 
 		toolName := parts[1]
@@ -117,7 +117,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Entries: entries}
 	case "approve":
 		if r.pending == nil {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay ninguna accion pendiente."}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No pending action."}}}
 		}
 
 		pending := r.pending
@@ -125,18 +125,18 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{
 			Entries: []Entry{
 				{Kind: EntryCommand, Text: "$ " + pending.Command},
-				{Kind: EntrySystem, Text: "Aprobacion recibida. Ejecutando comando..."},
+				{Kind: EntrySystem, Text: "Approval received. Executing command..."},
 			},
 			Action: &Action{Type: ActionShell, ShellCommand: pending.Command},
 		}
 	case "deny":
 		if r.pending == nil {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay ninguna accion pendiente."}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No pending action."}}}
 		}
 
 		command := r.pending.Command
 		r.pending = nil
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Accion cancelada: %s", command)}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", command)}}}
 	case "trace":
 		if !tracelog.Available() {
 			return Response{}
@@ -147,12 +147,12 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}
 		return Response{}
 	default:
-		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Comando desconocido: /%s", command)}}}
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}
 }
 
 func formatToolList(specs []tools.Spec) string {
-	lines := []string{"Tools registradas:"}
+	lines := []string{"Registered tools:"}
 	for _, spec := range specs {
 		lines = append(lines, fmt.Sprintf("- %s: %s", spec.Usage, spec.Summary))
 	}
@@ -160,27 +160,27 @@ func formatToolList(specs []tools.Spec) string {
 }
 
 func (r *Runtime) statusText(info system.ContextInfo) string {
-	pending := "ninguna"
+	pending := "none"
 	if r.pending != nil {
 		pending = r.pending.Command
 	}
 
 	return strings.Join([]string{
-		fmt.Sprintf("modo: %s", r.mode),
-		fmt.Sprintf("entrada: %s", r.inputMode),
-		fmt.Sprintf("agente configurado: %t", r.AgentConfigured()),
-		fmt.Sprintf("provider activo: %s", r.ProviderSummary()),
+		fmt.Sprintf("mode: %s", r.mode),
+		fmt.Sprintf("input: %s", r.inputMode),
+		fmt.Sprintf("agent configured: %t", r.AgentConfigured()),
+		fmt.Sprintf("active provider: %s", r.ProviderSummary()),
 		fmt.Sprintf("workspace: %s", info.Workspace),
 		fmt.Sprintf("git: %s", info.GitSummary()),
-		fmt.Sprintf("aprobacion pendiente: %s", pending),
-		"politica: plan pide aprobacion para shell; build ejecuta seguro y pide aprobacion para comandos sensibles.",
+		fmt.Sprintf("pending approval: %s", pending),
+		"policy: plan asks for shell approval; build runs safe commands and asks for sensitive ones.",
 	}, "\n")
 }
 
 func (r *Runtime) handleProviderCommand(args []string) Response {
 	if len(args) == 0 {
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.Join([]string{
-			"Uso de providers:",
+			"Provider usage:",
 			"/provider list",
 			"/provider add",
 			"/provider use <name>",
@@ -193,10 +193,10 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 	case "list":
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.providerListText()}}}
 	case "add":
-		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Abriendo formulario de provider..."}}}
+		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Opening provider configuration form..."}}}
 	case "use":
 		if len(args) < 2 {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /provider use <name>"}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider use <name>"}}}
 		}
 		if err := r.config.SetActive(args[1]); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
@@ -205,28 +205,28 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		r.refreshAgent()
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider activo: %s", r.ProviderSummary())}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Active provider: %s", r.ProviderSummary())}}}
 	case "remove":
 		if len(args) < 2 {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: "Uso: /provider remove <name>"}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider remove <name>"}}}
 		}
 		if !r.config.RemoveProvider(args[1]) {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider no encontrado: %s", args[1])}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider not found: %s", args[1])}}}
 		}
 		if err := r.config.Save(); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		r.refreshAgent()
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider eliminado: %s", args[1])}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider removed: %s", args[1])}}}
 	default:
-		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Subcomando desconocido: %s", subcommand)}}}
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s", subcommand)}}}
 	}
 }
 
 func (r *Runtime) handleModelsCommand(args []string) Response {
 	active, ok := r.config.Active()
 	if !ok {
-		return Response{Entries: []Entry{{Kind: EntryError, Text: "No hay provider activo. Usa /provider add o /provider use primero."}}}
+		return Response{Entries: []Entry{{Kind: EntryError, Text: "No active provider. Use /provider add or /provider use first."}}}
 	}
 
 	if len(args) == 0 {
@@ -242,15 +242,15 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 	}
 	r.refreshAgent()
-	return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Modelo activo para %s: %s", active.Name, active.Model)}}}
+	return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Active model for %s: %s", active.Name, active.Model)}}}
 }
 
 func (r *Runtime) providerListText() string {
 	if r.config == nil || len(r.config.Providers) == 0 {
-		return "No hay providers configurados. Usa /provider add."
+		return "No providers configured. Use /provider add."
 	}
 
-	lines := []string{"Providers configurados:"}
+	lines := []string{"Configured providers:"}
 	for _, providerCfg := range r.config.Providers {
 		marker := " "
 		if strings.EqualFold(providerCfg.Name, r.config.ActiveProvider) {

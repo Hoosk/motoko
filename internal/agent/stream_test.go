@@ -20,9 +20,9 @@ func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]provider.Mode
 func (f *fakeStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	return provider.Response{FinalText: "hola", OutputItems: []provider.ConversationItem{provider.AssistantText("hola")}}, nil
 }
-func (f *fakeStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
-	_ = onDelta("ho")
-	_ = onDelta("la")
+func (f *fakeStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
+	_ = onDelta(provider.Delta{Content: "ho"})
+	_ = onDelta(provider.Delta{Content: "la"})
 	return provider.Response{FinalText: "hola", OutputItems: []provider.ConversationItem{provider.AssistantText("hola")}}, nil
 }
 
@@ -54,10 +54,10 @@ func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]provider
 func (f *fakePlainStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	return provider.Response{FinalText: "hola mundo", OutputItems: []provider.ConversationItem{provider.AssistantText("hola mundo")}}, nil
 }
-func (f *fakePlainStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
-	_ = onDelta("hola")
-	_ = onDelta(" ")
-	_ = onDelta("mundo")
+func (f *fakePlainStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
+	_ = onDelta(provider.Delta{Content: "hola"})
+	_ = onDelta(provider.Delta{Content: " "})
+	_ = onDelta(provider.Delta{Content: "mundo"})
 	return provider.Response{FinalText: "hola mundo", OutputItems: []provider.ConversationItem{provider.AssistantText("hola mundo")}}, nil
 }
 
@@ -88,7 +88,7 @@ func (f *fakeToolStreamingProvider) Summary() string  { return "fake:tool-stream
 func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
 }
-func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
+func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
 }
 func (f *fakeToolStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {

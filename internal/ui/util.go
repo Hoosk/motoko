@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/tools"
+	osc52 "github.com/aymanbagabas/go-osc52/v2"
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,6 +30,15 @@ const logoArt = `
 `
 
 func writeClipboard(text string) error {
+	seq := osc52.New(text)
+	if os.Getenv("TMUX") != "" {
+		seq = seq.Tmux()
+	} else if os.Getenv("STY") != "" {
+		seq = seq.Screen()
+	}
+	if _, err := seq.WriteTo(os.Stderr); err == nil {
+		return nil
+	}
 	if err := clipboard.WriteAll(text); err == nil {
 		return nil
 	}
@@ -43,7 +54,7 @@ func writeClipboard(text string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("no se pudo copiar: instala wl-copy, xclip o xsel si el backend actual falla")
+	return fmt.Errorf("could not copy: OSC52, clipboard backend, and wl-copy/xclip/xsel all failed")
 }
 
 func copySelection(text string) tea.Cmd {
@@ -156,6 +167,73 @@ func estimateTextareaHeight(value string, width int) int {
 		count += (lineWidth-1)/width + 1
 	}
 	return max(3, count)
+}
+
+func truncateANSI(s string, maxCols int) string {
+	if maxCols <= 0 {
+		return ""
+	}
+	var out strings.Builder
+	col := 0
+	runes := []rune(s)
+	i := 0
+	for i < len(runes) {
+		r := runes[i]
+		if r == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+			j := i + 2
+			for j < len(runes) {
+				c := runes[j]
+				if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+					j++
+					break
+				}
+				j++
+			}
+			out.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+		rw := runewidth.RuneWidth(r)
+		if rw == 0 {
+			rw = 1
+		}
+		if col+rw > maxCols {
+			break
+		}
+		out.WriteRune(r)
+		col += rw
+		i++
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
+// overlayBase superimposes an overlay string (toast) over a base string.
+func overlayBase(base, overlay string, width, height int) string {
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	res := make([]string, len(baseLines))
+	for i, baseLine := range baseLines {
+		if i < len(overlayLines) {
+			oLine := overlayLines[i]
+			oWidth := lipgloss.Width(oLine)
+			availWidth := width - oWidth
+			if availWidth < 0 {
+				availWidth = 0
+			}
+			truncated := truncateANSI(baseLine, availWidth)
+			actualWidth := lipgloss.Width(truncated)
+			padding := ""
+			if actualWidth < availWidth {
+				padding = strings.Repeat(" ", availWidth-actualWidth)
+			}
+			res[i] = truncated + padding + oLine
+		} else {
+			res[i] = baseLine
+		}
+	}
+	return strings.Join(res, "\n")
 }
 
 func stripANSI(value string) string {

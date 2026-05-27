@@ -44,13 +44,15 @@ type chatCompletionChoice struct {
 }
 
 type chatCompletionMessage struct {
-	Content   string                   `json:"content"`
-	ToolCalls []chatCompletionToolCall `json:"tool_calls"`
+	Content          string                   `json:"content"`
+	ReasoningContent string                   `json:"reasoning_content"`
+	ToolCalls        []chatCompletionToolCall `json:"tool_calls"`
 }
 
 type chatCompletionDelta struct {
-	Content   string                        `json:"content"`
-	ToolCalls []chatCompletionToolCallDelta `json:"tool_calls"`
+	Content          string                        `json:"content"`
+	ReasoningContent string                        `json:"reasoning_content"`
+	ToolCalls        []chatCompletionToolCallDelta `json:"tool_calls"`
 }
 
 type chatCompletionToolCall struct {

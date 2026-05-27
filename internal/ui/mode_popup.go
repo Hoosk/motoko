@@ -52,8 +52,8 @@ func (m *Model) handleModePickerKey(msg tea.KeyMsg) tea.Cmd {
 
 func (m Model) renderModePicker() string {
 	rows := []string{
-		styles.PopupTitleStyle.Render("Modo / Agente"),
-		styles.PopupMutedStyle.Render("↑↓ navega  Enter selecciona  Esc cancela"),
+		styles.PopupTitleStyle.Render("Agent Mode"),
+		styles.PopupMutedStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
 	for i, a := range m.agentList {

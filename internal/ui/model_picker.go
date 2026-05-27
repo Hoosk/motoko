@@ -22,7 +22,7 @@ const (
 func (m *Model) openModelPicker() {
 	active, ok := m.runtime.GetActiveProviderConfig()
 	if !ok {
-		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "No hay provider activo."})
+		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "No active provider."})
 		m.timeline.renderMessages()
 		return
 	}
@@ -184,17 +184,17 @@ func (m Model) renderModelPickerStep() string {
 	hintStyle := lipgloss.NewStyle().Foreground(styles.Gray)
 
 	rows := []string{
-		titleStyle.Render("Seleccionar modelo"),
-		hintStyle.Render("↑↓ navega  Enter selecciona  Esc cancela"),
+		titleStyle.Render("Select Model"),
+		hintStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
 
 	if m.modelPickerLoading && len(m.modelList) == 0 {
-		rows = append(rows, hintStyle.Render("Cargando modelos..."))
+		rows = append(rows, hintStyle.Render("Loading models..."))
 		return strings.Join(rows, "\n")
 	}
 	if len(m.modelList) == 0 {
-		rows = append(rows, hintStyle.Render("Sin modelos. Usa /models <nombre> para añadir uno."))
+		rows = append(rows, hintStyle.Render("No models found. Use /models <name> to add one."))
 		return strings.Join(rows, "\n")
 	}
 
@@ -203,7 +203,7 @@ func (m Model) renderModelPickerStep() string {
 		label := styles.PopupFieldLabelStyle.Render(model.ID)
 		current := strings.EqualFold(model.ID, active.Model)
 		if current {
-			label += "  " + hintStyle.Render("(activo)")
+			label += "  " + hintStyle.Render("(active)")
 		}
 		if i == m.modelListIndex {
 			rows = append(rows, styles.PopupSelectionStyle.Render(label))
@@ -213,7 +213,7 @@ func (m Model) renderModelPickerStep() string {
 	}
 
 	if m.modelPickerLoading {
-		rows = append(rows, "", hintStyle.Render("Actualizando lista…"))
+		rows = append(rows, "", hintStyle.Render("Updating list…"))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -229,9 +229,9 @@ func (m Model) renderThinkingPicker() string {
 	}
 
 	rows := []string{
-		titleStyle.Render("Nivel de razonamiento"),
+		titleStyle.Render("Reasoning Level"),
 		accentStyle.Render(chosen),
-		hintStyle.Render("↑↓ navega  Enter confirma  Esc volver"),
+		hintStyle.Render("↑↓ navigate  Enter confirm  Esc back"),
 		"",
 	}
 

@@ -16,11 +16,11 @@ type AgentDef struct {
 var BuiltinAgents = []AgentDef{
 	{
 		Name:   "plan",
-		System: "Modo plan: lee y analiza el código, proporciona planes y diagnósticos. NO escribas ni modifiques archivos sin aprobación explícita. Explica lo que harías antes de hacerlo.",
+		System: "Plan mode: read and analyze code, provide plans and diagnostics. DO NOT write or modify files without explicit approval. Explain what you would do before doing it.",
 	},
 	{
 		Name:   "build",
-		System: "Modo build: implementa cambios en el código directamente y de forma precisa. Verifica siempre el estado actual antes de escribir. Prefiere cambios incrementales y verificables.",
+		System: "Build mode: implement code changes directly and precisely. Always verify current state before writing. Prefer incremental and verifiable changes.",
 	},
 }
 

@@ -178,8 +178,17 @@ func (m ComposerModel) View() string {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
-	return styles.InputChromeStyle.Width(m.width - 6).Render(
-		lipgloss.JoinVertical(lipgloss.Left, body, mentionDropdown, suggestionsBlock),
+	var blocks []string
+	blocks = append(blocks, body)
+	if mentionDropdown != "" {
+		blocks = append(blocks, mentionDropdown)
+	}
+	if suggestionsBlock != "" {
+		blocks = append(blocks, suggestionsBlock)
+	}
+
+	return styles.InputChromeStyle.Width(m.width).Render(
+		lipgloss.JoinVertical(lipgloss.Left, blocks...),
 	)
 }
 
@@ -193,8 +202,8 @@ func (m *ComposerModel) syncLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	// Overhead: MainContainerStyle.Padding(0,1)=2 + Chrome border H=2 + Chrome Padding(1,1) H=2 + promptBlock=3 = 9
-	textareaWidth := max(16, m.width-9)
+	// Overhead: Chrome (4) + promptBlock (3) = 7
+	textareaWidth := max(16, m.width-7)
 	m.textarea.SetWidth(textareaWidth)
 	m.textarea.SetHeight(2)
 }
@@ -281,10 +290,10 @@ func (m *ComposerModel) applySelectedMention() {
 
 func (m *ComposerModel) syncInputChrome() {
 	if m.runtime.InputMode() == app.InputModeShell {
-		m.textarea.Placeholder = "Modo shell activo: escribe un comando o /chat para salir"
+		m.textarea.Placeholder = "Shell mode active: type a command or /chat to exit"
 		return
 	}
-	m.textarea.Placeholder = "Escribe un prompt, /tool ..., o !comando"
+	m.textarea.Placeholder = "Type a prompt, /tool ..., or !command"
 }
 
 func (m ComposerModel) renderInputPrompt() string {
@@ -303,10 +312,10 @@ func (m ComposerModel) renderSuggestionsLine() string {
 	var detail string
 	if len(m.suggestions) == 0 {
 		if m.runtime.InputMode() == app.InputModeShell {
-			detail = styles.InputHintStyle.Render("Shell directo activo. Enter ejecuta. /chat sale. Ctrl+T abre la paleta.")
+			detail = styles.InputHintStyle.Render("Direct shell active. Enter to execute. /chat to exit. Ctrl+T for tools.")
 			return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 		}
-		detail = styles.InputHintStyle.Render("Tab rota y completa. /provider add abre el formulario. /models tiene autocompletado con modelos cacheados.")
+		detail = styles.InputHintStyle.Render("Tab to rotate suggestions. /provider add for config. /models for selection.")
 		return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 	}
 	limit := min(3, len(m.suggestions))
@@ -378,7 +387,14 @@ func composerActivityLabel(agentName string) string {
 }
 
 func (m ComposerModel) Height() int {
-	return m.textarea.Height() + 6
+	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)
+	if len(m.mentionSuggestions) > 0 {
+		// MarginTop(1) = 1 line
+		// Title "Mentions" = 1 line
+		// Items = min(4, len) lines
+		height += 2 + min(4, len(m.mentionSuggestions))
+	}
+	return height
 }
 
 func (m ComposerModel) Value() string {

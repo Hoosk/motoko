@@ -31,13 +31,13 @@ func TestProviderFormValidationAndMaskSecret(t *testing.T) {
 	m.openProviderForm()
 	m.providerForm.fieldIndex = 2 // Save button
 	_ = m.handleProviderFormEnter()
-	if m.providerForm.status != "La API key es obligatoria." {
+	if m.providerForm.status != "API Key is required." {
 		t.Fatalf("expected api key validation, got %q", m.providerForm.status)
 	}
 	if got := maskSecret("abcd1234"); got != "****1234" {
 		t.Fatalf("unexpected secret mask %q", got)
 	}
-	if got := buttonLabel(true, "guardar"); got != "cargando..." {
+	if got := buttonLabel(true, "guardar"); got != "loading..." {
 		t.Fatalf("unexpected loading button label %q", got)
 	}
 }

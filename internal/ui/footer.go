@@ -117,7 +117,7 @@ func (m FooterModel) View() string {
 		parts = append(parts, styles.ErrorStyle.Render("⚠ "+pending))
 	}
 
-	return styles.FooterStyle.Width(m.width - 4).Render(strings.Join(parts, "  "))
+	return styles.FooterStyle.Width(m.width).Render(strings.Join(parts, "  "))
 }
 
 func (m FooterModel) GetSysInfo() system.ContextInfo {

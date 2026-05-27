@@ -44,14 +44,13 @@ func (f fakeProviderClient) Complete(ctx context.Context, systemPrompt string, m
 	}
 	return f.complete(ctx, systemPrompt, messages, toolSet)
 }
-
-func (f fakeProviderClient) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet, onDelta func(string) error) (provider.Response, error) {
+func (f fakeProviderClient) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	resp, err := f.Complete(ctx, systemPrompt, messages, toolSet)
 	if err != nil {
 		return provider.Response{}, err
 	}
 	if onDelta != nil && strings.TrimSpace(resp.FinalText) != "" {
-		if err := onDelta(resp.FinalText); err != nil {
+		if err := onDelta(provider.Delta{Content: resp.FinalText}); err != nil {
 			return provider.Response{}, err
 		}
 	}
@@ -331,7 +330,7 @@ func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) 
 		t.Fatalf("expected one status entry, got %#v", resp)
 	}
 	text := resp.Entries[0].Text
-	for _, want := range []string{"modo: plan", "entrada: shell", "workspace: motoko", "aprobacion pendiente: git status"} {
+	for _, want := range []string{"mode: plan", "input: shell", "workspace: motoko", "pending approval: git status"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in status text %q", want, text)
 		}

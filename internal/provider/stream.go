@@ -16,7 +16,7 @@ import (
 
 var errSSEDone = errors.New("sse done")
 
-func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
+func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
@@ -41,7 +41,7 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 				continue
 			}
 			if onDelta != nil {
-				if err := onDelta(delta); err != nil {
+				if err := onDelta(Delta{Content: delta}); err != nil {
 					return Response{}, err
 				}
 			}
@@ -59,7 +59,7 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	return Response{}, nil
 }
 
-func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
+func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
 	payload := map[string]interface{}{
 		"model": c.model,
 		"messages": append([]map[string]any{
@@ -89,11 +89,15 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		}
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
-			content := delta.Content
-			if content != "" {
-				raw.WriteString(content)
+			if delta.Content != "" || delta.ReasoningContent != "" {
+				raw.WriteString(delta.Content)
 				if onDelta != nil {
-					return onDelta(content)
+					if err := onDelta(Delta{
+						Content:          delta.Content,
+						ReasoningContent: delta.ReasoningContent,
+					}); err != nil {
+						return err
+					}
 				}
 			}
 			mergeChatToolCallDeltas(toolCalls, delta.ToolCalls)
@@ -116,7 +120,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	}), nil
 }
 
-func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
+func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
 	if !c.Configured() {
 		return Response{}, fmt.Errorf("provider no configurado")
 	}
@@ -157,8 +161,12 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		var event struct {
 			Type  string `json:"type"`
 			Delta struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type         string `json:"type"`
+				Text         string `json:"text"`
+				Thinking     string `json:"thinking"`
+				Signature    string `json:"signature"`
+				Reason       string `json:"reason"`
+				PartialQuote string `json:"partial_quote"`
 			} `json:"delta"`
 			Usage struct {
 				InputTokens  int `json:"input_tokens"`
@@ -178,12 +186,15 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		case "message_start":
 			usage.InputTokens = event.Message.Usage.InputTokens
 		case "content_block_delta":
-			if event.Delta.Text == "" {
+			if event.Delta.Text == "" && event.Delta.Thinking == "" {
 				return nil
 			}
 			raw.WriteString(event.Delta.Text)
 			if onDelta != nil {
-				return onDelta(event.Delta.Text)
+				return onDelta(Delta{
+					Content:          event.Delta.Text,
+					ReasoningContent: event.Delta.Thinking,
+				})
 			}
 		case "message_delta":
 			if event.Usage.OutputTokens > 0 {
@@ -200,19 +211,6 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 	return responseFromText(raw.String(), usage), nil
-}
-
-func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(string) error) (Response, error) {
-	resp, err := c.Complete(ctx, systemPrompt, messages, tools)
-	if err != nil {
-		return Response{}, err
-	}
-	if onDelta != nil && strings.TrimSpace(resp.FinalText) != "" {
-		if err := onDelta(resp.FinalText); err != nil {
-			return Response{}, err
-		}
-	}
-	return resp, nil
 }
 
 func postJSONStream(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, onData func(string) error) error {

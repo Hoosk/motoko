@@ -47,9 +47,10 @@ type Agent struct {
 }
 
 type StreamEvent struct {
-	Kind    string
-	Title   string
-	Content string
+	Kind             string
+	Title            string
+	Content          string
+	ReasoningContent string
 }
 
 func New(p provider.Client, toolsRegistry *tools.Registry) *Agent {
@@ -197,8 +198,18 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	if onEvent == nil {
 		return a.provider.Complete(ctx, systemPrompt, messages, toolSet)
 	}
-	return a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta string) error {
-		return onEvent(StreamEvent{Kind: "assistant_delta", Content: delta})
+	return a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
+		if delta.ReasoningContent != "" {
+			if err := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); err != nil {
+				return err
+			}
+		}
+		if delta.Content != "" {
+			if err := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

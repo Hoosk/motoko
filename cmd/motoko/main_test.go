@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/ui"
 )
 
-func TestNewTachikomaManagerWiresDefaultWorkers(t *testing.T) {
-	mgr := newTachikomaManager(app.NewRuntime())
-	if mgr == nil {
-		t.Fatal("expected manager")
+func TestMainWiringUsesRuntimeTachikomas(t *testing.T) {
+	runtime := app.NewRuntime(app.RuntimeOptions{})
+	model := ui.NewModel(runtime, func() {}, context.Background())
+	if model.Init() == nil {
+		t.Fatal("expected init command")
 	}
 }

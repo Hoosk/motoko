@@ -33,11 +33,11 @@ func TestRenderHelpers(t *testing.T) {
 	if !strings.Contains(tachikomaList, "Git") || !strings.Contains(tachikomaList, "clean") {
 		t.Fatalf("unexpected tachikoma list %q", tachikomaList)
 	}
-	palette := renderToolPalette(specs, true, map[string]string{"Git": "clean"})
-	if !strings.Contains(palette, "Tachikomas") {
-		t.Fatalf("expected tachikoma section, got %q", palette)
+	palette := renderToolPalette(specs, map[string]string{"Git": "clean"})
+	if !strings.Contains(palette, "read") {
+		t.Fatalf("expected tool palette content, got %q", palette)
 	}
-	if got := renderTachikomaList(nil); !strings.Contains(got, stripANSI(styles.SystemStyle.Render("Sin datos."))) && !strings.Contains(stripANSI(got), "Sin datos.") {
+	if got := renderTachikomaList(nil); !strings.Contains(got, stripANSI(styles.SystemStyle.Render("No background workers active."))) && !strings.Contains(stripANSI(got), "No background workers active.") {
 		t.Fatalf("unexpected empty tachikoma output %q", got)
 	}
 }

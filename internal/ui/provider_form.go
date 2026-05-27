@@ -101,7 +101,7 @@ func (m *Model) handleProviderFormEnter() tea.Cmd {
 	case 2: // Save
 		cfg := m.providerConfigFromForm()
 		if strings.TrimSpace(cfg.APIKey) == "" {
-			m.providerForm.status = "La API key es obligatoria."
+			m.providerForm.status = "API Key is required."
 			return nil
 		}
 		if err := m.runtime.SaveProvider(cfg, true); err != nil {
@@ -109,8 +109,8 @@ func (m *Model) handleProviderFormEnter() tea.Cmd {
 			return nil
 		}
 		m.providerForm = providerForm{}
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider guardado y activado: %s", cfg.Name)})
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Cargando modelos del provider activo en background... luego usa /models para listarlos o /models <modelo> para elegir uno."})
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider saved and activated: %s", cfg.Name)})
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Loading models in background... then use /models to list or select them."})
 		m.timeline.renderMessages()
 		return loadProviderModels(m.runtime, cfg)
 	default:
@@ -126,13 +126,13 @@ func (m Model) renderProviderForm() string {
 	apiKeyLine := renderProviderField(1, m.providerForm.fieldIndex,
 		"API Key", maskSecret(m.providerForm.apiKey))
 
-	saveBtn := renderProviderButton(2, m.providerForm.fieldIndex, buttonLabel(m.providerForm.loading, "guardar"))
-	cancelBtn := renderProviderButton(3, m.providerForm.fieldIndex, "cancelar")
+	saveBtn := renderProviderButton(2, m.providerForm.fieldIndex, buttonLabel(m.providerForm.loading, "save"))
+	cancelBtn := renderProviderButton(3, m.providerForm.fieldIndex, "cancel")
 	buttons := lipgloss.JoinHorizontal(lipgloss.Left, saveBtn, "   ", cancelBtn)
 
 	return strings.Join([]string{
 		styles.PopupTitleStyle.Render("Add Provider"),
-		styles.PopupMutedStyle.Render("Selecciona el proveedor e introduce tu API key."),
+		styles.PopupMutedStyle.Render("Select a provider and enter your API key."),
 		"",
 		presetLine,
 		apiKeyLine,
@@ -177,7 +177,7 @@ func maskSecret(value string) string {
 
 func buttonLabel(loading bool, text string) string {
 	if loading {
-		return "cargando..."
+		return "loading..."
 	}
 	return text
 }

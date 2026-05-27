@@ -23,6 +23,10 @@ func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messag
 	return c.compatibleClient().Complete(ctx, systemPrompt, messages, tools)
 }
 
+func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+	return c.compatibleClient().StreamComplete(ctx, systemPrompt, messages, tools, onDelta)
+}
+
 func (c *geminiClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return c.compatibleClient().ListModels(ctx)
 }
