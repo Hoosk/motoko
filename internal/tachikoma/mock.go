@@ -19,7 +19,7 @@ func (m *MockTachikoma) Name() string {
 
 func (m *MockTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
 	publish(Update{Name: m.name, Status: "Iniciando escaneo...", Done: false})
-	
+
 	select {
 	case <-time.After(2 * time.Second):
 		publish(Update{Name: m.name, Status: "Analizando archivos...", Done: false})

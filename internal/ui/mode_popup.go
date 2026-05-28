@@ -4,59 +4,75 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *Model) openModePicker() {
-	m.agentList = m.runtime.AvailableAgents()
-	current := m.runtime.AgentName()
-	m.agentListIndex = 0
-	for i, a := range m.agentList {
+type modePopupState struct {
+	active bool
+	index  int
+	agents []agent.AgentDef
+}
+
+func (p *modePopupState) Open(runtime *app.Runtime) {
+	p.agents = runtime.AvailableAgents()
+	current := runtime.AgentName()
+	p.index = 0
+	for i, a := range p.agents {
 		if strings.EqualFold(a.Name, current) {
-			m.agentListIndex = i
+			p.index = i
 			break
 		}
 	}
-	m.modePickerOpen = true
+	p.active = true
 }
 
-func (m *Model) handleModePickerKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
-		m.modePickerOpen = false
-		return nil
-	case "up", "ctrl+p":
-		m.agentListIndex--
-		if m.agentListIndex < 0 {
-			m.agentListIndex = len(m.agentList) - 1
-		}
-		return nil
-	case "down", "ctrl+n", "tab":
-		if len(m.agentList) > 0 {
-			m.agentListIndex = (m.agentListIndex + 1) % len(m.agentList)
-		}
-		return nil
-	case "enter":
-		if len(m.agentList) == 0 {
-			m.modePickerOpen = false
+func (p *modePopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !p.active {
 			return nil
 		}
-		chosen := m.agentList[m.agentListIndex]
-		m.modePickerOpen = false
-		m.runtime.SetAgentMode(chosen.Name)
-		return func() tea.Msg { return AgentChangedMsg{Agent: chosen.Name} }
+		switch msg.String() {
+		case "esc":
+			p.active = false
+			return nil
+		case "up", "ctrl+p":
+			p.index--
+			if p.index < 0 {
+				p.index = len(p.agents) - 1
+			}
+			return nil
+		case "down", "ctrl+n", "tab":
+			if len(p.agents) > 0 {
+				p.index = (p.index + 1) % len(p.agents)
+			}
+			return nil
+		case "enter":
+			if len(p.agents) == 0 {
+				p.active = false
+				return nil
+			}
+			chosen := p.agents[p.index]
+			p.active = false
+			runtime.SetAgentMode(chosen.Name)
+			return func() tea.Msg { return AgentChangedMsg{Name: chosen.Name, Agent: chosen.Name} }
+		}
 	}
 	return nil
 }
 
-func (m Model) renderModePicker() string {
+func (p modePopupState) View() string {
+	if !p.active {
+		return ""
+	}
 	rows := []string{
 		styles.PopupTitleStyle.Render("Agent Mode"),
 		styles.PopupMutedStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
-	for i, a := range m.agentList {
+	for i, a := range p.agents {
 		label := styles.PopupFieldLabelStyle.Render(a.Name)
 		var desc string
 		if a.System != "" {
@@ -66,7 +82,7 @@ func (m Model) renderModePicker() string {
 		if desc != "" {
 			line += "  " + desc
 		}
-		if i == m.agentListIndex {
+		if i == p.index {
 			rows = append(rows, styles.PopupSelectionStyle.Render(line))
 		} else {
 			rows = append(rows, line)
@@ -75,27 +91,14 @@ func (m Model) renderModePicker() string {
 	return strings.Join(rows, "\n")
 }
 
-func truncateAgentDesc(s string, max int) string {
+func truncateAgentDesc(s string, maxLen int) string {
 	// Use first line only.
 	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
 		s = s[:idx]
 	}
-	if len([]rune(s)) <= max {
+	if len([]rune(s)) <= maxLen {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:max-1]) + "…"
-}
-
-// agentDefsEqual checks if two slices of AgentDef are equal by name.
-func agentDefsEqual(a, b []agent.AgentDef) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Name != b[i].Name {
-			return false
-		}
-	}
-	return true
+	return string(runes[:maxLen-1]) + "…"
 }

@@ -10,8 +10,8 @@ import (
 
 	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/tools"
-	osc52 "github.com/aymanbagabas/go-osc52/v2"
 	"github.com/atotto/clipboard"
+	osc52 "github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -73,16 +73,16 @@ func pendingLabel(pending string) string {
 func renderToolPalette(specs []tools.Spec, tachikomaInfo map[string]string) string {
 	title := styles.PopupTitleStyle.Render("TOOL CATALOG")
 	help := styles.PopupMutedStyle.Render("Press Ctrl+T to close. Use /tool <name> <args> to execute.")
-	
+
 	toolList := renderToolList(specs)
-	
+
 	sections := []string{
 		title,
 		help,
 		"",
 		toolList,
 	}
-	
+
 	return strings.Join(sections, "\n")
 }
 
@@ -96,7 +96,7 @@ func renderToolList(specs []tools.Spec) string {
 		name := styles.SelectionStyle.Width(12).Render(spec.Name)
 		usage := styles.CommandStyle.Render(spec.Usage)
 		summary := styles.PopupMutedStyle.Render(spec.Summary)
-		
+
 		// Create a clean block for each tool
 		toolBlock := fmt.Sprintf("%s  %s\n              %s", name, usage, summary)
 		lines = append(lines, toolBlock)
@@ -104,31 +104,47 @@ func renderToolList(specs []tools.Spec) string {
 	return strings.Join(lines, "\n\n")
 }
 
+func formatShortcut(key, desc string) string {
+	return fmt.Sprintf("%s %s", styles.BoldNeonStyle.Render(key), styles.GrayStyle.Render(desc))
+}
+
+func helpView() string {
+	rows := [][]string{
+		{formatShortcut("enter", "send"), formatShortcut("tab", "focus shell")},
+		{formatShortcut("ctrl+p", "providers"), formatShortcut("ctrl+m", "models")},
+		{formatShortcut("ctrl+s", "sessions"), formatShortcut("ctrl+c", "exit")},
+		{formatShortcut("ctrl+l", "clear"), formatShortcut("ctrl+r", "reset session")},
+		{formatShortcut("/", "commands"), formatShortcut("@", "mention file")},
+	}
+
+	var formatted []string
+	for _, row := range rows {
+		formatted = append(formatted, strings.Join(row, "  "))
+	}
+
+	return styles.GrayStyle.Render(strings.Join(formatted, "\n"))
+}
+
 func renderTachikomaList(statuses map[string]string) string {
 	if len(statuses) == 0 {
 		return styles.SystemStyle.Render("No background workers active.")
 	}
-	
+
 	names := make([]string, 0, len(statuses))
 	for name := range statuses {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	
-	whiteStyle := lipgloss.NewStyle().Foreground(styles.White)
-	grayStyle := lipgloss.NewStyle().Foreground(styles.Gray)
-	neonStyle := lipgloss.NewStyle().Foreground(styles.MainNeon)
-	pinkStyle := lipgloss.NewStyle().Foreground(styles.AlertPink)
 
 	var lines []string
 	for _, name := range names {
 		status := statuses[name]
-		indicator := neonStyle.Render("●")
+		indicator := styles.NeonStyle.Render("●")
 		if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "fail") {
-			indicator = pinkStyle.Render("●")
+			indicator = styles.PinkStyle.Render("●")
 		}
-		
-		line := fmt.Sprintf("%s %-15s %s", indicator, whiteStyle.Render(name), grayStyle.Render(status))
+
+		line := fmt.Sprintf("%s %-15s %s", indicator, styles.WhiteStyle.Render(name), styles.GrayStyle.Render(status))
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")

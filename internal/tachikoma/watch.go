@@ -29,9 +29,9 @@ func WatchHelper(ctx context.Context, rootPaths []string, debounce time.Duration
 
 	go func() {
 		defer watcher.Close()
-		
+
 		var timer *time.Timer
-		
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -59,11 +59,11 @@ func WatchHelper(ctx context.Context, rootPaths []string, debounce time.Duration
 						}
 					}
 				}
-				
+
 				if timer != nil {
 					timer.Stop()
 				}
-				
+
 				timer = time.AfterFunc(debounce, func() {
 					select {
 					case out <- struct{}{}:
@@ -93,12 +93,12 @@ func addRecursive(watcher *fsnotify.Watcher, root string, m *ignore.Matcher) err
 		if !info.IsDir() {
 			return nil
 		}
-		
+
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return nil
 		}
-		
+
 		if rel != "." && m != nil && m.Ignored(rel, true) {
 			return filepath.SkipDir
 		}

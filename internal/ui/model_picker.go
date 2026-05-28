@@ -1,14 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
-	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -16,172 +15,84 @@ const (
 	modelPickerStepThinking = 1
 )
 
-// openModelPicker initialises and opens the model picker popup.
-// If the active provider has cached models, those are used immediately.
-// An async fetch is always dispatched so the list stays fresh.
-func (m *Model) openModelPicker() {
-	active, ok := m.runtime.GetActiveProviderConfig()
-	if !ok {
-		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "No active provider."})
-		m.timeline.renderMessages()
-		return
-	}
-	m.modelList = make([]provider.ModelInfo, 0, len(active.Models))
-	for _, modelID := range active.Models {
-		m.modelList = append(m.modelList, provider.ModelInfo{ID: modelID})
-	}
-	m.modelListIndex = 0
-	// Highlight current model.
-	for i, model := range m.modelList {
-		if strings.EqualFold(model.ID, active.Model) {
-			m.modelListIndex = i
-			break
-		}
-	}
-	// Init thinking level index from current config.
-	m.thinkingLevelIndex = budgetToLevelIndex(active.ThinkingBudget)
-	m.modelPickerStep = modelPickerStepModel
-	m.modelPickerLoading = true
-	m.modelPickerOpen = true
+type modelPickerState struct {
+	active          bool
+	step            int
+	models          []provider.ModelInfo
+	index           int
+	thinkingIndex   int
+	thinkingBudgets []int
 }
 
-// budgetToLevelIndex returns the index into ThinkingBudgetLevels for a given budget.
-func budgetToLevelIndex(budget int) int {
-	for i, v := range app.ThinkingBudgetLevels {
-		if v == budget {
-			return i
-		}
-	}
-	return 0 // default: off
+func (p *modelPickerState) Open(models []provider.ModelInfo) {
+	p.models = models
+	p.active = true
+	p.step = modelPickerStepModel
+	p.index = 0
+	p.thinkingBudgets = app.ThinkingBudgetLevels
+	p.thinkingIndex = 0
 }
 
-// pickerSupportsThinking reports whether the active provider + model support
-// thinking level control.
-func pickerSupportsThinking(active config.ProviderConfig) bool {
-	switch active.Kind {
-	case config.ProviderKindAnthropic:
-		return true
-	case config.ProviderKindGemini:
-		return true
-	case config.ProviderKindOpenAICompatible:
-		// Legacy o-series and current gpt-5.x reasoning models support reasoning_effort.
-		lower := strings.ToLower(active.Model)
-		return strings.HasPrefix(lower, "o1") ||
-			strings.HasPrefix(lower, "o3") ||
-			strings.HasPrefix(lower, "o4") ||
-			strings.HasPrefix(lower, "gpt-5")
-	}
-	return false
-}
-
-func (m *Model) handleModelPickerKey(msg tea.KeyMsg) tea.Cmd {
-	switch m.modelPickerStep {
-	case modelPickerStepModel:
-		return m.handleModelPickerStepModel(msg)
-	case modelPickerStepThinking:
-		return m.handleModelPickerStepThinking(msg)
-	}
-	return nil
-}
-
-func (m *Model) handleModelPickerStepModel(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
-		m.modelPickerOpen = false
-		m.modelPickerLoading = false
-		return nil
-	case "up", "ctrl+p":
-		if len(m.modelList) > 0 {
-			m.modelListIndex--
-			if m.modelListIndex < 0 {
-				m.modelListIndex = len(m.modelList) - 1
+func (p *modelPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			if p.step == modelPickerStepThinking {
+				p.step = modelPickerStepModel
+				return nil
 			}
-		}
-		return nil
-	case "down", "ctrl+n", "tab":
-		if len(m.modelList) > 0 {
-			m.modelListIndex = (m.modelListIndex + 1) % len(m.modelList)
-		}
-		return nil
-	case "enter":
-		if len(m.modelList) == 0 {
-			m.modelPickerOpen = false
+			p.active = false
 			return nil
-		}
-		chosen := m.modelList[m.modelListIndex]
-		// Apply model selection immediately so pickerSupportsThinking can use it.
-		active, _ := m.runtime.GetActiveProviderConfig()
-		active.Model = chosen.ID
-		if pickerSupportsThinking(active) {
-			// Advance to thinking level step.
-			m.modelPickerStep = modelPickerStepThinking
-			return nil
-		}
-		// No thinking support: confirm and close.
-		return m.confirmModelSelection(chosen)
-	}
-	return nil
-}
 
-func (m *Model) handleModelPickerStepThinking(msg tea.KeyMsg) tea.Cmd {
-	levels := app.ThinkingBudgetLevels
-	switch msg.String() {
-	case "esc":
-		// Go back to model selection step.
-		m.modelPickerStep = modelPickerStepModel
-		return nil
-	case "up", "ctrl+p":
-		m.thinkingLevelIndex--
-		if m.thinkingLevelIndex < 0 {
-			m.thinkingLevelIndex = len(levels) - 1
-		}
-		return nil
-	case "down", "ctrl+n", "tab":
-		m.thinkingLevelIndex = (m.thinkingLevelIndex + 1) % len(levels)
-		return nil
-	case "enter":
-		chosen := m.modelList[m.modelListIndex]
-		budget := levels[m.thinkingLevelIndex]
-		// Apply thinking budget first, then model.
-		if err := m.runtime.SetThinkingBudget(budget); err != nil {
-			m.modelPickerOpen = false
-			m.modelPickerLoading = false
-			return func() tea.Msg {
-				return ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryError, Text: err.Error()}}}}
+		case "up":
+			if p.step == modelPickerStepThinking {
+				p.thinkingIndex = (p.thinkingIndex - 1 + len(p.thinkingBudgets)) % len(p.thinkingBudgets)
+			} else {
+				p.index = (p.index - 1 + len(p.models)) % len(p.models)
 			}
+
+		case "down":
+			if p.step == modelPickerStepThinking {
+				p.thinkingIndex = (p.thinkingIndex + 1) % len(p.thinkingBudgets)
+			} else {
+				p.index = (p.index + 1) % len(p.models)
+			}
+
+		case "enter":
+			if p.step == modelPickerStepModel {
+				p.step = modelPickerStepThinking
+				return nil
+			}
+
+			if len(p.models) > 0 {
+				model := p.models[p.index]
+				budget := app.ThinkingBudgetLevels[p.thinkingIndex]
+				p.active = false
+				return selectModelAndBudget(runtime, model, budget)
+			}
+			p.active = false
 		}
-		return m.confirmModelSelection(chosen)
 	}
 	return nil
 }
 
-// confirmModelSelection applies the chosen model and closes the picker.
-func (m *Model) confirmModelSelection(chosen provider.ModelInfo) tea.Cmd {
-	m.modelPickerOpen = false
-	m.modelPickerLoading = false
-	if err := m.runtime.SetActiveModelInfo(chosen); err != nil {
-		return func() tea.Msg {
-			return ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryError, Text: err.Error()}}}}
-		}
+func (p modelPickerState) View() string {
+	if !p.active {
+		return ""
 	}
-	active, _ := m.runtime.GetActiveProviderConfig()
-	return func() tea.Msg {
-		return ModelChangedMsg{Provider: active.Name, Model: chosen.ID}
-	}
-}
 
-func (m Model) renderModelPicker() string {
-	switch m.modelPickerStep {
+	switch p.step {
 	case modelPickerStepThinking:
-		return m.renderThinkingPicker()
+		return p.renderThinkingPicker()
 	default:
-		return m.renderModelPickerStep()
+		return p.renderModelPickerStep()
 	}
 }
 
-func (m Model) renderModelPickerStep() string {
-	titleStyle := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(styles.Gray)
+func (p modelPickerState) renderModelPickerStep() string {
+	titleStyle := styles.BoldNeonStyle
+	hintStyle := styles.GrayStyle
 
 	rows := []string{
 		titleStyle.Render("Select Model"),
@@ -189,60 +100,62 @@ func (m Model) renderModelPickerStep() string {
 		"",
 	}
 
-	if m.modelPickerLoading && len(m.modelList) == 0 {
-		rows = append(rows, hintStyle.Render("Loading models..."))
-		return strings.Join(rows, "\n")
-	}
-	if len(m.modelList) == 0 {
-		rows = append(rows, hintStyle.Render("No models found. Use /models <name> to add one."))
-		return strings.Join(rows, "\n")
+	for i, mod := range p.models {
+		cursor := "  "
+		style := styles.PopupFieldValueStyle
+		if i == p.index {
+			cursor = styles.BoldNeonStyle.Render("> ")
+			style = styles.PopupSelectionStyle
+		}
+		rows = append(rows, cursor+style.Render(mod.ID))
 	}
 
-	active, _ := m.runtime.GetActiveProviderConfig()
-	for i, model := range m.modelList {
-		label := styles.PopupFieldLabelStyle.Render(model.ID)
-		current := strings.EqualFold(model.ID, active.Model)
-		if current {
-			label += "  " + hintStyle.Render("(active)")
-		}
-		if i == m.modelListIndex {
-			rows = append(rows, styles.PopupSelectionStyle.Render(label))
-		} else {
-			rows = append(rows, label)
-		}
-	}
-
-	if m.modelPickerLoading {
-		rows = append(rows, "", hintStyle.Render("Updating list…"))
-	}
 	return strings.Join(rows, "\n")
 }
 
-func (m Model) renderThinkingPicker() string {
-	titleStyle := lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true)
-	hintStyle := lipgloss.NewStyle().Foreground(styles.Gray)
-	accentStyle := lipgloss.NewStyle().Foreground(styles.AccentBlue)
+func (p modelPickerState) renderThinkingPicker() string {
+	titleStyle := styles.BoldNeonStyle
+	hintStyle := styles.GrayStyle
+	accentStyle := styles.BlueStyle
 
 	chosen := ""
-	if len(m.modelList) > 0 {
-		chosen = m.modelList[m.modelListIndex].ID
+	if len(p.models) > 0 {
+		chosen = p.models[p.index].ID
 	}
 
 	rows := []string{
-		titleStyle.Render("Reasoning Level"),
-		accentStyle.Render(chosen),
-		hintStyle.Render("↑↓ navigate  Enter confirm  Esc back"),
+		titleStyle.Render("Thinking Budget"),
+		accentStyle.Render("Model: " + chosen),
+		hintStyle.Render("↑↓ navigate  Enter select  Esc back"),
 		"",
 	}
 
-	labels := app.ThinkingBudgetLabels
-	for i, label := range labels {
-		entry := styles.PopupFieldLabelStyle.Render(label)
-		if i == m.thinkingLevelIndex {
-			rows = append(rows, styles.PopupSelectionStyle.Render(entry))
+	for i, budget := range p.thinkingBudgets {
+		cursor := "  "
+		style := styles.PopupFieldValueStyle
+		if i == p.thinkingIndex {
+			cursor = styles.BoldNeonStyle.Render("> ")
+			style = styles.PopupSelectionStyle
+		}
+		label := app.ThinkingBudgetLabels[i]
+		if budget > 0 {
+			rows = append(rows, fmt.Sprintf("%s%s (%d tokens)", cursor, style.Render(label), budget))
 		} else {
-			rows = append(rows, entry)
+			rows = append(rows, cursor+style.Render(label))
 		}
 	}
+
 	return strings.Join(rows, "\n")
+}
+
+func selectModelAndBudget(runtime *app.Runtime, model provider.ModelInfo, budget int) tea.Cmd {
+	return func() tea.Msg {
+		if err := runtime.SetActiveModelInfo(model); err != nil {
+			return ErrorMsg{Err: err}
+		}
+		if err := runtime.SetThinkingBudget(budget); err != nil {
+			return ErrorMsg{Err: err}
+		}
+		return NotificationMsg{Text: "Model updated: " + model.ID}
+	}
 }

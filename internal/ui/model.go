@@ -1,47 +1,30 @@
 package ui
 
 import (
-	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
-	"github.com/Hoosk/motoko/internal/config"
-	"github.com/Hoosk/motoko/internal/provider"
-	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/styles"
-	"github.com/Hoosk/motoko/internal/tachikoma"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type TachikomaMsg tachikoma.Update
-type ShellResultMsg struct{ Result app.ShellResult }
-type ProviderModelsMsg struct {
-	Models []provider.ModelInfo
-	Err    error
+type TachikomaMsg struct {
+	Statuses map[string]string
 }
+
+type ShellResultMsg struct {
+	Result app.ShellResult
+}
+
 type AgentResultMsg struct {
 	Prompt    string
-	Result    app.Response
+	Result    agent.Result
 	Assistant string
 	Err       error
-}
-
-type ThinkingTickMsg struct{}
-
-type providerForm struct {
-	active      bool
-	fieldIndex  int
-	presetIndex int
-	name        string
-	baseURL     string
-	apiKey      string
-	loading     bool
-	status      string
 }
 
 type agentStreamBuffer struct {
@@ -51,275 +34,135 @@ type agentStreamBuffer struct {
 }
 
 type Model struct {
-	timeline           TimelineModel
-	composer           ComposerModel
-	footer             FooterModel
-	sidebar            SidebarModel
-	providerForm       providerForm
-	runtime            *app.Runtime
-	manager            *tachikoma.Manager
-	cancel             func()
-	showToolPalette    bool
-	showSidebar        bool
-	autoSidebar        bool
-	modePickerOpen     bool
-	agentList          []agent.AgentDef
-	agentListIndex     int
-	modelPickerOpen    bool
-	modelList          []provider.ModelInfo
-	modelListIndex     int
-	modelPickerLoading bool
-	modelPickerStep    int // 0=model selection, 1=thinking level selection
-	thinkingLevelIndex int
-	sessionPickerOpen  bool
-	sessionList        []*session.Session
-	sessionListIndex   int
-	sessionLoading     bool
-	width              int
-	height             int
-	timelineWidth      int
-	viewportHeight     int
-	agentStream        *agentStreamBuffer
-	tachikomaCtx       context.Context
-	notificationText   string
-	notificationShow   bool
+	runtime          *app.Runtime
+	timeline         TimelineModel
+	composer         ComposerModel
+	footer           FooterModel
+	sidebar          SidebarModel
+	width            int
+	height           int
+	notificationShow bool
+	notificationText string
+	notificationTime time.Time
+	providerForm     providerForm
+	modelPicker      modelPickerState
+	sessionPicker    sessionPickerState
+	agentStream      chan app.AgentStreamEvent
+	agentBuffer      *agentStreamBuffer
+	modePopup        modePopupState
+	showHelp         bool
+	showTools        bool
 }
 
-func NewModel(runtime *app.Runtime, cancel func(), tachikomaCtx context.Context) Model {
-	if tachikomaCtx == nil {
-		tachikomaCtx = context.Background()
-	}
-	footer := NewFooterModel(runtime)
-	footer.SetContextStats(runtime.HistoryInputTokens(), runtime.ContextWindow())
-	
-	var manager *tachikoma.Manager
-	if runtime != nil {
-		manager = runtime.Tachikomas()
-	}
-
+func NewModel(runtime *app.Runtime) Model {
 	return Model{
-		timeline:     NewTimelineModel(),
-		composer:     NewComposerModel(runtime),
-		footer:       footer,
-		sidebar:      NewSidebarModel(runtime),
-		runtime:      runtime,
-		manager:      manager,
-		cancel:       cancel,
-		tachikomaCtx: tachikomaCtx,
-		autoSidebar:  true,
+		runtime:  runtime,
+		timeline: NewTimelineModel(),
+		composer: NewComposerModel(runtime),
+		footer:   NewFooterModel(runtime),
+		sidebar:  NewSidebarModel(runtime),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	var cmds []tea.Cmd
-	cmds = append(cmds, m.composer.Init(), m.timeline.Init(), m.footer.Init())
-	if entries := m.runtime.StartupEntries(); len(entries) > 0 {
-		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: app.Response{Entries: entries}} })
-	}
-	if m.manager != nil {
-		cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
-	}
-	return tea.Batch(cmds...)
+	return tea.Batch(
+		m.timeline.Init(),
+		m.composer.Init(),
+		m.footer.Init(),
+		m.sidebar.Init(),
+	)
 }
-
-func waitForTachikoma(ctx context.Context, manager *tachikoma.Manager) tea.Cmd {
-	return func() tea.Msg {
-		result := manager.Next(ctx)
-		if !result.OK {
-			return nil
-		}
-		return TachikomaMsg(result.Update)
-	}
-}
-type HideNotificationMsg struct{}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	switch msg := msg.(type) {
-	case CopySelectionMsg:
-		if msg.Err != nil {
-			m.notificationText = "Clipboard error"
-			m.notificationShow = true
-		} else {
-			m.notificationText = "Copied"
-			m.notificationShow = true
-		}
-		cmds = append(cmds, tea.Tick(3*time.Second, func(time.Time) tea.Msg {
-			return HideNotificationMsg{}
-		}))
-		// Don't forward to timeline to avoid spamming the log with copy status
-
-	case HideNotificationMsg:
-		m.notificationShow = false
-
-	case tea.MouseMsg:
-		switch msg.Action {
-		case tea.MouseActionPress:
-			contentX, contentY, ok := m.timeline.MouseContentCoords(msg.X, msg.Y)
-			if ok {
-				m.timeline.BeginSelection(contentX, contentY)
-			} else {
-				m.timeline.CancelSelection()
-			}
-
-		case tea.MouseActionMotion:
-			contentX, contentY := m.timeline.ClampMouseContentCoords(msg.X, msg.Y)
-			m.timeline.UpdateSelection(contentX, contentY)
-
-		case tea.MouseActionRelease:
-			contentX, contentY := m.timeline.ClampMouseContentCoords(msg.X, msg.Y)
-			if cmd := m.timeline.EndSelection(contentX, contentY); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-
-	case tea.KeyMsg:		if m.providerForm.active {
-			cmd := m.handleProviderFormKey(msg)
-			return m, cmd
-		}
-		if m.modePickerOpen {
-			cmd := m.handleModePickerKey(msg)
-			return m, cmd
-		}
-		if m.sessionPickerOpen {
-			cmd := m.handleSessionPickerKey(msg)
-			return m, cmd
-		}
-		if m.modelPickerOpen {
-			cmd := m.handleModelPickerKey(msg)
-			return m, cmd
-		}
-
-		switch msg.String() {
-		case "ctrl+c", "esc":
-			if m.showToolPalette {
-				m.showToolPalette = false
-				return m, nil
-			}
-			m.cancel()
+	// 1. Handle Priority Key Commands (Global)
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "ctrl+c":
 			return m, tea.Quit
-		case "alt+s":
-			m.showSidebar = !m.showSidebar
-			m.autoSidebar = false // Disable auto-mode once user interacts
-			return m, nil
-		case "ctrl+t":
-			m.showToolPalette = !m.showToolPalette
-			return m, nil
 		}
+	}
 
+	// 2. Delegate to Active Popups (Modal state)
+	if m.providerForm.active {
+		cmds = append(cmds, m.providerForm.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+	if m.modelPicker.active {
+		cmds = append(cmds, m.modelPicker.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+	if m.sessionPicker.active {
+		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+	if m.modePopup.active {
+		cmds = append(cmds, m.modePopup.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+
+	// 3. Global Message Handling
+	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.syncLayout()
+		m.SyncLayout()
+
+	case NotificationMsg:
+		m.notificationShow = true
+		m.notificationText = msg.Text
+		m.notificationTime = time.Now()
+		cmds = append(cmds, m.hideNotification())
+
+	case hideNotificationMsg:
+		if time.Since(m.notificationTime) >= 3*time.Second {
+			m.notificationShow = false
+		}
+
+	case ErrorMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+		m.timeline.renderMessages()
+
+	case TachikomaStatusMsg:
+		m.footer.tachikomaInfo = msg.Statuses
+		m.sidebar.Update(msg)
 
 	case SubmitPromptMsg:
-		response := m.runtime.HandleInput(msg.Prompt, m.footer.GetSysInfo())
-
-		if response.Clear {
-			cmds = append(cmds, func() tea.Msg { return ClearMessagesMsg{} })
+		if strings.TrimSpace(msg.Prompt) == "" {
+			break
 		}
-
-		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: response} })
-
-		if response.Signal == "open-provider-popup" {
-			m.openProviderForm()
-			return m, tea.Batch(cmds...)
-		}
-
-		if response.Signal == "open-mode-popup" {
-			m.openModePicker()
-			return m, tea.Batch(cmds...)
-		}
-
-		if response.Signal == "open-models-popup" {
-			m.openModelPicker()
-			active, ok := m.runtime.GetActiveProviderConfig()
-			if ok {
-				cmds = append(cmds, loadProviderModels(m.runtime, active))
-			}
-			return m, tea.Batch(cmds...)
-		}
-
-		if response.Signal == "open-sessions-popup" {
-			m.openSessionPicker()
-			cmds = append(cmds, loadSessions(m.runtime))
-			return m, tea.Batch(cmds...)
-		}
-
-		if response.Action != nil {
-			if response.Action.Type == app.ActionShell {
-				cmds = append(cmds, runShellCommand(response.Action.ShellCommand))
-			} else if response.Action.Type == app.ActionCompact {
-				m.timeline.SetThinking(true)
-				m.composer.SetThinking(true)
-				m.footer.SetThinking(true)
-				cmds = append(cmds,
-					thinkingTick(),
-					func() tea.Msg {
-						return CompactResultMsg{Response: m.runtime.CompactSession(context.Background())}
-					},
-				)
-			} else if response.Action.Type == app.ActionAgent {
-				m.timeline.SetThinking(true)
-				m.composer.SetThinking(true)
-				m.footer.SetThinking(true)
-				m.timeline.SetStreaming(true)
-				m.agentStream = &agentStreamBuffer{}
-
-				cmds = append(cmds,
-					waitAgentStream(m.agentStream),
-					thinkingTick(),
-					func() tea.Msg {
-						result, err := m.runtime.RunAgentStream(context.Background(), m.runtime.GetContextInfo(), response.Action.AgentPrompt, func(event app.AgentStreamEvent) error {
-							m.agentStream.push(event)
-							return nil
-						})
-						m.agentStream.finish()
-
-						resp := app.Response{}
-						resp.Entries = entriesForAgentResult(result, m.runtime.Debug())
-						return AgentResultMsg{Prompt: response.Action.AgentPrompt, Result: resp, Assistant: result.Assistant, Err: err}
-					},
-				)
-			}
-		}
+		m.timeline.appendEntry(app.Entry{Kind: app.EntryUser, Text: msg.Prompt})
+		m.timeline.renderMessages()
+		m.timeline.SetStreaming(true)
+		m.timeline.SetThinking(true)
+		m.footer.SetThinking(true)
+		m.composer.SetThinking(true)
+		m.agentStream = make(chan app.AgentStreamEvent, 100)
+		m.agentBuffer = &agentStreamBuffer{}
+		cmds = append(cmds, m.runAgent(msg.Prompt), m.waitAgentStream(m.agentStream), m.thinkingTick())
 
 	case AgentStreamBatchMsg:
-		if len(msg.Events) > 0 {
-			m.timeline.SetThinking(false)
-			// Footer keeps thinking=true until AgentResultMsg (entire agent run).
-			for _, event := range msg.Events {
-				if !m.runtime.Debug() {
-					switch event.Kind {
-					case "output", "debug":
-						continue
-					case "tool":
-						event.Content = ""
-					}
-				}
-				if event.Kind == "compacting" || event.Kind == "status" {
-					if strings.TrimSpace(event.Content) != "" {
-						m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-						m.timeline.renderMessages()
-					}
-					continue
-				}
-				if cmd := m.timeline.Update(AgentStreamEventMsg{Event: event}); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
+		for _, event := range msg.Events {
+			m.timeline.Update(AgentStreamEventMsg{Event: event})
+		}
+		if msg.Done && m.agentBuffer != nil {
+			m.agentBuffer.mu.Lock()
+			m.agentBuffer.done = true
+			m.agentBuffer.mu.Unlock()
 		}
 		if !msg.Done && m.agentStream != nil {
-			cmds = append(cmds, waitAgentStream(m.agentStream))
+			cmds = append(cmds, m.waitAgentStream(m.agentStream))
 		} else if msg.Done {
 			m.agentStream = nil
 		}
 
 	case ThinkingTickMsg:
-		if m.timeline.thinking || m.footer.thinking {
-			cmds = append(cmds, thinkingTick())
+		if m.timeline.model.Thinking || m.footer.thinking {
+			cmds = append(cmds, m.thinkingTick())
 		}
+		m.timeline.Update(msg)
+		m.footer.Update(msg)
 
 	case AgentResultMsg:
 		if strings.TrimSpace(msg.Assistant) != "" {
@@ -328,237 +171,198 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.timeline.SetThinking(false)
-		m.composer.SetThinking(false)
 		m.footer.SetThinking(false)
-		m.footer.SetContextStats(m.runtime.HistoryInputTokens(), m.runtime.ContextWindow())
-		m.timeline.SetStreaming(false)
-
+		m.composer.SetThinking(false)
 		if msg.Err != nil {
-			cmds = append(cmds, func() tea.Msg {
-				return ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryError, Text: msg.Err.Error()}}}}
-			})
-		} else {
-			cmds = append(cmds, func() tea.Msg {
-				return ResponseAppliedMsg{Response: msg.Result}
-			})
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+			m.timeline.renderMessages()
 		}
+		cmds = append(cmds, m.updateContextStats())
+
+	case ShellResultMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntryCommand, Text: msg.Result.Command})
+		if msg.Result.Output != "" {
+			kind := app.EntryOutput
+			if msg.Result.ExitCode != 0 {
+				kind = app.EntryError
+			}
+			m.timeline.appendEntry(app.Entry{Kind: kind, Text: msg.Result.Output})
+		}
+		m.timeline.renderMessages()
 
 	case ProviderModelsMsg:
-		if m.modelPickerOpen {
-			m.modelPickerLoading = false
-			if msg.Err != nil {
-				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
-				m.timeline.renderMessages()
-			} else {
-				m.modelList = msg.Models
-				m.modelListIndex = 0
-			}
+		if msg.Err != nil {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+			m.timeline.renderMessages()
 		} else {
-			// Fall through to timeline.
-			if cmd := m.timeline.Update(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+			m.modelPicker.Open(msg.Models)
 		}
 
 	case SessionsMsg:
-		if m.sessionPickerOpen {
-			m.sessionLoading = false
-			if msg.Err != nil {
-				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
-				m.timeline.renderMessages()
-			} else {
-				m.sessionList = msg.Sessions
-				m.sessionListIndex = 0
-			}
-		}
+		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
 
 	case SessionLoadedMsg:
 		if msg.Err != nil {
-			cmds = append(cmds, func() tea.Msg {
-				return ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryError, Text: msg.Err.Error()}}}}
-			})
-			break
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+		} else {
+			m.timeline.resetMessages()
+			for _, entry := range m.runtime.CurrentSessionEntries() {
+				m.timeline.appendEntry(entry)
+			}
+			m.timeline.renderMessages()
+			m.notificationShow = true
+			m.notificationText = "Session loaded"
+			m.notificationTime = time.Now()
+			cmds = append(cmds, m.hideNotification())
 		}
-		cmds = append(cmds, func() tea.Msg { return ClearMessagesMsg{} })
-		cmds = append(cmds, func() tea.Msg {
-			return ResponseAppliedMsg{Response: app.Response{Entries: m.runtime.CurrentSessionEntries()}}
-		})
-		m.footer.SetContextStats(m.runtime.HistoryInputTokens(), m.runtime.ContextWindow())
 
 	case CompactResultMsg:
-		m.timeline.SetThinking(false)
-		m.composer.SetThinking(false)
-		m.footer.SetThinking(false)
-		m.footer.SetContextStats(m.runtime.HistoryInputTokens(), m.runtime.ContextWindow())
-		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: msg.Response} })
-
-	case ShellResultMsg:
-		response := m.runtime.HandleShellResult(msg.Result)
-		cmds = append(cmds, func() tea.Msg { return ResponseAppliedMsg{Response: response} })
+		if msg.Err != nil {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+		} else {
+			m.timeline.resetMessages()
+			for _, entry := range msg.Response.Entries {
+				m.timeline.appendEntry(entry)
+			}
+			m.timeline.renderMessages()
+			m.notificationShow = true
+			m.notificationText = "Session compacted"
+			m.notificationTime = time.Now()
+			cmds = append(cmds, m.hideNotification())
+		}
 
 	case AgentChangedMsg:
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Modo agente: " + msg.Agent})
-		m.timeline.renderMessages()
+		m.notificationShow = true
+		m.notificationText = "Agent switched to " + msg.Name
+		m.notificationTime = time.Now()
+		cmds = append(cmds, m.hideNotification())
 
 	case ModelChangedMsg:
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Modelo activo para %s: %s", msg.Provider, msg.Model)})
-		m.timeline.renderMessages()
+		m.notificationShow = true
+		m.notificationText = "Model switched to " + msg.Model
+		m.notificationTime = time.Now()
+		cmds = append(cmds, m.hideNotification())
 
-	case TachikomaMsg:
-		if m.manager != nil {
-			cmds = append(cmds, waitForTachikoma(m.tachikomaCtx, m.manager))
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+p":
+			m.providerForm.Open(m.runtime)
+		case "ctrl+m":
+			cmds = append(cmds, m.listModels())
+		case "ctrl+s":
+			m.sessionPicker.Open()
+			cmds = append(cmds, m.listSessions())
+		case "ctrl+a":
+			m.modePopup.Open(m.runtime)
+		case "ctrl+t":
+			m.showTools = !m.showTools
+		case "ctrl+h":
+			m.showHelp = !m.showHelp
 		}
 	}
+	// 4. Delegate to standard components
+	cmds = append(cmds, m.timeline.Update(msg))
 
-	if !m.providerForm.active && !m.modePickerOpen && !m.modelPickerOpen && !m.sessionPickerOpen {
-		cmds = append(cmds, m.composer.Update(msg))
-		cmds = append(cmds, m.timeline.Update(msg))
-		cmds = append(cmds, m.footer.Update(msg))
-		m.syncLayout() // Recalculate layout in case sub-models changed height
-	}
+	var cmd tea.Cmd
+	m.composer, cmd = m.composer.Update(msg)
+	cmds = append(cmds, cmd)
+
+	var fCmd tea.Cmd
+	m.footer, fCmd = m.footer.Update(msg)
+	cmds = append(cmds, fCmd)
+
+	m.sidebar, cmd = m.sidebar.Update(msg)
+	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) View() string {
-	if m.width == 0 {
-		return "initializing..."
+	if m.width == 0 || m.height == 0 {
+		return ""
 	}
+
+	sidebarWidth := 36
+	if m.width < 110 {
+		sidebarWidth = 28
+	}
+	if m.width < 90 {
+		sidebarWidth = 0
+	}
+	mainWidth := m.width - sidebarWidth
+
+	footerHeight := 1
+	composerHeight := m.composer.Height()
+	// The sidebar should cover exactly the same height as timeline + composer
+	timelineHeight := m.height - footerHeight - composerHeight
+
+	m.timeline.SyncLayout(mainWidth, timelineHeight)
+	m.composer.SetWidth(mainWidth)
+	m.footer.width = m.width
 
 	timelineView := m.timeline.View()
 	composerView := m.composer.View()
 	footerView := m.footer.View()
 
-	var mainContent string
-	if m.showSidebar {
+	var mainView string
+	if sidebarWidth > 0 {
+		m.sidebar.width = sidebarWidth
+		// Use lipgloss.Height to ensure exact matching if there's any internal padding/border
+		m.sidebar.height = lipgloss.Height(timelineView) + lipgloss.Height(composerView)
 		sidebarView := m.sidebar.View()
-		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, 
-			lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView),
-			sidebarView,
-		)
+		mainContent := lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
+		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
 	} else {
-		mainContent = lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
+		mainView = lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
 	}
 
-	base := styles.MainContainerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, mainContent, footerView))
+	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
 
 	if m.notificationShow {
 		toast := styles.PopupStyle.
 			Padding(0, 1).
 			Width(30).
 			BorderForeground(styles.MainNeon).
-			Render(lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render("✓ ") + 
-				lipgloss.NewStyle().Foreground(styles.White).Render(m.notificationText))
-		
+			Render(styles.BoldNeonStyle.Render("✓ ") +
+				styles.WhiteStyle.Render(m.notificationText))
 		return overlayBase(base, toast, m.width, m.height)
 	}
 
 	if m.providerForm.active {
-		popup := styles.PopupStyle.Render(m.renderProviderForm())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+		popup := styles.PopupStyle.Render(m.providerForm.View(m.runtime))
+		return overlayBase(base, popup, m.width, m.height)
 	}
-	if m.modePickerOpen {
-		popup := styles.PopupStyle.Render(m.renderModePicker())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+
+	if m.modelPicker.active {
+		popup := styles.PopupStyle.Render(m.modelPicker.View())
+		return overlayBase(base, popup, m.width, m.height)
 	}
-	if m.sessionPickerOpen {
-		popup := styles.PopupStyle.Render(m.renderSessionPicker())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+
+	if m.sessionPicker.active {
+		popup := styles.PopupStyle.Render(m.sessionPicker.View())
+		return overlayBase(base, popup, m.width, m.height)
 	}
-	if m.modelPickerOpen {
-		popup := styles.PopupStyle.Render(m.renderModelPicker())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+
+	if m.modePopup.active {
+		popup := styles.PopupStyle.Render(m.modePopup.View())
+		return overlayBase(base, popup, m.width, m.height)
 	}
-	if !m.showToolPalette {
-		return base
+
+	if m.showTools {
+		popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
+		return overlayBase(base, popup, m.width, m.height)
 	}
-	popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup)
+
+	if m.showHelp {
+		popup := styles.PopupStyle.Render(helpView())
+		return overlayBase(base, popup, m.width, m.height)
+	}
+
+	return base
 }
 
-func (m *Model) syncLayout() {
-	if m.width <= 0 || m.height <= 0 {
-		return
-	}
-
-	// Automatic sidebar detection
-	if m.autoSidebar {
-		m.showSidebar = m.width > 120
-	}
-
-	composerHeight := m.composer.Height()
-	// Total height - (composer + footer + paddings)
-	footerHeight := 1
-	viewportHeight := max(6, m.height-(composerHeight+footerHeight+5))
-
-	// Account for MainContainerStyle padding (0,1) -> 2 columns overhead
-	availableWidth := m.width - 2
-	timelineWidth := availableWidth
-	if m.showSidebar {
-		sidebarWidth := 30
-		if m.width > 150 {
-			sidebarWidth = 40
-		}
-		timelineWidth = availableWidth - sidebarWidth
-		m.sidebar.width = sidebarWidth
-		m.sidebar.height = viewportHeight + composerHeight + 4
-	}
-
-	m.timelineWidth = timelineWidth
-	m.viewportHeight = viewportHeight
-	m.composer.SyncLayout(timelineWidth, composerHeight)
-	m.timeline.SyncLayout(timelineWidth, viewportHeight)
+func (m *Model) SyncLayout() {
+	// Handled in View for now to ensure consistency
 }
 
-func runShellCommand(command string) tea.Cmd {
-	return func() tea.Msg { return ShellResultMsg{Result: app.RunShellCommand(context.Background(), command)} }
-}
-
-func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd {
-	return func() tea.Msg {
-		models, err := runtime.ListModelsForProvider(context.Background(), cfg)
-		return ProviderModelsMsg{Models: models, Err: err}
-	}
-}
-
-func loadSessions(runtime *app.Runtime) tea.Cmd {
-	return func() tea.Msg {
-		sessions, err := runtime.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
-	}
-}
-
-func (b *agentStreamBuffer) push(event app.AgentStreamEvent) {
-	b.mu.Lock()
-	b.events = append(b.events, event)
-	b.mu.Unlock()
-}
-
-func (b *agentStreamBuffer) finish() {
-	b.mu.Lock()
-	b.done = true
-	b.mu.Unlock()
-}
-
-func (b *agentStreamBuffer) drain() ([]app.AgentStreamEvent, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.events) == 0 {
-		return nil, b.done
-	}
-	events := append([]app.AgentStreamEvent(nil), b.events...)
-	b.events = nil
-	return events, b.done
-}
-
-func waitAgentStream(buffer *agentStreamBuffer) tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(16 * time.Millisecond)
-		events, done := buffer.drain()
-		return AgentStreamBatchMsg{Events: events, Done: done}
-	}
-}
-
-func thinkingTick() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return ThinkingTickMsg{} })
-}
+type hideNotificationMsg struct{}

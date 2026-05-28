@@ -31,59 +31,66 @@ func (m SidebarModel) Update(msg tea.Msg) (SidebarModel, tea.Cmd) {
 	return m, nil
 }
 
+func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
 func (m SidebarModel) View() string {
-	if m.width <= 0 {
+	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
 
 	info := m.runtime.GetContextInfo()
-
-	grayStyle := lipgloss.NewStyle().Foreground(styles.Gray)
-	blueStyle := lipgloss.NewStyle().Foreground(styles.AccentBlue)
+	contentWidth := m.width - 3 // Account for left border (1) and padding (2)
 
 	// Section 1: Relevant Files (Top Priority)
 	fileLines := []string{
-		lipgloss.NewStyle().Foreground(styles.AccentBlue).Bold(true).Render("RELEVANT FILES"),
+		styles.BoldBlueStyle.Render("RELEVANT FILES"),
 	}
 	if len(info.RelevantFiles) > 0 {
 		for _, file := range info.RelevantFiles {
-			// Extract just the filename or a shortened path
 			parts := strings.Split(file, " | ")
 			name := parts[0]
-			if len(name) > m.width-4 {
-				name = "..." + name[len(name)-(m.width-7):]
+			maxNameLen := contentWidth - 2 // "• " is 2 chars
+			if maxNameLen > 0 && len(name) > maxNameLen {
+				name = "…" + name[len(name)-(maxNameLen-1):]
 			}
 			fileLines = append(fileLines, "• "+name)
 		}
 	} else {
-		fileLines = append(fileLines, grayStyle.Render("none detected"))
+		fileLines = append(fileLines, styles.GrayStyle.Render(truncate("none detected", contentWidth)))
 	}
 
 	// Section 2: Git Status
 	gitLines := []string{
 		"",
-		lipgloss.NewStyle().Foreground(styles.AccentViolet).Bold(true).Render("GIT STATUS"),
+		styles.BoldVioletStyle.Render("GIT STATUS"),
 	}
 	if info.HasGit {
-		gitLines = append(gitLines, "Branch: "+info.GitBranch)
+		gitLines = append(gitLines, truncate("Branch: "+info.GitBranch, contentWidth))
 		if info.GitDirty {
-			gitLines = append(gitLines, styles.DiffAddStyle.Render(fmt.Sprintf("+ %d staged", info.Staged)))
-			gitLines = append(gitLines, styles.DiffRemoveStyle.Render(fmt.Sprintf("- %d unstaged", info.Unstaged)))
-			gitLines = append(gitLines, grayStyle.Render(fmt.Sprintf("? %d untracked", info.Untracked)))
+			gitLines = append(gitLines, styles.DiffAddStyle.Render(truncate(fmt.Sprintf("+ %d staged", info.Staged), contentWidth)))
+			gitLines = append(gitLines, styles.DiffRemoveStyle.Render(truncate(fmt.Sprintf("- %d unstaged", info.Unstaged), contentWidth)))
+			gitLines = append(gitLines, styles.GrayStyle.Render(truncate(fmt.Sprintf("? %d untracked", info.Untracked), contentWidth)))
 		} else {
-			gitLines = append(gitLines, grayStyle.Render("clean"))
+			gitLines = append(gitLines, styles.GrayStyle.Render(truncate("clean", contentWidth)))
 		}
 	} else {
-		gitLines = append(gitLines, grayStyle.Render("no repository"))
+		gitLines = append(gitLines, styles.GrayStyle.Render(truncate("no repository", contentWidth)))
 	}
 
 	// Section 3: Tachikomas (Bottom)
 	tachikomaLines := []string{
 		"",
-		lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render("TACHIKOMAS"),
+		styles.BoldNeonStyle.Render("TACHIKOMAS"),
 	}
-	
-	// Deterministic sorting for Tachikomas to prevent "blinking"
+
 	var names []string
 	if info.Signals != nil {
 		for name := range info.Signals {
@@ -91,7 +98,15 @@ func (m SidebarModel) View() string {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			tachikomaLines = append(tachikomaLines, fmt.Sprintf("● %-14s %s", name, grayStyle.Render(info.Signals[name])))
+			status := info.Signals[name]
+			// "● " (2) + name (up to 14) + " " (1) = 17 chars approx before status
+			maxStatusLen := contentWidth - 17
+			if maxStatusLen > 0 {
+				status = truncate(status, maxStatusLen)
+			} else {
+				status = ""
+			}
+			tachikomaLines = append(tachikomaLines, fmt.Sprintf("● %-14s %s", name, styles.GrayStyle.Render(status)))
 		}
 	}
 
@@ -102,23 +117,25 @@ func (m SidebarModel) View() string {
 		}
 		sort.Strings(onDemandNames)
 		for _, name := range onDemandNames {
-			tachikomaLines = append(tachikomaLines, fmt.Sprintf("○ %-14s %s", name, blueStyle.Render("on-demand")))
+			status := truncate("on-demand", contentWidth-17)
+			tachikomaLines = append(tachikomaLines, fmt.Sprintf("○ %-14s %s", name, styles.BlueStyle.Render(status)))
 		}
 	}
 
 	content := append(fileLines, gitLines...)
 	content = append(content, tachikomaLines...)
 
-	if m.height > 0 && len(content) > m.height {
+	if len(content) > m.height {
 		content = content[:m.height]
 	}
 
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(styles.Gray).
+		BorderForeground(styles.BorderColor).
 		Padding(0, 1).
-		Width(m.width).
-		Height(m.height)
+		Width(contentWidth).
+		Height(m.height).
+		MaxHeight(m.height)
 
 	return style.Render(strings.Join(content, "\n"))
 }

@@ -78,7 +78,7 @@ func (d *DiffTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 
 func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, error) {
 	result := SemanticDiff{Files: make(map[string][]SymbolChange)}
-	
+
 	snapshot := d.index.LatestSnapshot()
 	if snapshot == nil {
 		return result, nil
@@ -93,7 +93,7 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	var currentFile string
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "+++ b/") {
@@ -110,7 +110,7 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 			if strings.HasPrefix(newRange, "+") {
 				newRange = newRange[1:]
 			}
-			
+
 			startLine := 0
 			rangeParts := strings.Split(newRange, ",")
 			startLine, _ = strconv.Atoi(rangeParts[0])
@@ -118,7 +118,7 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 			if len(rangeParts) > 1 {
 				count, _ = strconv.Atoi(rangeParts[1])
 			}
-			
+
 			// Find symbols in this range
 			d.identifyChangesInFile(snapshot, currentFile, startLine, count, &result)
 		}

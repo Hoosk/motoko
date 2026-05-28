@@ -138,8 +138,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 
 	// Setup default tachikomas
 	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
-	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30 * time.Second))
-	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15 * time.Second))
+	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
+	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
 
 	// Register tools that depend on tachikomas
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))

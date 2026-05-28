@@ -1,104 +1,109 @@
 package ui
 
 import (
-	"reflect"
+	"fmt"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
-	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
+	"github.com/Hoosk/motoko/internal/ui/timeline"
 )
 
-func TestEntriesForAgentResult(t *testing.T) {
-	result := agent.Result{
-		AgentLabel: "openai:gpt-4.1",
-		Duration:   250 * time.Millisecond,
-		Steps: []agent.Step{
-			{Kind: "tool", Title: "read", Content: "README.md 1 20"},
-			{Kind: "output", Title: "read", Content: "contenido"},
-			{Kind: "error", Title: "bash", Content: "tool error: boom"},
-			{Kind: "assistant", Title: "answer", Content: "respuesta final"},
-			{Kind: "debug", Title: "provider", Content: "completion 1"},
-		},
-		Usage: provider.Usage{InputTokens: 11, OutputTokens: 7, TotalTokens: 18},
-	}
-
-	want := []app.Entry{
-		{Kind: app.EntrySystem, Text: styles.AssistantMetaStyle.Render("agent:openai:gpt-4.1  elapsed:250ms")},
-		{Kind: app.EntrySystem, Text: "tokens in:11 out:7 total:18"},
-	}
-
-	got := entriesForAgentResult(result, false)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("entriesForAgentResult() = %#v, want %#v", got, want)
-	}
-}
-
-func TestEntriesForAgentResultSkipsEmptyToolInputAndZeroTokens(t *testing.T) {
-	result := agent.Result{
-		AgentLabel: "openai:gpt-4.1",
-		Steps:      []agent.Step{{Kind: "tool", Title: "grep", Content: "   "}},
-	}
-
-	want := []app.Entry{
-		{Kind: app.EntrySystem, Text: styles.AssistantMetaStyle.Render("agent:openai:gpt-4.1  elapsed:0s")},
-	}
-
-	got := entriesForAgentResult(result, false)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("entriesForAgentResult() = %#v, want %#v", got, want)
-	}
-}
-
-func TestEntriesForAgentResultIncludesContextInDebug(t *testing.T) {
-	result := agent.Result{
-		Context: agent.ContextSnapshot{
-			Signals:          "semantic: files:10",
-			Semantic:         "files:10",
-			RelevantFiles:    "internal/app/runtime.go",
-			RelevantSnippets: "FILE internal/app/runtime.go",
-		},
-		Steps: []agent.Step{{Kind: "assistant", Title: "answer", Content: "ok"}},
-	}
-
-	got := entriesForAgentResult(result, true)
-	if len(got) == 0 || got[0].Kind != app.EntrySystem {
-		t.Fatalf("expected debug context entry first, got %#v", got)
-	}
-	if !strings.Contains(got[0].Text, "agent context") {
-		t.Fatalf("expected context text, got %#v", got[0])
-	}
-}
-
-func TestEstimateTextareaHeight(t *testing.T) {
-	tests := []struct {
-		name  string
-		value string
-		width int
-		want  int
+func TestEntriesRendering(t *testing.T) {
+	cases := []struct {
+		kind app.EntryKind
+		text string
+		want string
 	}{
-		{name: "empty uses minimum", value: "", width: 20, want: 3},
-		{name: "short line uses minimum", value: "hola", width: 20, want: 3},
-		{name: "multiple lines grow", value: "uno\ndos\ntres\ncuatro", width: 20, want: 4},
-		{name: "wrapped line grows", value: "12345678901", width: 5, want: 3},
+		{app.EntryUser, "hello", ">"},
+		{app.EntrySystem, "ready", "ready"},
+		{app.EntryError, "fail", "fail"},
 	}
 
-	for _, tt := range tests {
-		got := estimateTextareaHeight(tt.value, tt.width)
-		if got != tt.want {
-			t.Fatalf("%s: estimateTextareaHeight() = %d, want %d", tt.name, got, tt.want)
+	for _, tc := range cases {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			m := NewTimelineModel()
+			m.appendEntry(app.Entry{Kind: tc.kind, Text: tc.text})
+			m.renderMessages()
+
+			got := strings.Join(m.model.Messages, "\n")
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("expected kind %s to contain %q, got %q", tc.kind, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestDiffOutputHighlighter(t *testing.T) {
+	input := `--- a/main.go
++++ b/main.go
+@@ -1,1 +1,1 @@
+-old
++new`
+
+	got := timeline.RenderDiffOutput(input)
+
+	if !strings.Contains(got, styles.DiffAddStyle.Render("+new")) {
+		t.Error("expected diff add style")
+	}
+	if !strings.Contains(got, styles.DiffRemoveStyle.Render("-old")) {
+		t.Error("expected diff remove style")
+	}
+}
+
+func TestDiffOutputCollapsing(t *testing.T) {
+	var lines []string
+	lines = append(lines, "--- a/file.go", "+++ b/file.go", "@@ -1,1 +1,1 @@")
+	for i := 0; i < 30; i++ {
+		lines = append(lines, fmt.Sprintf("+line %d", i))
+	}
+	input := strings.Join(lines, "\n")
+
+	got := timeline.RenderDiffOutput(input)
+	if !strings.Contains(got, "collapsed") {
+		t.Errorf("expected large diff to be collapsed, got:\n%s", got)
+	}
+}
+
+func TestMessageSelection(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+
+	m.appendEntry(app.Entry{Kind: app.EntryAssistant, Text: "hello world"})
+	m.renderMessages()
+
+	// Find the line index for "hello world"
+	lineIdx := -1
+	for i, line := range m.model.RenderLines {
+		if strings.Contains(line.Plain, "hello world") {
+			lineIdx = i
+			break
 		}
 	}
+
+	if lineIdx == -1 {
+		t.Fatal("could not find rendered assistant line")
+	}
+
+	// Y coordinate for PositionAt is lineIdx - YOffset
+	y := lineIdx - int(m.model.Viewport.YOffset)
+
+	if !m.BeginSelection(3, y) {
+		t.Fatal("expected selection to start")
+	}
+	m.UpdateSelection(10, y)
+
+	text, ok := m.model.SelectedText()
+	if !ok || text == "" {
+		t.Error("expected non-empty selection")
+	}
 }
 
-func TestNewModelInitializesFooterContextStatsFromRuntime(t *testing.T) {
+func TestModelCreation(t *testing.T) {
 	r := app.NewRuntime()
-
-	m := NewModel(r, func() {}, nil)
-	if m.footer.contextTokens != r.HistoryInputTokens() || m.footer.contextWindow != r.ContextWindow() {
-		t.Fatalf("unexpected footer context stats tokens=%d window=%d", m.footer.contextTokens, m.footer.contextWindow)
+	m := NewModel(r)
+	if m.runtime == nil {
+		t.Error("expected runtime to be set")
 	}
 }

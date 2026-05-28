@@ -42,7 +42,7 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	output := fmt.Sprintf("Worker: %s\nStatus: %s\n", update.Name, update.Status)
-	
+
 	// Format payload if it's a known type
 	if update.Payload != nil {
 		output += "\n--- Detailed Payload ---\n"

@@ -16,7 +16,6 @@ import (
 const (
 	maxIndexedFileSize   = 256 * 1024
 	maxSymbolsPerFile    = 24
-	defaultTopFiles      = 4
 	defaultSnippetFiles  = 3
 	defaultSnippetBudget = 220
 	maxSnippetLines      = 48
@@ -38,7 +37,7 @@ func (idx *Index) Ensure(ctx context.Context) (*Snapshot, error) {
 	idx.mu.RLock()
 	s := idx.lastSnapshot
 	idx.mu.RUnlock()
-	if s != nil && time.Since(s.GeneratedAt) < staleAfter {
+	if s != nil && time.Since(s.Snapshot.GeneratedAt) < staleAfter {
 		return s, nil
 	}
 	return idx.Refresh(ctx)
@@ -65,17 +64,17 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		ctx, cancel = context.WithTimeout(ctx, refreshTimeout)
 		defer cancel()
 	}
-	snapshot := &Snapshot{
-		GeneratedAt:    time.Now(),
-		Root:           root,
-		LanguageCounts: make(map[string]int),
-	}
+	snapshot := &Snapshot{}
+	snapshot.Snapshot.GeneratedAt = time.Now()
+	snapshot.Snapshot.Root = root
+	snapshot.Snapshot.LanguageCounts = make(map[string]int)
+
 	matcher, err := workspaceignore.Load(root)
 	if err != nil {
 		return nil, err
 	}
 	changed := findChangedFiles(root)
-	snapshot.ChangedPaths = changed
+	snapshot.Snapshot.ChangedPaths = changed
 	changedMap := make(map[string]bool)
 	for _, p := range changed {
 		changedMap[p] = true
@@ -136,12 +135,12 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 			Exports:  exports,
 			Content:  content,
 		}
-		snapshot.Files = append(snapshot.Files, summary)
-		snapshot.LanguageCounts[langName]++
+		snapshot.Snapshot.Files = append(snapshot.Snapshot.Files, summary)
+		snapshot.Snapshot.LanguageCounts[langName]++
 		dir := filepath.Dir(rel)
 		if dir != "." && !dirsSeen[dir] {
 			dirsSeen[dir] = true
-			snapshot.Directories = append(snapshot.Directories, dir)
+			snapshot.Snapshot.Directories = append(snapshot.Snapshot.Directories, dir)
 		}
 		return nil
 	})

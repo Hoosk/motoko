@@ -37,10 +37,10 @@ func NewComposerModel(runtime *app.Runtime) ComposerModel {
 
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(styles.White)
-	ta.BlurredStyle.Text = lipgloss.NewStyle().Foreground(styles.White)
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.Gray)
-	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(styles.Gray)
+	ta.FocusedStyle.Text = styles.WhiteStyle
+	ta.BlurredStyle.Text = styles.WhiteStyle
+	ta.FocusedStyle.Placeholder = styles.GrayStyle
+	ta.BlurredStyle.Placeholder = styles.GrayStyle
 	ta.EndOfBufferCharacter = ' '
 
 	m := ComposerModel{
@@ -57,7 +57,7 @@ func (m ComposerModel) Init() tea.Cmd {
 	return textarea.Blink
 }
 
-func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
+func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
@@ -77,52 +77,52 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyMsg:
 		if m.thinking {
-			return nil
+			return m, nil
 		}
 
 		switch msg.String() {
 		case "tab", "right":
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(1)
-				return nil
+				return m, nil
 			}
 			if len(m.suggestions) > 0 {
 				m.advanceSuggestion(1)
-				return nil
+				return m, nil
 			}
 		case "shift+tab", "left":
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(-1)
-				return nil
+				return m, nil
 			}
 			if len(m.suggestions) > 0 {
 				m.advanceSuggestion(-1)
-				return nil
+				return m, nil
 			}
 		case "down", "ctrl+n":
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(1)
-				return nil
+				return m, nil
 			}
 			m.clearSuggestionCycle()
 			m.navigateHistoryDown()
-			return nil
+			return m, nil
 		case "up", "ctrl+p":
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(-1)
-				return nil
+				return m, nil
 			}
 			m.clearSuggestionCycle()
 			m.navigateHistoryUp()
-			return nil
+			return m, nil
 		case "enter":
 			if len(m.mentionSuggestions) > 0 {
 				m.applySelectedMention()
-				return nil
+				return m, nil
 			}
 			if len(m.suggestions) > 0 && shouldApplySuggestionOnEnter(m.textarea.Value(), m.suggestions[m.selectedSuggestion]) {
 				m.applySelectedSuggestion()
-				return nil
+				return m, nil
 			}
 			m.clearSuggestionCycle()
 			input := m.textarea.Value()
@@ -132,7 +132,7 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 				m.savedInput = ""
 				m.textarea.Reset()
 				m.refreshSuggestions()
-				return func() tea.Msg {
+				return m, func() tea.Msg {
 					return SubmitPromptMsg{Prompt: input}
 				}
 			}
@@ -153,7 +153,7 @@ func (m *ComposerModel) Update(msg tea.Msg) tea.Cmd {
 		m.refreshSuggestions()
 	}
 
-	return tea.Batch(cmds...)
+	return m, tea.Batch(cmds...)
 }
 
 func (m ComposerModel) View() string {
@@ -187,9 +187,18 @@ func (m ComposerModel) View() string {
 		blocks = append(blocks, suggestionsBlock)
 	}
 
-	return styles.InputChromeStyle.Width(m.width).Render(
+	chromeWidth := m.width - 4
+	if chromeWidth < 0 {
+		chromeWidth = 0
+	}
+	return styles.InputChromeStyle.Width(chromeWidth).Render(
 		lipgloss.JoinVertical(lipgloss.Left, blocks...),
 	)
+}
+
+func (m *ComposerModel) SetWidth(width int) {
+	m.width = width
+	m.syncLayout()
 }
 
 func (m *ComposerModel) SyncLayout(width, height int) {
@@ -298,9 +307,9 @@ func (m *ComposerModel) syncInputChrome() {
 
 func (m ComposerModel) renderInputPrompt() string {
 	if m.runtime.InputMode() == app.InputModeShell {
-		return lipgloss.NewStyle().Foreground(styles.WarmGold).Bold(true).Render("$")
+		return styles.WarmGoldStyle.Bold(true).Render("$")
 	}
-	return lipgloss.NewStyle().Foreground(styles.MainNeon).Bold(true).Render(">")
+	return styles.BoldNeonStyle.Render(">")
 }
 
 func (m ComposerModel) renderSuggestionsLine() string {

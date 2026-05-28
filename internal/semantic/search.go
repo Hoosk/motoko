@@ -6,16 +6,16 @@ import (
 	"unicode"
 )
 
-func (s Snapshot) RelevantFiles(prompt string, limit int) []FileSummary {
-	return s.relevantFilesForTokens(promptTokens(prompt), limit)
+func RelevantFiles(s Snapshot, prompt string, limit int) []FileSummary {
+	return relevantFilesForTokens(s, promptTokens(prompt), limit)
 }
 
-func (s Snapshot) RelevantSnippets(prompt string, fileLimit, lineBudget int) []Snippet {
+func RelevantSnippets(s Snapshot, prompt string, fileLimit, lineBudget int) []Snippet {
 	if lineBudget <= 0 {
 		lineBudget = defaultSnippetBudget
 	}
 	tokens := promptTokens(prompt)
-	files := s.relevantFilesForTokens(tokens, fileLimit)
+	files := relevantFilesForTokens(s, tokens, fileLimit)
 	result := make([]Snippet, 0, len(files))
 	remaining := lineBudget
 	for _, file := range files {
@@ -32,7 +32,7 @@ func (s Snapshot) RelevantSnippets(prompt string, fileLimit, lineBudget int) []S
 	return result
 }
 
-func (s Snapshot) relevantFilesForTokens(tokens []string, limit int) []FileSummary {
+func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummary {
 	if limit <= 0 {
 		limit = defaultTopFiles
 	}
@@ -54,7 +54,7 @@ func (s Snapshot) relevantFilesForTokens(tokens []string, limit int) []FileSumma
 		result = append(result, item.file)
 	}
 	if len(result) < limit {
-		fallbacks := s.fallbackFiles(limit - len(result))
+		fallbacks := fallbackFiles(s, limit-len(result))
 		for _, file := range fallbacks {
 			if _, ok := seen[file.Path]; ok {
 				continue
@@ -68,7 +68,7 @@ func (s Snapshot) relevantFilesForTokens(tokens []string, limit int) []FileSumma
 	return result
 }
 
-func (s Snapshot) fallbackFiles(limit int) []FileSummary {
+func fallbackFiles(s Snapshot, limit int) []FileSummary {
 	if limit <= 0 {
 		return nil
 	}

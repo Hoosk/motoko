@@ -28,7 +28,7 @@ func main() {
 	runtime.Start(ctx)
 
 	// Create UI Model
-	m := ui.NewModel(runtime, cancel, ctx)
+	m := ui.NewModel(runtime)
 
 	// Start Bubble Tea program
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -11,123 +10,94 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Fields: 0=Preset  1=APIKey  2=Save  3=Cancel
-func (m *Model) providerFieldCount() int { return 4 }
-
-func (m *Model) openProviderForm() {
-	preset := m.currentProviderPreset()
-	m.providerForm = providerForm{
-		active:  true,
-		name:    config.DefaultProviderName(preset),
-		baseURL: config.DefaultBaseURL(preset, ""),
-	}
+type providerForm struct {
+	active      bool
+	fieldIndex  int
+	presetIndex int
+	name        string
+	baseURL     string
+	apiKey      string
+	loading     bool
+	status      string
 }
 
-func (m *Model) currentProviderPreset() config.ProviderPreset {
-	presets := m.runtime.ProviderPresets()
-	if len(presets) == 0 {
-		return config.ProviderPresetOpenAI
-	}
-	if m.providerForm.presetIndex < 0 || m.providerForm.presetIndex >= len(presets) {
-		return presets[0]
-	}
-	return presets[m.providerForm.presetIndex]
+func (f *providerForm) Open(runtime *app.Runtime) {
+	preset := f.currentProviderPreset(runtime)
+	f.active = true
+	f.name = config.DefaultProviderName(preset)
+	f.baseURL = config.DefaultBaseURL(preset, "")
+	f.presetIndex = 0
+	f.fieldIndex = 0
 }
 
-func (m *Model) providerConfigFromForm() config.ProviderConfig {
-	preset := m.currentProviderPreset()
-	return config.NormalizeProvider(config.ProviderConfig{
-		Name:    config.DefaultProviderName(preset),
-		Preset:  preset,
-		BaseURL: config.DefaultBaseURL(preset, ""),
-		APIKey:  strings.TrimSpace(m.providerForm.apiKey),
-	})
-}
-
-func (m *Model) handleProviderFormKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
-		m.providerForm = providerForm{}
-		return nil
-	case "tab", "down", "ctrl+n":
-		m.providerForm.fieldIndex = (m.providerForm.fieldIndex + 1) % m.providerFieldCount()
-		return nil
-	case "up", "ctrl+p":
-		m.providerForm.fieldIndex--
-		if m.providerForm.fieldIndex < 0 {
-			m.providerForm.fieldIndex = m.providerFieldCount() - 1
+func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !f.active {
+			return nil
 		}
-		return nil
-	case "left":
-		if m.providerForm.fieldIndex == 0 {
-			presets := m.runtime.ProviderPresets()
-			m.providerForm.presetIndex--
-			if m.providerForm.presetIndex < 0 {
-				m.providerForm.presetIndex = len(presets) - 1
+		switch msg.String() {
+		case "esc":
+			f.active = false
+			return nil
+		case "tab", "down", "ctrl+n":
+			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount()
+			return nil
+		case "up", "ctrl+p":
+			f.fieldIndex--
+			if f.fieldIndex < 0 {
+				f.fieldIndex = f.fieldCount() - 1
 			}
-			m.syncProviderFormPreset()
-		}
-		return nil
-	case "right":
-		if m.providerForm.fieldIndex == 0 {
-			presets := m.runtime.ProviderPresets()
-			m.providerForm.presetIndex = (m.providerForm.presetIndex + 1) % len(presets)
-			m.syncProviderFormPreset()
-		}
-		return nil
-	case "backspace":
-		if m.providerForm.fieldIndex == 1 {
-			m.providerForm.apiKey = trimLastRune(m.providerForm.apiKey)
-		}
-		return nil
-	case "enter":
-		return m.handleProviderFormEnter()
-	default:
-		if len(msg.Runes) == 0 {
+			return nil
+		case "left":
+			if f.fieldIndex == 0 {
+				presets := runtime.ProviderPresets()
+				f.presetIndex--
+				if f.presetIndex < 0 {
+					f.presetIndex = len(presets) - 1
+				}
+				f.syncPreset(runtime)
+			}
+			return nil
+		case "right":
+			if f.fieldIndex == 0 {
+				presets := runtime.ProviderPresets()
+				f.presetIndex = (f.presetIndex + 1) % len(presets)
+				f.syncPreset(runtime)
+			}
+			return nil
+		case "backspace":
+			if f.fieldIndex == 1 {
+				f.apiKey = trimLastRune(f.apiKey)
+			}
+			return nil
+		case "enter":
+			return f.handleEnter(runtime)
+		default:
+			if len(msg.Runes) == 0 {
+				return nil
+			}
+			if f.fieldIndex == 1 {
+				f.apiKey += string(msg.Runes)
+			}
 			return nil
 		}
-		if m.providerForm.fieldIndex == 1 {
-			m.providerForm.apiKey += string(msg.Runes)
-		}
-		return nil
 	}
+	return nil
 }
 
-func (m *Model) handleProviderFormEnter() tea.Cmd {
-	switch m.providerForm.fieldIndex {
-	case 3: // Cancel
-		m.providerForm = providerForm{}
-		return nil
-	case 2: // Save
-		cfg := m.providerConfigFromForm()
-		if strings.TrimSpace(cfg.APIKey) == "" {
-			m.providerForm.status = "API Key is required."
-			return nil
-		}
-		if err := m.runtime.SaveProvider(cfg, true); err != nil {
-			m.providerForm.status = err.Error()
-			return nil
-		}
-		m.providerForm = providerForm{}
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("Provider saved and activated: %s", cfg.Name)})
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Loading models in background... then use /models to list or select them."})
-		m.timeline.renderMessages()
-		return loadProviderModels(m.runtime, cfg)
-	default:
-		m.providerForm.fieldIndex = (m.providerForm.fieldIndex + 1) % m.providerFieldCount()
-		return nil
+func (f *providerForm) View(runtime *app.Runtime) string {
+	if !f.active {
+		return ""
 	}
-}
-
-func (m Model) renderProviderForm() string {
-	preset := m.currentProviderPreset()
-	presetLine := renderProviderField(0, m.providerForm.fieldIndex,
+	preset := f.currentProviderPreset(runtime)
+	presetLine := renderProviderField(0, f.fieldIndex,
 		"Provider", string(preset)+"  ◀ ▶")
-	apiKeyLine := renderProviderField(1, m.providerForm.fieldIndex,
-		"API Key", maskSecret(m.providerForm.apiKey))
+	apiKeyLine := renderProviderField(1, f.fieldIndex,
+		"API Key", maskSecret(f.apiKey))
 
-	saveBtn := renderProviderButton(2, m.providerForm.fieldIndex, buttonLabel(m.providerForm.loading, "save"))
-	cancelBtn := renderProviderButton(3, m.providerForm.fieldIndex, "cancel")
+	saveBtn := renderProviderButton(2, f.fieldIndex, buttonLabel(f.loading, "save"))
+	cancelBtn := renderProviderButton(3, f.fieldIndex, "cancel")
 	buttons := lipgloss.JoinHorizontal(lipgloss.Left, saveBtn, "   ", cancelBtn)
 
 	return strings.Join([]string{
@@ -139,14 +109,63 @@ func (m Model) renderProviderForm() string {
 		"",
 		buttons,
 		"",
-		styles.SystemStyle.Render(m.providerForm.status),
+		styles.SystemStyle.Render(f.status),
 	}, "\n")
 }
 
-func (m *Model) syncProviderFormPreset() {
-	preset := m.currentProviderPreset()
-	m.providerForm.name = config.DefaultProviderName(preset)
-	m.providerForm.baseURL = config.DefaultBaseURL(preset, "")
+func (f *providerForm) fieldCount() int { return 4 }
+
+func (f *providerForm) currentProviderPreset(runtime *app.Runtime) config.ProviderPreset {
+	presets := runtime.ProviderPresets()
+	if len(presets) == 0 {
+		return config.ProviderPresetOpenAI
+	}
+	if f.presetIndex < 0 || f.presetIndex >= len(presets) {
+		return presets[0]
+	}
+	return presets[f.presetIndex]
+}
+
+func (f *providerForm) configFromForm(runtime *app.Runtime) config.ProviderConfig {
+	preset := f.currentProviderPreset(runtime)
+	return config.NormalizeProvider(config.ProviderConfig{
+		Name:    config.DefaultProviderName(preset),
+		Preset:  preset,
+		BaseURL: config.DefaultBaseURL(preset, ""),
+		APIKey:  strings.TrimSpace(f.apiKey),
+	})
+}
+
+func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
+	switch f.fieldIndex {
+	case 3: // Cancel
+		f.active = false
+		return nil
+	case 2: // Save
+		cfg := f.configFromForm(runtime)
+		if strings.TrimSpace(cfg.APIKey) == "" {
+			f.status = "API Key is required."
+			return nil
+		}
+		if err := runtime.SaveProvider(cfg, true); err != nil {
+			f.status = err.Error()
+			return nil
+		}
+		f.active = false
+		return tea.Batch(
+			func() tea.Msg { return NotificationMsg{Text: "Provider saved and activated: " + cfg.Name} },
+			loadProviderModels(runtime, cfg),
+		)
+	default:
+		f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount()
+		return nil
+	}
+}
+
+func (f *providerForm) syncPreset(runtime *app.Runtime) {
+	preset := f.currentProviderPreset(runtime)
+	f.name = config.DefaultProviderName(preset)
+	f.baseURL = config.DefaultBaseURL(preset, "")
 }
 
 func renderProviderField(index, active int, label, value string) string {

@@ -12,6 +12,7 @@ import (
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/semantic/symtypes"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
@@ -113,13 +114,18 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 }
 
 func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
-	r := NewRuntime()
-	snapshot := semantic.Snapshot{Files: []semantic.FileSummary{{
-		Path:     "internal/app/runtime.go",
-		Language: "go",
-		Content:  []byte("package app\n\nfunc RunAgent() error {\n\treturn nil\n}\n"),
-		Symbols:  []semantic.Symbol{{Name: "RunAgent", Kind: "func", Line: 3, Range: semantic.LineRange{Start: 3, End: 5}}},
-	}}, GeneratedAt: time.Now()}
+	r := NewRuntime(RuntimeOptions{})
+	snapshot := semantic.Snapshot{
+		Snapshot: symtypes.Snapshot{
+			Files: []semantic.FileSummary{{
+				Path:     "internal/app/runtime.go",
+				Language: "go",
+				Content:  []byte("package app\n\nfunc RunAgent() error {\n\treturn nil\n}\n"),
+				Symbols:  []semantic.Symbol{{Name: "RunAgent", Kind: "func", Line: 3, Range: semantic.LineRange{Start: 3, End: 5}}},
+			}},
+			GeneratedAt: time.Now(),
+		},
+	}
 	r.semantic = semantic.NewIndex()
 	r.semantic.SetSnapshotForTest(&snapshot)
 
@@ -157,8 +163,10 @@ func TestMentionSuggestionsPreferAgentsAndFiles(t *testing.T) {
 	r.availableAgents = append(r.availableAgents, agent.AgentDef{Name: "explore", System: "Busca codigo"})
 	r.semantic = semantic.NewIndex()
 	r.semantic.SetSnapshotForTest(&semantic.Snapshot{
-		GeneratedAt: time.Now(),
-		Files:       []semantic.FileSummary{{Path: "internal/app/runtime.go", Language: "go", Content: []byte("package app\n")}},
+		Snapshot: symtypes.Snapshot{
+			GeneratedAt: time.Now(),
+			Files:       []semantic.FileSummary{{Path: "internal/app/runtime.go", Language: "go", Content: []byte("package app\n")}},
+		},
 	})
 	got := r.MentionSuggestions("revisa @ex")
 	if len(got) == 0 || got[0] != "@explore" {
