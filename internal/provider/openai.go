@@ -63,7 +63,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		"model": c.model,
 		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
-		}, toChatMessages(messages)...),
+		}, toChatMessages(messages, isGoogleEndpoint(c.baseURL))...),
 		"temperature": 0.2,
 	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
@@ -72,9 +72,9 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		payload["parallel_tool_calls"] = false
 	}
 
-	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, map[string]string{
-		"Authorization": "Bearer " + c.apiKey,
-	}, &decoded); err != nil {
+	headers := geminiAuthHeaders(c.baseURL, c.apiKey)
+
+	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
 		return Response{}, err
 	}
 
@@ -94,9 +94,10 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			ContextLength int    `json:"context_length"`
 		} `json:"data"`
 	}
-	if err := getJSON(ctx, c.httpClient, c.baseURL+"/models", map[string]string{
-		"Authorization": "Bearer " + c.apiKey,
-	}, &decoded); err != nil {
+
+	listHeaders := geminiAuthHeaders(c.baseURL, c.apiKey)
+
+	if err := getJSON(ctx, c.httpClient, c.baseURL+"/models", listHeaders, &decoded); err != nil {
 		return nil, err
 	}
 	result := make([]ModelInfo, 0, len(decoded.Data))

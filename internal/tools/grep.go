@@ -28,7 +28,6 @@ func (t *GrepTool) Spec() Spec {
 }
 
 func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
 		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
@@ -38,6 +37,20 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 	include := ""
 	if len(parts) > 1 {
 		include = parts[1]
+	}
+
+	cfg := GetConfig(ctx)
+	caseSensitive := false
+	maxMatches := maxGrepMatches
+	if cfg != nil {
+		caseSensitive = cfg.Search.CaseSensitive
+		if cfg.Search.MaxResults > 0 {
+			maxMatches = cfg.Search.MaxResults
+		}
+	}
+
+	if !caseSensitive && !strings.HasPrefix(pattern, "(?i)") {
+		pattern = "(?i)" + pattern
 	}
 
 	re, err := regexp.Compile(pattern)
@@ -54,7 +67,7 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	var matches []string
-	err = walkWorkspace(func(relPath, absPath string, entry fs.DirEntry) error {
+	err = walkWorkspace(ctx, func(relPath, absPath string, entry fs.DirEntry) error {
 		if entry.IsDir() {
 			return nil
 		}
@@ -79,7 +92,7 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 			line := scanner.Text()
 			if re.MatchString(line) {
 				matches = append(matches, fmt.Sprintf("%s:%d: %s", relPath, lineNo, line))
-				if len(matches) >= maxGrepMatches {
+				if len(matches) >= maxMatches {
 					return errStopWalk
 				}
 			}

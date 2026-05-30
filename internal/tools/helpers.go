@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -42,7 +43,7 @@ func resolveWorkspacePath(target string) (string, string, error) {
 	return path, filepath.ToSlash(rel), nil
 }
 
-func walkWorkspace(fn func(relPath, absPath string, entry fs.DirEntry) error) error {
+func walkWorkspace(ctx context.Context, fn func(relPath, absPath string, entry fs.DirEntry) error) error {
 	workspace, _, err := resolveWorkspacePath("")
 	if err != nil {
 		return err
@@ -50,6 +51,12 @@ func walkWorkspace(fn func(relPath, absPath string, entry fs.DirEntry) error) er
 	matcher, err := workspaceignore.Load(workspace)
 	if err != nil {
 		return err
+	}
+
+	cfg := GetConfig(ctx)
+	var excludePatterns []string
+	if cfg != nil {
+		excludePatterns = cfg.Search.ExcludePatterns
 	}
 
 	return filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -74,6 +81,16 @@ func walkWorkspace(fn func(relPath, absPath string, entry fs.DirEntry) error) er
 		}
 		if entry.IsDir() && (rel == ".git" || strings.HasPrefix(rel, ".git/")) {
 			return filepath.SkipDir
+		}
+
+		// Apply custom exclude patterns
+		for _, pat := range excludePatterns {
+			if matched, _ := filepath.Match(pat, rel); matched {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 
 		return fn(rel, path, entry)

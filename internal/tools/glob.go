@@ -35,7 +35,7 @@ func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	var matches []string
-	err = walkWorkspace(func(relPath, absPath string, entry fs.DirEntry) error {
+	err = walkWorkspace(ctx, func(relPath, absPath string, entry fs.DirEntry) error {
 		_ = absPath
 		if matcher.MatchString(relPath) {
 			matches = append(matches, relPath)

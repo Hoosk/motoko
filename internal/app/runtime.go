@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
@@ -12,6 +14,7 @@ import (
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
+	"github.com/Hoosk/motoko/internal/skills"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
@@ -74,6 +77,12 @@ type pendingShell struct {
 	Command string
 }
 
+type SubagentInfo struct {
+	Name      string
+	Prompt    string
+	StartedAt time.Time
+}
+
 type Runtime struct {
 	mode              Mode
 	inputMode         InputMode
@@ -92,6 +101,10 @@ type Runtime struct {
 	contextWindow     int
 	wasResumed        bool
 	mentionedFiles    []string
+	availableSkills   []skills.Skill
+
+	subagentsMu       sync.Mutex
+	activeSubagents   map[string]*SubagentInfo
 }
 
 type RuntimeOptions struct {
@@ -123,6 +136,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		allAgents = append(allAgents, customAgents...)
 	}
 
+	sList, _ := skills.Discover(workspacePath)
+
 	r := &Runtime{
 		mode:              ModePlan,
 		inputMode:         InputModeChat,
@@ -134,6 +149,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		currentAgentName:  "plan",
 		availableAgents:   allAgents,
 		workspaceID:       workspaceID,
+		availableSkills:   sList,
+		activeSubagents:   make(map[string]*SubagentInfo),
 	}
 
 	// Setup default tachikomas
@@ -143,6 +160,11 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 
 	// Register tools that depend on tachikomas
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))
+	r.tools.Register(tools.NewDelegateTool(r))
+
+	if len(sList) > 0 {
+		r.tools.Register(tools.NewActivateSkillTool(sList))
+	}
 
 	if runtimeOpts.Resume {
 		if last, err := session.Last(workspaceID); err == nil && last != nil {
@@ -381,7 +403,17 @@ func (r *Runtime) refreshAgent() {
 		return
 	}
 	r.contextWindow = active.ContextWindow
-	r.agent = agent.New(client, r.tools)
+
+	var toolsRegistry *tools.Registry
+	if strings.EqualFold(r.currentAgentName, "plan") || strings.EqualFold(r.currentAgentName, "search") {
+		toolsRegistry = r.tools.Filter(func(t tools.Tool) bool {
+			return !tools.IsWriteTool(t.Spec().Name)
+		})
+	} else {
+		toolsRegistry = r.tools
+	}
+
+	r.agent = agent.New(client, toolsRegistry)
 	r.agent.SetDebug(r.debug)
 	// Re-apply the current agent mode system prompt.
 	for _, a := range r.availableAgents {
@@ -390,6 +422,18 @@ func (r *Runtime) refreshAgent() {
 			break
 		}
 	}
+}
+
+// ActiveSubagents returns a sorted list of currently active subagent labels.
+func (r *Runtime) ActiveSubagents() []string {
+	r.subagentsMu.Lock()
+	defer r.subagentsMu.Unlock()
+	var list []string
+	for id := range r.activeSubagents {
+		list = append(list, id)
+	}
+	sort.Strings(list)
+	return list
 }
 
 func (r *Runtime) Start(ctx context.Context) {

@@ -6,6 +6,21 @@ import (
 	"github.com/Hoosk/motoko/internal/app"
 )
 
+// VisibleEntries returns the subset of entries to display.
+func (m *Model) VisibleEntries() []app.Entry {
+	if m.ShowReasoning {
+		return m.Entries
+	}
+	var visible []app.Entry
+	for _, entry := range m.Entries {
+		if entry.Kind == app.EntryReasoning {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	return visible
+}
+
 func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer bool) {
 	styledLines := strings.Split(styled, "\n")
 	plainLines := strings.Split(StripANSI(styled), "\n")
@@ -47,10 +62,11 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 		return meta
 	}
 	entryIdx := idx - 2
-	if entryIdx < 0 || entryIdx >= len(m.Entries) {
+	visible := m.VisibleEntries()
+	if entryIdx < 0 || entryIdx >= len(visible) {
 		return nil
 	}
-	entry := m.Entries[entryIdx]
+	entry := visible[entryIdx]
 	switch entry.Kind {
 	case app.EntryAssistant, app.EntryReasoning:
 		wrapped := strings.Split(WrapText(entry.Text, m.AssistantInnerWidth()), "\n")
@@ -60,12 +76,31 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 		}
 		return meta
 	case app.EntryUser:
-		body := " >  " + entry.Text
-		return []RenderLine{
-			{Content: strings.Repeat("─", max(20, m.Viewport.Width)), Selectable: false},
-			{Content: body, ContentX: UserContentX, Selectable: true},
-			{Content: strings.Repeat("─", max(20, m.Viewport.Width)), Selectable: false},
+		w := max(20, m.Viewport.Width)
+		ruleWidth := w - 2
+		if ruleWidth < 10 {
+			ruleWidth = 10
 		}
+		ruleStr := strings.Repeat("─", ruleWidth)
+
+		wrapped := strings.Split(WrapText(entry.Text, w-5), "\n")
+		meta := make([]RenderLine, 0, len(wrapped)+2)
+
+		// Top rule
+		meta = append(meta, RenderLine{Content: ruleStr, Selectable: false})
+		// Body lines
+		for i, line := range wrapped {
+			var bodyLine string
+			if i == 0 {
+				bodyLine = " >  " + line
+			} else {
+				bodyLine = "    " + line
+			}
+			meta = append(meta, RenderLine{Content: bodyLine, ContentX: UserContentX, Selectable: true})
+		}
+		// Bottom rule
+		meta = append(meta, RenderLine{Content: ruleStr, Selectable: false})
+		return meta
 	case app.EntryCommand, app.EntryOutput, app.EntryError, app.EntrySystem, app.EntryHelp:
 		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
 		meta := make([]RenderLine, 0, len(plainLines))
@@ -103,7 +138,8 @@ func (m *Model) MessageAtY(y int) int {
 	}
 	currentY += welcomeHeight + 2
 
-	for i, entry := range m.Entries {
+	visible := m.VisibleEntries()
+	for i, entry := range visible {
 		copyable := entry.Kind == app.EntryAssistant ||
 			entry.Kind == app.EntryReasoning ||
 			entry.Kind == app.EntryUser ||

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -60,6 +61,7 @@ type chatCompletionToolCall struct {
 	Type     string                     `json:"type"`
 	Function chatCompletionToolFunction `json:"function"`
 	Raw      json.RawMessage            `json:"-"`
+	RawMap   map[string]any             `json:"-"`
 }
 
 func (c *chatCompletionToolCall) UnmarshalJSON(data []byte) error {
@@ -70,6 +72,7 @@ func (c *chatCompletionToolCall) UnmarshalJSON(data []byte) error {
 	}
 	*c = chatCompletionToolCall(decoded)
 	c.Raw = append(c.Raw[:0], data...)
+	_ = json.Unmarshal(data, &c.RawMap)
 	return nil
 }
 
@@ -78,6 +81,18 @@ type chatCompletionToolCallDelta struct {
 	ID       string                     `json:"id"`
 	Type     string                     `json:"type"`
 	Function chatCompletionToolFunction `json:"function"`
+	Raw      json.RawMessage            `json:"-"`
+}
+
+func (c *chatCompletionToolCallDelta) UnmarshalJSON(data []byte) error {
+	type alias chatCompletionToolCallDelta
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = chatCompletionToolCallDelta(decoded)
+	c.Raw = append(c.Raw[:0], data...)
+	return nil
 }
 
 type chatCompletionToolFunction struct {
@@ -128,21 +143,47 @@ func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []ToolInv
 	return result
 }
 
-func toChatMessages(messages []ConversationItem) []map[string]any {
+func toChatMessages(messages []ConversationItem, isGoogle bool) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
+			hasThoughtSignature := false
 			if len(call.Raw) > 0 {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
-					result = append(result, map[string]any{
-						"role":       RoleAssistant,
-						"content":    "",
-						"tool_calls": []map[string]any{rawToolCall},
-					})
-					continue
+					if _, found := rawToolCall["thought_signature"]; found {
+						hasThoughtSignature = true
+					}
+					if !hasThoughtSignature {
+						if extra, ok := rawToolCall["extra_content"].(map[string]any); ok {
+							if google, ok := extra["google"].(map[string]any); ok {
+								if _, found := google["signature"]; found {
+									hasThoughtSignature = true
+								}
+							}
+						}
+					}
+
+					if !isGoogle || hasThoughtSignature {
+						result = append(result, map[string]any{
+							"role":       RoleAssistant,
+							"content":    "",
+							"tool_calls": []map[string]any{rawToolCall},
+						})
+						continue
+					}
 				}
 			}
+
+			if isGoogle && !hasThoughtSignature {
+				// Convert to standard assistant text message to prevent 400 bad request error
+				result = append(result, map[string]any{
+					"role":    RoleAssistant,
+					"content": fmt.Sprintf("[Ejecutando herramienta: %s con argumentos: %s]", call.Name, call.Input),
+				})
+				continue
+			}
+
 			result = append(result, map[string]any{
 				"role":    RoleAssistant,
 				"content": "",
@@ -159,6 +200,34 @@ func toChatMessages(messages []ConversationItem) []map[string]any {
 		}
 		if msg.Role == RoleTool {
 			call, output := parseToolResultContent(msg.Content)
+			hasThoughtSignature := false
+			if len(call.Raw) > 0 {
+				var rawToolCall map[string]any
+				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+					if _, found := rawToolCall["thought_signature"]; found {
+						hasThoughtSignature = true
+					}
+					if !hasThoughtSignature {
+						if extra, ok := rawToolCall["extra_content"].(map[string]any); ok {
+							if google, ok := extra["google"].(map[string]any); ok {
+								if _, found := google["signature"]; found {
+									hasThoughtSignature = true
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if isGoogle && !hasThoughtSignature {
+				// Convert to standard user text message to prevent 400 bad request error
+				result = append(result, map[string]any{
+					"role":    RoleUser,
+					"content": fmt.Sprintf("[Resultado de %s: %s]", call.Name, output),
+				})
+				continue
+			}
+
 			item := map[string]any{
 				"role":    RoleTool,
 				"content": output,
@@ -265,12 +334,34 @@ func toolInputDescription(tool LocalToolDefinition) string {
 	return "Raw text input for the tool."
 }
 
-func mergeChatToolCallDeltas(acc map[int]*chatCompletionToolCall, deltas []chatCompletionToolCallDelta) {
+func mergeChatToolCallDeltas(acc map[int]*chatCompletionToolCall, deltas []chatCompletionToolCallDelta, mappedIndexes map[int]int) {
+	if mappedIndexes == nil {
+		mappedIndexes = make(map[int]int)
+	}
 	for _, delta := range deltas {
-		call := acc[delta.Index]
+		targetIndex := delta.Index
+		if delta.ID != "" {
+			existing, exists := acc[delta.Index]
+			if exists && existing.ID != "" && existing.ID != delta.ID {
+				newIndex := len(acc)
+				mappedIndexes[delta.Index] = newIndex
+				targetIndex = newIndex
+			} else {
+				mappedIndexes[delta.Index] = delta.Index
+				targetIndex = delta.Index
+			}
+		} else {
+			if mapped, ok := mappedIndexes[delta.Index]; ok {
+				targetIndex = mapped
+			}
+		}
+
+		call := acc[targetIndex]
 		if call == nil {
-			call = &chatCompletionToolCall{}
-			acc[delta.Index] = call
+			call = &chatCompletionToolCall{
+				RawMap: make(map[string]any),
+			}
+			acc[targetIndex] = call
 		}
 		if delta.ID != "" {
 			call.ID = delta.ID
@@ -283,6 +374,38 @@ func mergeChatToolCallDeltas(acc map[int]*chatCompletionToolCall, deltas []chatC
 		}
 		if delta.Function.Arguments != "" {
 			call.Function.Arguments += delta.Function.Arguments
+		}
+
+		if len(delta.Raw) > 0 {
+			var deltaMap map[string]any
+			if err := json.Unmarshal(delta.Raw, &deltaMap); err == nil {
+				mergeMaps(call.RawMap, deltaMap)
+			}
+		}
+	}
+}
+
+func mergeMaps(dest, src map[string]any) {
+	for k, v := range src {
+		if k == "index" {
+			continue
+		}
+		if srcMap, ok := v.(map[string]any); ok {
+			destMap, destOk := dest[k].(map[string]any)
+			if !destOk {
+				destMap = make(map[string]any)
+				dest[k] = destMap
+			}
+			mergeMaps(destMap, srcMap)
+		} else if srcStr, ok := v.(string); ok {
+			if k == "name" || k == "arguments" {
+				existing, _ := dest[k].(string)
+				dest[k] = existing + srcStr
+			} else {
+				dest[k] = v
+			}
+		} else {
+			dest[k] = v
 		}
 	}
 }
@@ -299,6 +422,11 @@ func sortedChatToolCalls(acc map[int]*chatCompletionToolCall) []chatCompletionTo
 	result := make([]chatCompletionToolCall, 0, len(indexes))
 	for _, index := range indexes {
 		if call := acc[index]; call != nil {
+			if len(call.RawMap) > 0 {
+				if bytes, err := json.Marshal(call.RawMap); err == nil {
+					call.Raw = bytes
+				}
+			}
 			result = append(result, *call)
 		}
 	}

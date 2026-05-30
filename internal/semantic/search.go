@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -36,13 +37,44 @@ func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummar
 	if limit <= 0 {
 		limit = defaultTopFiles
 	}
+
+	// 1. Calculate initial scores
+	scores := make(map[string]int)
+	for _, file := range s.Files {
+		scores[file.Path] = scoreFile(file, tokens)
+	}
+
+	// 2. Semantic graph score propagation (expanded scores)
+	expanded := make(map[string]int)
+	for k, v := range scores {
+		expanded[k] = v
+	}
+
+	for _, a := range s.Files {
+		scoreA := scores[a.Path]
+		if scoreA <= 0 {
+			continue
+		}
+		for _, b := range s.Files {
+			if a.Path == b.Path {
+				continue
+			}
+			if areConnected(a, b) {
+				// Propagate 30% of A's score to B
+				expanded[b.Path] += scoreA * 3 / 10
+			}
+		}
+	}
+
+	// 3. Rank files based on final expanded scores
 	var ranked []scoredFile
 	for _, file := range s.Files {
-		score := scoreFile(file, tokens)
+		score := expanded[file.Path]
 		if score > 0 {
 			ranked = append(ranked, scoredFile{file: file, score: score})
 		}
 	}
+
 	sortScoredFiles(ranked)
 	result := make([]FileSummary, 0, limit)
 	seen := make(map[string]struct{})
@@ -67,6 +99,7 @@ func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummar
 	}
 	return result
 }
+
 
 func fallbackFiles(s Snapshot, limit int) []FileSummary {
 	if limit <= 0 {
@@ -239,3 +272,55 @@ func promptTokens(prompt string) []string {
 	}
 	return tokens
 }
+
+func isImportedBy(b, a FileSummary) bool {
+	for _, imp := range a.Imports {
+		impClean := strings.Trim(imp, "\"`' ")
+		if impClean == "" {
+			continue
+		}
+		// If B's path contains the import suffix or vice-versa
+		lowerB := strings.ToLower(b.Path)
+		lowerImp := strings.ToLower(impClean)
+		if strings.Contains(lowerB, lowerImp) || strings.Contains(lowerImp, strings.ToLower(filepath.Base(b.Path))) {
+			return true
+		}
+	}
+	return false
+}
+
+func referencesSymbol(a, b FileSummary) bool {
+	if len(b.Exports) == 0 || len(a.Content) == 0 {
+		return false
+	}
+	aStr := strings.ToLower(string(a.Content))
+	for _, exp := range b.Exports {
+		if exp == "" {
+			continue
+		}
+		if strings.Contains(aStr, strings.ToLower(exp)) {
+			return true
+		}
+	}
+	return false
+}
+
+func areConnected(a, b FileSummary) bool {
+	if a.Path == b.Path {
+		return false
+	}
+	if isImportedBy(b, a) {
+		return true
+	}
+	if isImportedBy(a, b) {
+		return true
+	}
+	if referencesSymbol(a, b) {
+		return true
+	}
+	if referencesSymbol(b, a) {
+		return true
+	}
+	return false
+}
+

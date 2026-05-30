@@ -36,3 +36,48 @@ func resolveWorkspacePath(target string) (string, string, error) {
 
 	return path, filepath.ToSlash(rel), nil
 }
+
+// ValidateWritePath checks if the given target path is allowed for writes.
+func ValidateWritePath(target string) error {
+	_, relPath, err := resolveWorkspacePath(target)
+	if err != nil {
+		return err
+	}
+
+	lowerRel := strings.ToLower(relPath)
+
+	// Block any write to .git directory (hooks, config, objects, etc.)
+	if lowerRel == ".git" || strings.HasPrefix(lowerRel, ".git/") {
+		return fmt.Errorf("escritura bloqueada: ruta dentro de infraestructura git (.git) no permitida")
+	}
+
+	// Block any environment configuration files (.env, .env.local, .env.development, etc.)
+	baseName := strings.ToLower(filepath.Base(relPath))
+	if strings.HasPrefix(baseName, ".env") {
+		return fmt.Errorf("escritura bloqueada: modificacion de archivos de variables de entorno (.env) no permitida")
+	}
+
+	// Block SSH directories or private keys
+	if lowerRel == ".ssh" || strings.HasPrefix(lowerRel, ".ssh/") ||
+		strings.HasPrefix(baseName, "id_rsa") || strings.HasPrefix(baseName, "id_dsa") ||
+		strings.HasPrefix(baseName, "id_ecdsa") || strings.HasPrefix(baseName, "id_ed25519") ||
+		baseName == "authorized_keys" || baseName == "known_hosts" {
+		return fmt.Errorf("escritura bloqueada: modificacion de claves SSH o credenciales del sistema no permitida")
+	}
+
+	// Block Motoko agent settings
+	if lowerRel == ".antigravitycli" || strings.HasPrefix(lowerRel, ".antigravitycli/") {
+		return fmt.Errorf("escritura bloqueada: modificacion de configuracion del agente no permitida")
+	}
+
+	return nil
+}
+
+// resolveWorkspaceWritePath resolves target and ensures it is a safe write path.
+func resolveWorkspaceWritePath(target string) (string, string, error) {
+	if err := ValidateWritePath(target); err != nil {
+		return "", "", err
+	}
+	return resolveWorkspacePath(target)
+}
+

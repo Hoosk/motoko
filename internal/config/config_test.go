@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -135,3 +136,60 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected config dir %q", filepath.Dir(path))
 	}
 }
+
+func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	const rawKey = "sk-proj-my-super-secret-key-12345"
+
+	cfg := &AppConfig{
+		ActiveProvider: "my-openai",
+		Providers: []ProviderConfig{{
+			Name:   "my-openai",
+			Preset: ProviderPresetOpenAI,
+			Kind:   ProviderKindOpenAICompatible,
+			APIKey: rawKey,
+			Model:  "gpt-4",
+		}},
+	}
+
+	// 1. Save config: should encrypt APIKey
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read raw config file and check that the key is ENCRYPTED
+	fileData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawContent := string(fileData)
+	if !strings.Contains(rawContent, "enc:") {
+		t.Fatalf("expected encrypted APIKey in file starting with 'enc:', got file content: %s", rawContent)
+	}
+	if strings.Contains(rawContent, rawKey) {
+		t.Fatalf("security violation: raw APIKey found in plaintext in config file")
+	}
+
+	// 2. Load config: should decrypt APIKey transparently
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(loaded.Providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(loaded.Providers))
+	}
+
+	loadedKey := loaded.Providers[0].APIKey
+	if loadedKey != rawKey {
+		t.Fatalf("expected transparent decryption to restore %q, got %q", rawKey, loadedKey)
+	}
+}
+

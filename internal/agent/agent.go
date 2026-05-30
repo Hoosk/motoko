@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/provider"
@@ -138,42 +139,93 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			history = append(history, resp.OutputItems...)
 		}
 
-		for _, call := range pending {
+		type toolResult struct {
+			idx         int
+			steps       []Step
+			historyItem provider.ConversationItem
+		}
+		ch := make(chan toolResult, len(pending))
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for idx, call := range pending {
 			toolName := strings.TrimSpace(call.Name)
 			toolInput := strings.TrimSpace(call.Input)
 			if toolInput == "" && len(call.Arguments) > 0 {
 				toolInput = strings.TrimSpace(string(call.Arguments))
 			}
-			tracelog.Logf("agent tool call name=%s input=%q", toolName, toolInput)
 			toolKey := toolName + "\x00" + toolInput + "\x00" + strings.TrimSpace(call.CallID)
+
+			mu.Lock()
 			if _, seen := seenToolCalls[toolKey]; seen {
+				mu.Unlock()
 				return Result{}, fmt.Errorf("ciclo de tool detectado: %s %s", toolName, toolInput)
 			}
 			seenToolCalls[toolKey] = struct{}{}
-			steps = append(steps, Step{Kind: "tool", Title: toolName, Content: toolInput})
-			if onEvent != nil {
-				_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
-			}
+			mu.Unlock()
 
-			result, err := a.tools.Run(ctx, toolName, toolInput)
-			if err != nil {
-				tracelog.Logf("agent tool error name=%s err=%v", toolName, err)
-				errText := fmt.Sprintf("tool error: %v", err)
-				steps = append(steps, Step{Kind: "error", Title: toolName, Content: errText})
+			wg.Add(1)
+			go func(idx int, call provider.ToolInvocation, toolName, toolInput string) {
+				defer wg.Done()
+
+				var subSteps []Step
+				subSteps = append(subSteps, Step{Kind: "tool", Title: toolName, Content: toolInput})
+
+				mu.Lock()
 				if onEvent != nil {
-					_ = onEvent(StreamEvent{Kind: "error", Title: toolName, Content: errText})
+					_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
 				}
-				history = append(history, provider.ToolResultForInvocation(call, errText))
-				continue
-			}
+				mu.Unlock()
 
-			toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
-			tracelog.Logf("agent tool result name=%s summary=%q output_bytes=%d", toolName, result.Summary, len(result.Output))
-			steps = append(steps, Step{Kind: "output", Title: toolName, Content: toolOutput})
-			if onEvent != nil {
-				_ = onEvent(StreamEvent{Kind: "output", Title: toolName, Content: toolOutput})
-			}
-			history = append(history, provider.ToolResultForInvocation(call, toolOutput))
+				result, err := a.tools.Run(ctx, toolName, toolInput)
+				if err != nil {
+					tracelog.Logf("agent tool error name=%s err=%v", toolName, err)
+					errText := fmt.Sprintf("tool error: %v", err)
+					subSteps = append(subSteps, Step{Kind: "error", Title: toolName, Content: errText})
+
+					mu.Lock()
+					if onEvent != nil {
+						_ = onEvent(StreamEvent{Kind: "error", Title: toolName, Content: errText})
+					}
+					mu.Unlock()
+
+					ch <- toolResult{
+						idx:         idx,
+						steps:       subSteps,
+						historyItem: provider.ToolResultForInvocation(call, errText),
+					}
+					return
+				}
+
+				toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
+				tracelog.Logf("agent tool result name=%s summary=%q output_bytes=%d", toolName, result.Summary, len(result.Output))
+				subSteps = append(subSteps, Step{Kind: "output", Title: toolName, Content: toolOutput})
+
+				mu.Lock()
+				if onEvent != nil {
+					_ = onEvent(StreamEvent{Kind: "output", Title: toolName, Content: toolOutput})
+				}
+				mu.Unlock()
+
+				ch <- toolResult{
+					idx:         idx,
+					steps:       subSteps,
+					historyItem: provider.ToolResultForInvocation(call, toolOutput),
+				}
+			}(idx, call, toolName, toolInput)
+		}
+
+		wg.Wait()
+		close(ch)
+
+		orderedResults := make([]toolResult, len(pending))
+		for res := range ch {
+			orderedResults[res.idx] = res
+		}
+
+		for _, res := range orderedResults {
+			steps = append(steps, res.steps...)
+			history = append(history, res.historyItem)
 		}
 	}
 
@@ -232,6 +284,27 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 	)
 	if agentSystem != "" {
 		lines = append(lines, "--- AGENT MODE ---", agentSystem, "")
+	}
+	if len(info.AvailableSkills) > 0 {
+		lines = append(lines,
+			"--- AVAILABLE SKILLS ---",
+			"The following skills provide specialized instructions for specific tasks.",
+			"When a task matches a skill's description, you MUST call the 'activate_skill' tool with the skill's name to load its full instructions BEFORE proceeding.",
+			"",
+			"<available_skills>",
+		)
+		for _, s := range info.AvailableSkills {
+			lines = append(lines,
+				"  <skill>",
+				fmt.Sprintf("    <name>%s</name>", s.Name),
+				fmt.Sprintf("    <description>%s</description>", s.Description),
+				"  </skill>",
+			)
+		}
+		lines = append(lines,
+			"</available_skills>",
+			"",
+		)
 	}
 	lines = append(lines,
 		"--- CONTEXT ---",

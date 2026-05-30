@@ -58,9 +58,20 @@ func (m *Model) AssistantInnerWidth() int {
 
 func RenderUserMessage(text string, width int) string {
 	w := max(20, width)
-	rule := styles.VioletStyle.Render(strings.Repeat("─", w))
-	body := " " + styles.UserPromptStyle.Render(">") + "  " +
-		styles.WhiteStyle.Render(text)
+	ruleWidth := w - 5
+
+	rule := styles.VioletStyle.Render(strings.Repeat("─", ruleWidth))
+
+	wrapped := WrapText(text, w-5)
+	lines := strings.Split(wrapped, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			lines[i] = " " + styles.UserPromptStyle.Render(">") + "  " + styles.WhiteStyle.Render(line)
+		} else {
+			lines[i] = "    " + styles.WhiteStyle.Render(line)
+		}
+	}
+	body := strings.Join(lines, "\n")
 	return strings.Join([]string{rule, body, rule}, "\n")
 }
 

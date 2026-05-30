@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ type AgentDef struct {
 	System string
 }
 
-// BuiltinAgents are the two compiled-in agents that ship with Motoko.
+// BuiltinAgents are the compiled-in agents that ship with Motoko.
 var BuiltinAgents = []AgentDef{
 	{
 		Name:   "plan",
@@ -22,11 +23,44 @@ var BuiltinAgents = []AgentDef{
 		Name:   "build",
 		System: "Build mode: implement code changes directly and precisely. Always verify current state before writing. Prefer incremental and verifiable changes.",
 	},
+	{
+		Name:   "search",
+		System: "Search mode: explore and locate files, classes, methods, variables, and code patterns within the codebase. Formulate precise search strategy using grep, glob, inspect, and read tools. Report the exact location and usage of symbols clearly.",
+	},
 }
 
 // LoadAgentsFile reads a .agents INI file from path.
 // Returns nil error and empty slice if the file does not exist.
 func LoadAgentsFile(path string) ([]AgentDef, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if info.IsDir() {
+		// Fallback: look for 'agents', 'agents.ini', or 'config' inside the directory
+		candidates := []string{
+			filepath.Join(path, "agents"),
+			filepath.Join(path, "agents.ini"),
+			filepath.Join(path, "config"),
+		}
+		foundFile := false
+		for _, cand := range candidates {
+			if candInfo, candErr := os.Stat(cand); candErr == nil && !candInfo.IsDir() {
+				path = cand
+				foundFile = true
+				break
+			}
+		}
+		if !foundFile {
+			// It is a directory, but no agents config file was found.
+			return nil, nil
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

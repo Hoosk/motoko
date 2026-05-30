@@ -40,6 +40,9 @@ func formatToolResultContent(call ToolInvocation, output string) string {
 	if len(call.Arguments) > 0 {
 		parts = append(parts, "tool_arguments_base64="+base64.StdEncoding.EncodeToString(call.Arguments))
 	}
+	if len(call.Raw) > 0 {
+		parts = append(parts, "tool_raw_base64="+base64.StdEncoding.EncodeToString(call.Raw))
+	}
 	if strings.TrimSpace(output) != "" {
 		parts = append(parts, "tool_output:\n"+strings.TrimSpace(output))
 	}
@@ -91,6 +94,11 @@ func parseToolResultContent(content string) (ToolInvocation, string) {
 			encoded := strings.TrimSpace(strings.TrimPrefix(line, "tool_arguments_base64="))
 			if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil && len(decoded) > 0 {
 				call.Arguments = decoded
+			}
+		case strings.HasPrefix(line, "tool_raw_base64="):
+			encoded := strings.TrimSpace(strings.TrimPrefix(line, "tool_raw_base64="))
+			if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil && len(decoded) > 0 {
+				call.Raw = decoded
 			}
 		}
 	}

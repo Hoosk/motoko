@@ -91,7 +91,7 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		return t.runUnifiedPatch(request.Unified)
 	}
 
-	absPath, relPath, err := resolveWorkspacePath(request.Path)
+	absPath, relPath, err := resolveWorkspaceWritePath(request.Path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -133,7 +133,7 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 	if len(requests) == 0 {
 		return Result{}, fmt.Errorf("no se proporcionaron mutaciones AST")
 	}
-	absPath, relPath, err := resolveWorkspacePath(requests[0].Path)
+	absPath, relPath, err := resolveWorkspaceWritePath(requests[0].Path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -179,7 +179,7 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	absPath, relPath, err := resolveWorkspacePath(path)
+	absPath, relPath, err := resolveWorkspaceWritePath(path)
 	if err != nil {
 		return Result{}, err
 	}

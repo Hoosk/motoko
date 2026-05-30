@@ -252,6 +252,61 @@ func overlayBase(base, overlay string, width, height int) string {
 	return strings.Join(res, "\n")
 }
 
+// overlayCenter superimposes an overlay string (popup modal) centered vertically and horizontally over a base string.
+func overlayCenter(base, overlay string, width, height int) string {
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	if len(baseLines) > height {
+		baseLines = baseLines[:height]
+	}
+
+	popupHeight := len(overlayLines)
+	popupWidth := 0
+	for _, oLine := range overlayLines {
+		w := lipgloss.Width(oLine)
+		if w > popupWidth {
+			popupWidth = w
+		}
+	}
+
+	startY := (len(baseLines) - popupHeight) / 2
+	if startY < 0 {
+		startY = 0
+	}
+
+	startX := (width - popupWidth) / 2
+	if startX < 0 {
+		startX = 0
+	}
+
+	res := make([]string, len(baseLines))
+	for i, baseLine := range baseLines {
+		if i >= startY && i < startY+popupHeight {
+			oLine := overlayLines[i-startY]
+			oWidth := lipgloss.Width(oLine)
+
+			leftPart := truncateANSI(baseLine, startX)
+			leftWidth := lipgloss.Width(leftPart)
+			leftPadding := ""
+			if leftWidth < startX {
+				leftPadding = strings.Repeat(" ", startX-leftWidth)
+			}
+
+			rightPadding := ""
+			rightStart := startX + oWidth
+			if rightStart < width {
+				rightPadding = strings.Repeat(" ", width-rightStart)
+			}
+
+			res[i] = leftPart + leftPadding + oLine + rightPadding
+		} else {
+			res[i] = baseLine
+		}
+	}
+	return strings.Join(res, "\n")
+}
+
 func stripANSI(value string) string {
 	return ansiPattern.ReplaceAllString(value, "")
 }

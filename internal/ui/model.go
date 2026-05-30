@@ -132,15 +132,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.Prompt) == "" {
 			break
 		}
-		m.timeline.appendEntry(app.Entry{Kind: app.EntryUser, Text: msg.Prompt})
+		resp := m.runtime.HandleInput(msg.Prompt, m.runtime.GetContextInfo())
+
+		if resp.Clear {
+			m.timeline.resetMessages()
+		}
+
+		for _, entry := range resp.Entries {
+			m.timeline.appendEntry(entry)
+		}
 		m.timeline.renderMessages()
-		m.timeline.SetStreaming(true)
-		m.timeline.SetThinking(true)
-		m.footer.SetThinking(true)
-		m.composer.SetThinking(true)
-		m.agentStream = make(chan app.AgentStreamEvent, 100)
-		m.agentBuffer = &agentStreamBuffer{}
-		cmds = append(cmds, m.runAgent(msg.Prompt), m.waitAgentStream(m.agentStream), m.thinkingTick())
+
+		if resp.Signal != "" {
+			switch resp.Signal {
+			case "open-provider-popup":
+				m.providerForm.Open(m.runtime)
+			case "open-models-popup":
+				cmds = append(cmds, m.listModels())
+			case "open-sessions-popup":
+				m.sessionPicker.Open()
+				cmds = append(cmds, m.listSessions())
+			case "open-mode-popup":
+				m.modePopup.Open(m.runtime)
+			}
+		}
+
+		if resp.Action != nil {
+			switch resp.Action.Type {
+			case app.ActionAgent:
+				m.timeline.SetStreaming(true)
+				m.timeline.SetThinking(true)
+				m.footer.SetThinking(true)
+				m.composer.SetThinking(true)
+				m.agentStream = make(chan app.AgentStreamEvent, 100)
+				m.agentBuffer = &agentStreamBuffer{}
+				cmds = append(cmds, m.runAgent(resp.Action.AgentPrompt), m.waitAgentStream(m.agentStream), m.thinkingTick())
+
+			case app.ActionShell:
+				cmds = append(cmds, m.runShell(resp.Action.ShellCommand))
+
+			case app.ActionCompact:
+				cmds = append(cmds, m.compactSession())
+			}
+		}
 
 	case AgentStreamBatchMsg:
 		for _, event := range msg.Events {
@@ -193,6 +227,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProviderModelsMsg:
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+			m.timeline.renderMessages()
+		} else if len(msg.Models) == 0 {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "El provider no devolvio modelos disponibles."})
 			m.timeline.renderMessages()
 		} else {
 			m.modelPicker.Open(msg.Models)
@@ -258,6 +295,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showTools = !m.showTools
 		case "ctrl+h":
 			m.showHelp = !m.showHelp
+		case "ctrl+r":
+			m.timeline.model.ShowReasoning = !m.timeline.model.ShowReasoning
+			m.timeline.renderMessages()
+			stateStr := "hidden"
+			if m.timeline.model.ShowReasoning {
+				stateStr = "visible"
+			}
+			m.notificationShow = true
+			m.notificationText = "Reasoning is now " + stateStr
+			m.notificationTime = time.Now()
+			cmds = append(cmds, m.hideNotification())
 		}
 	}
 	// 4. Delegate to standard components
@@ -291,18 +339,22 @@ func (m Model) View() string {
 	}
 	mainWidth := m.width - sidebarWidth
 
+	m.composer.SetWidth(mainWidth)
+	composerView := m.composer.View()
+	composerHeight := lipgloss.Height(composerView)
+
 	footerHeight := 1
-	composerHeight := m.composer.Height()
+	m.footer.width = m.width
+	footerView := m.footer.View()
+
 	// The sidebar should cover exactly the same height as timeline + composer
 	timelineHeight := m.height - footerHeight - composerHeight
+	if timelineHeight < 4 {
+		timelineHeight = 4
+	}
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	m.composer.SetWidth(mainWidth)
-	m.footer.width = m.width
-
 	timelineView := m.timeline.View()
-	composerView := m.composer.View()
-	footerView := m.footer.View()
 
 	var mainView string
 	if sidebarWidth > 0 {
@@ -325,40 +377,32 @@ func (m Model) View() string {
 			BorderForeground(styles.MainNeon).
 			Render(styles.BoldNeonStyle.Render("✓ ") +
 				styles.WhiteStyle.Render(m.notificationText))
-		return overlayBase(base, toast, m.width, m.height)
-	}
-
-	if m.providerForm.active {
+		base = overlayBase(base, toast, m.width, m.height)
+	} else if m.providerForm.active {
 		popup := styles.PopupStyle.Render(m.providerForm.View(m.runtime))
-		return overlayBase(base, popup, m.width, m.height)
-	}
-
-	if m.modelPicker.active {
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.modelPicker.active {
 		popup := styles.PopupStyle.Render(m.modelPicker.View())
-		return overlayBase(base, popup, m.width, m.height)
-	}
-
-	if m.sessionPicker.active {
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.sessionPicker.active {
 		popup := styles.PopupStyle.Render(m.sessionPicker.View())
-		return overlayBase(base, popup, m.width, m.height)
-	}
-
-	if m.modePopup.active {
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.modePopup.active {
 		popup := styles.PopupStyle.Render(m.modePopup.View())
-		return overlayBase(base, popup, m.width, m.height)
-	}
-
-	if m.showTools {
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.showTools {
 		popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
-		return overlayBase(base, popup, m.width, m.height)
-	}
-
-	if m.showHelp {
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.showHelp {
 		popup := styles.PopupStyle.Render(helpView())
-		return overlayBase(base, popup, m.width, m.height)
+		base = overlayCenter(base, popup, m.width, m.height)
 	}
 
-	return base
+	lines := strings.Split(base, "\n")
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) SyncLayout() {

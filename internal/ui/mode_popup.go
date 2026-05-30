@@ -25,6 +25,9 @@ func (p *modePopupState) Open(runtime *app.Runtime) {
 			break
 		}
 	}
+	if p.index < 0 || p.index >= len(p.agents) {
+		p.index = 0
+	}
 	p.active = true
 }
 
@@ -39,20 +42,29 @@ func (p *modePopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			p.active = false
 			return nil
 		case "up", "ctrl+p":
+			if len(p.agents) == 0 {
+				p.index = 0
+				return nil
+			}
 			p.index--
 			if p.index < 0 {
 				p.index = len(p.agents) - 1
 			}
 			return nil
 		case "down", "ctrl+n", "tab":
-			if len(p.agents) > 0 {
-				p.index = (p.index + 1) % len(p.agents)
+			if len(p.agents) == 0 {
+				p.index = 0
+				return nil
 			}
+			p.index = (p.index + 1) % len(p.agents)
 			return nil
 		case "enter":
 			if len(p.agents) == 0 {
 				p.active = false
 				return nil
+			}
+			if p.index < 0 || p.index >= len(p.agents) {
+				p.index = 0
 			}
 			chosen := p.agents[p.index]
 			p.active = false
@@ -72,6 +84,10 @@ func (p modePopupState) View() string {
 		styles.PopupMutedStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
+	idx := p.index
+	if idx < 0 || idx >= len(p.agents) {
+		idx = 0
+	}
 	for i, a := range p.agents {
 		label := styles.PopupFieldLabelStyle.Render(a.Name)
 		var desc string
@@ -82,7 +98,7 @@ func (p modePopupState) View() string {
 		if desc != "" {
 			line += "  " + desc
 		}
-		if i == p.index {
+		if i == idx {
 			rows = append(rows, styles.PopupSelectionStyle.Render(line))
 		} else {
 			rows = append(rows, line)

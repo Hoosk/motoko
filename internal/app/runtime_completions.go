@@ -153,6 +153,20 @@ func (r *Runtime) Completions(input string) []string {
 		return result
 	}
 
+	if strings.EqualFold(parts[0], "agent") {
+		prefix := ""
+		if len(parts) > 1 {
+			prefix = parts[1]
+		}
+		var result []string
+		for _, name := range r.AgentNames() {
+			if prefix == "" || strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
+				result = append(result, "/agent "+name)
+			}
+		}
+		return result
+	}
+
 	if strings.EqualFold(parts[0], "models") {
 		active, ok := r.config.Active()
 		if !ok || len(active.Models) == 0 {
@@ -190,7 +204,7 @@ func (r *Runtime) cacheProviderModels(providerName string, models []string) {
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "shell", "chat", "status", "debug", "trace", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny"}
+	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "agent", "shell", "chat", "status", "debug", "trace", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {

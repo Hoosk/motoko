@@ -85,6 +85,20 @@ func (m SidebarModel) View() string {
 		gitLines = append(gitLines, styles.GrayStyle.Render(truncate("no repository", contentWidth)))
 	}
 
+	// Section 2.5: Subagents
+	subagentLines := []string{
+		"",
+		styles.BoldNeonStyle.Render("SUBAGENTS"),
+	}
+	activeSubagents := m.runtime.ActiveSubagents()
+	if len(activeSubagents) > 0 {
+		for _, name := range activeSubagents {
+			subagentLines = append(subagentLines, "● "+styles.BlueStyle.Render(name))
+		}
+	} else {
+		subagentLines = append(subagentLines, styles.GrayStyle.Render(truncate("none active", contentWidth)))
+	}
+
 	// Section 3: Tachikomas (Bottom)
 	tachikomaLines := []string{
 		"",
@@ -123,6 +137,7 @@ func (m SidebarModel) View() string {
 	}
 
 	content := append(fileLines, gitLines...)
+	content = append(content, subagentLines...)
 	content = append(content, tachikomaLines...)
 
 	if len(content) > m.height {

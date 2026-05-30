@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,5 +74,36 @@ func TestBuildSystemPromptNoAgentModeWhenEmpty(t *testing.T) {
 	prompt := buildSystemPrompt(info, nil, "")
 	if strings.Contains(prompt, "--- AGENT MODE ---") {
 		t.Fatalf("did not expect AGENT MODE section when agentSystem is empty")
+	}
+}
+
+func TestLoadAgentsFileDirFallback(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "motoko-agents-dir-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Test fallback file candidate
+	agentsFilePath := filepath.Join(tmpDir, "agents.ini")
+	content := `
+[diragent]
+system = Loaded from agents.ini inside directory
+`
+	if err := os.WriteFile(agentsFilePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write agents.ini: %v", err)
+	}
+
+	agents, err := LoadAgentsFile(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to load agents file: %v", err)
+	}
+
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+
+	if agents[0].Name != "diragent" {
+		t.Errorf("expected name 'diragent', got '%s'", agents[0].Name)
 	}
 }

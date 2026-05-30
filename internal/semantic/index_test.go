@@ -198,3 +198,53 @@ func runGitCommand(t *testing.T, workdir string, args ...string) {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
 	}
 }
+
+func TestSemanticGraphExpansion(t *testing.T) {
+	// Setup a custom snapshot representing:
+	// - File A (runtime.go): matches prompt ("runtime"), imports File B and references its exported symbol "AppConfig"
+	// - File B (config.go): doesn't match prompt ("runtime") but is connected to A via imports/exports
+	// - File C (model.go): completely unrelated
+	snapshot := Snapshot{}
+	snapshot.Snapshot.Files = []FileSummary{
+		{
+			Path:     "internal/app/runtime.go",
+			Language: "go",
+			Content:  []byte("package app\nimport \"github.com/Hoosk/motoko/internal/config\"\nfunc Run() { var cfg config.AppConfig }"),
+			Imports:  []string{"github.com/Hoosk/motoko/internal/config"},
+			Symbols:  []Symbol{{Name: "Run", Kind: "func"}},
+		},
+		{
+			Path:     "internal/config/config.go",
+			Language: "go",
+			Content:  []byte("package config\ntype AppConfig struct{}"),
+			Exports:  []string{"AppConfig"},
+			Symbols:  []Symbol{{Name: "AppConfig", Kind: "type"}},
+		},
+		{
+			Path:     "internal/ui/model.go",
+			Language: "go",
+			Content:  []byte("package ui\nfunc NewModel() {}"),
+			Symbols:  []Symbol{{Name: "NewModel", Kind: "func"}},
+		},
+	}
+
+	// Request relevant files for the prompt "runtime"
+	// Without graph expansion, config.go would get 0 points and wouldn't be ranked first or potentially included at all.
+	// With graph expansion, runtime.go gets points for "runtime" token match, and propagates 30% of its points to config.go!
+	relevant := snapshot.RelevantFiles("revisa runtime", 2)
+	
+	if len(relevant) < 2 {
+		t.Fatalf("expected at least 2 relevant files, got %d", len(relevant))
+	}
+
+	// The first file must be the direct match: runtime.go
+	if relevant[0].Path != "internal/app/runtime.go" {
+		t.Fatalf("expected first relevant file to be runtime.go, got %q", relevant[0].Path)
+	}
+
+	// The second file must be config.go because of the semantic connection (model.go is unrelated)
+	if relevant[1].Path != "internal/config/config.go" {
+		t.Fatalf("expected config.go to be ranked second due to semantic connection, got %q", relevant[1].Path)
+	}
+}
+

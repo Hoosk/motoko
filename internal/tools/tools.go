@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Hoosk/motoko/internal/config"
 )
 
 const maxToolOutputBytes = 12_000
@@ -106,4 +108,44 @@ func truncateToolOutput(output string) string {
 		return output
 	}
 	return output[:maxToolOutputBytes] + truncatedToolOutputSuffix
+}
+
+// IsWriteTool returns true if the tool modifies the codebase.
+func IsWriteTool(name string) bool {
+	n := strings.ToLower(name)
+	return n == "bash" || n == "patch"
+}
+
+// Registry filtering for sandboxing
+func (r *Registry) Filter(predicate func(Tool) bool) *Registry {
+	filtered := &Registry{
+		tools: make(map[string]Tool),
+	}
+	for name, tool := range r.tools {
+		if predicate(tool) {
+			filtered.tools[name] = tool
+		}
+	}
+	for _, name := range r.order {
+		if _, exists := filtered.tools[name]; exists {
+			filtered.order = append(filtered.order, name)
+		}
+	}
+	return filtered
+}
+
+type configKey struct{}
+
+func WithConfig(ctx context.Context, cfg *config.AppConfig) context.Context {
+	return context.WithValue(ctx, configKey{}, cfg)
+}
+
+func GetConfig(ctx context.Context) *config.AppConfig {
+	if ctx == nil {
+		return nil
+	}
+	if cfg, ok := ctx.Value(configKey{}).(*config.AppConfig); ok {
+		return cfg
+	}
+	return nil
 }

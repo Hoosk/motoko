@@ -29,6 +29,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/mode     Open the agent mode selector",
 			"/plan     Activate read-only plan mode",
 			"/build    Activate active build mode",
+			"/agent    Switch or show active agent mode",
 			"/shell    Activate direct shell execution mode",
 			"/chat     Return to normal chat mode",
 			"/status   Summarize mode, permissions, and approvals",
@@ -61,6 +62,23 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "build":
 		r.SetAgentMode("build")
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
+	case "agent":
+		if len(parts) < 2 {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente activo: %s. Agentes disponibles: %s", r.AgentName(), strings.Join(r.AgentNames(), ", "))}}}
+		}
+		agentName := parts[1]
+		found := false
+		for _, name := range r.AgentNames() {
+			if strings.EqualFold(name, agentName) {
+				r.SetAgentMode(name)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Agente desconocido: %s", agentName)}}}
+		}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente cambiado a: %s", r.AgentName())}}}
 	case "mode":
 		return Response{Signal: "open-mode-popup"}
 	case "shell":

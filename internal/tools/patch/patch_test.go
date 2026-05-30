@@ -167,3 +167,31 @@ func TestPatchToolAppliesASTPatch(t *testing.T) {
 		t.Fatalf("unexpected summary %q", result.Summary)
 	}
 }
+
+func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
+	_ = withTempWorkspace(t)
+
+	unsafePaths := []string{
+		".git/hooks/pre-commit",
+		".git/config",
+		".env",
+		".env.local",
+		".ssh/id_rsa",
+		"id_rsa",
+		".antigravitycli/settings.json",
+	}
+
+	for _, unsafePath := range unsafePaths {
+		t.Run(unsafePath, func(t *testing.T) {
+			// Try to run a patch on an unsafe path
+			_, err := New().Run(context.Background(), unsafePath+"\n<<<<<<< SEARCH\n=======\nmalicious content\n>>>>>>> REPLACE")
+			if err == nil {
+				t.Fatalf("expected error for write to unsafe path: %s", unsafePath)
+			}
+			if !strings.Contains(err.Error(), "escritura bloqueada") {
+				t.Fatalf("expected sandbox error, got: %v", err)
+			}
+		})
+	}
+}
+

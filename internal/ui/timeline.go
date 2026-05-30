@@ -234,7 +234,7 @@ func (m *TimelineModel) renderMessages() {
 		styledLogo,
 		styles.SystemStyle.Render("Motoko online. /provider add opens the configuration form; /models lists or selects models."),
 	)
-	for _, entry := range m.model.Entries {
+	for _, entry := range m.model.VisibleEntries() {
 		m.model.Messages = append(m.model.Messages, m.model.RenderEntry(entry))
 	}
 	if m.model.SelectedMessage >= 0 && len(m.model.Messages) > 0 {

@@ -160,6 +160,29 @@ func (m ComposerModel) View() string {
 	if m.width == 0 {
 		return ""
 	}
+
+	// Create header block showing active agent status and subagents
+	agentName := m.runtime.AgentName()
+	agentLabel := agentActivityLabel(agentName)
+	var coloredLabel string
+	if strings.EqualFold(agentName, "plan") {
+		coloredLabel = styles.BlueStyle.Bold(true).Render("● " + agentLabel)
+	} else if strings.EqualFold(agentName, "build") {
+		coloredLabel = styles.BoldNeonStyle.Render("● " + agentLabel)
+	} else {
+		coloredLabel = styles.WarmGoldStyle.Bold(true).Render("● " + agentLabel)
+	}
+
+	activeSubs := m.runtime.ActiveSubagents()
+	if len(activeSubs) > 0 {
+		subTexts := make([]string, len(activeSubs))
+		for i, sub := range activeSubs {
+			subTexts[i] = styles.BlueStyle.Render(sub)
+		}
+		coloredLabel += styles.GrayStyle.Render(" [subagents: ") + strings.Join(subTexts, ", ") + styles.GrayStyle.Render("]")
+	}
+	headerBlock := lipgloss.NewStyle().MarginBottom(1).Render(coloredLabel)
+
 	prompt := m.renderInputPrompt()
 	rows := m.textarea.Height()
 	promptLines := make([]string, rows)
@@ -179,6 +202,7 @@ func (m ComposerModel) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
 	var blocks []string
+	blocks = append(blocks, headerBlock)
 	blocks = append(blocks, body)
 	if mentionDropdown != "" {
 		blocks = append(blocks, mentionDropdown)
@@ -231,7 +255,7 @@ func (m *ComposerModel) refreshSuggestions() {
 		m.suggestions = m.runtime.Completions(m.textarea.Value())
 	} else {
 		m.suggestions = nil
-		if m.mentionIndex >= len(m.mentionSuggestions) {
+		if m.mentionIndex < 0 || m.mentionIndex >= len(m.mentionSuggestions) {
 			m.mentionIndex = 0
 		}
 	}
@@ -240,17 +264,22 @@ func (m *ComposerModel) refreshSuggestions() {
 		m.selectedSuggestion = 0
 		return
 	}
-	if m.selectedSuggestion >= len(m.suggestions) {
-		m.selectedSuggestion = len(m.suggestions) - 1
-	}
-	if m.selectedSuggestion < 0 {
-		m.selectedSuggestion = 0
+	if len(m.suggestions) > 0 {
+		if m.selectedSuggestion >= len(m.suggestions) {
+			m.selectedSuggestion = len(m.suggestions) - 1
+		}
+		if m.selectedSuggestion < 0 {
+			m.selectedSuggestion = 0
+		}
 	}
 }
 
 func (m *ComposerModel) applySelectedSuggestion() {
 	if len(m.suggestions) == 0 {
 		return
+	}
+	if m.selectedSuggestion < 0 || m.selectedSuggestion >= len(m.suggestions) {
+		m.selectedSuggestion = 0
 	}
 	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
 	m.textarea.CursorEnd()
@@ -273,6 +302,9 @@ func (m *ComposerModel) advanceSuggestion(step int) {
 	}
 	m.suggestions = append([]string(nil), m.suggestionBase...)
 	m.selectedSuggestion = (m.selectedSuggestion + step + len(m.suggestions)) % len(m.suggestions)
+	if m.selectedSuggestion < 0 || m.selectedSuggestion >= len(m.suggestions) {
+		m.selectedSuggestion = 0
+	}
 	m.textarea.SetValue(m.suggestions[m.selectedSuggestion])
 	m.textarea.CursorEnd()
 }
@@ -285,12 +317,18 @@ func (m *ComposerModel) advanceMention(step int) {
 	if len(m.mentionSuggestions) == 0 {
 		return
 	}
+	if m.mentionIndex < 0 || m.mentionIndex >= len(m.mentionSuggestions) {
+		m.mentionIndex = 0
+	}
 	m.mentionIndex = (m.mentionIndex + step + len(m.mentionSuggestions)) % len(m.mentionSuggestions)
 }
 
 func (m *ComposerModel) applySelectedMention() {
 	if len(m.mentionSuggestions) == 0 {
 		return
+	}
+	if m.mentionIndex < 0 || m.mentionIndex >= len(m.mentionSuggestions) {
+		m.mentionIndex = 0
 	}
 	m.textarea.SetValue(m.runtime.ReplaceTrailingMention(m.textarea.Value(), m.mentionSuggestions[m.mentionIndex]))
 	m.textarea.CursorEnd()
@@ -344,12 +382,16 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	if len(m.mentionSuggestions) == 0 {
 		return ""
 	}
+	idx := m.mentionIndex
+	if idx < 0 || idx >= len(m.mentionSuggestions) {
+		idx = 0
+	}
 	rows := make([]string, 0, min(4, len(m.mentionSuggestions))+1)
 	rows = append(rows, styles.PopupMutedStyle.Render("Mentions"))
 	limit := min(4, len(m.mentionSuggestions))
 	for i := 0; i < limit; i++ {
 		line := m.mentionSuggestions[i]
-		if i == m.mentionIndex {
+		if i == idx {
 			rows = append(rows, styles.PopupSelectionStyle.Render(line))
 		} else {
 			rows = append(rows, styles.PopupFieldLabelStyle.Render(line))
@@ -360,9 +402,13 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 
 func (m ComposerModel) renderMentionDropdown() string {
 	limit := min(4, len(m.mentionSuggestions))
+	idx := m.mentionIndex
+	if idx < 0 || idx >= len(m.mentionSuggestions) {
+		idx = 0
+	}
 	items := make([]string, 0, limit)
 	for i := 0; i < limit; i++ {
-		if i == m.mentionIndex {
+		if i == idx {
 			items = append(items, styles.PopupSelectionStyle.Render(m.mentionSuggestions[i]))
 		} else {
 			items = append(items, styles.SuggestionStyle.Render(m.mentionSuggestions[i]))
@@ -396,7 +442,7 @@ func composerActivityLabel(agentName string) string {
 }
 
 func (m ComposerModel) Height() int {
-	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)
+	height := m.textarea.Height() + 8 // base height: textarea(2) + suggestions(2) + chrome(4) + header(2)
 	if len(m.mentionSuggestions) > 0 {
 		// MarginTop(1) = 1 line
 		// Title "Mentions" = 1 line

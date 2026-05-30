@@ -179,13 +179,16 @@ func TestFormatToolResultContentIncludesMetadata(t *testing.T) {
 }
 
 func TestParseToolResultContentRoundTripsMetadata(t *testing.T) {
-	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
+	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123", Raw: []byte(`{"raw":"metadata"}`)}
 	parsedCall, output := parseToolResultContent(formatToolResultContent(call, "ok"))
 	if parsedCall.Name != call.Name || parsedCall.Input != call.Input || parsedCall.CallID != call.CallID {
 		t.Fatalf("unexpected parsed tool call %#v", parsedCall)
 	}
 	if string(parsedCall.Arguments) != string(call.Arguments) {
 		t.Fatalf("unexpected parsed arguments %s", string(parsedCall.Arguments))
+	}
+	if string(parsedCall.Raw) != string(call.Raw) {
+		t.Fatalf("unexpected parsed raw %s", string(parsedCall.Raw))
 	}
 	if output != "ok" {
 		t.Fatalf("unexpected parsed output %q", output)
@@ -318,7 +321,7 @@ func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
 
 func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
-	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
+	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}), false)
 	if len(messages) != 1 {
 		t.Fatalf("expected one chat message, got %#v", messages)
 	}

@@ -98,3 +98,23 @@ func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd
 		return ProviderModelsMsg{Models: models, Err: err}
 	}
 }
+
+func (m *Model) runShell(command string) tea.Cmd {
+	return func() tea.Msg {
+		res := app.RunShellCommand(context.Background(), command)
+		return ShellResultMsg{Result: res}
+	}
+}
+
+func (m *Model) compactSession() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		resp := m.runtime.CompactSession(ctx)
+		var err error
+		if len(resp.Entries) > 0 && resp.Entries[0].Kind == app.EntryError {
+			err = fmt.Errorf("%s", resp.Entries[0].Text)
+		}
+		return CompactResultMsg{Response: resp, Err: err}
+	}
+}
+

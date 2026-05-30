@@ -47,21 +47,31 @@ func (p *modelPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 
 		case "up":
 			if p.step == modelPickerStepThinking {
-				p.thinkingIndex = (p.thinkingIndex - 1 + len(p.thinkingBudgets)) % len(p.thinkingBudgets)
+				if len(p.thinkingBudgets) > 0 {
+					p.thinkingIndex = (p.thinkingIndex - 1 + len(p.thinkingBudgets)) % len(p.thinkingBudgets)
+				}
 			} else {
-				p.index = (p.index - 1 + len(p.models)) % len(p.models)
+				if len(p.models) > 0 {
+					p.index = (p.index - 1 + len(p.models)) % len(p.models)
+				}
 			}
 
 		case "down":
 			if p.step == modelPickerStepThinking {
-				p.thinkingIndex = (p.thinkingIndex + 1) % len(p.thinkingBudgets)
+				if len(p.thinkingBudgets) > 0 {
+					p.thinkingIndex = (p.thinkingIndex + 1) % len(p.thinkingBudgets)
+				}
 			} else {
-				p.index = (p.index + 1) % len(p.models)
+				if len(p.models) > 0 {
+					p.index = (p.index + 1) % len(p.models)
+				}
 			}
 
 		case "enter":
 			if p.step == modelPickerStepModel {
-				p.step = modelPickerStepThinking
+				if len(p.models) > 0 {
+					p.step = modelPickerStepThinking
+				}
 				return nil
 			}
 

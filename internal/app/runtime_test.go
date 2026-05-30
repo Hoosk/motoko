@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -543,5 +545,54 @@ func TestGenerateTitleUpdatesCurrentSessionFromStructuredResponse(t *testing.T) 
 	r.generateTitle(context.Background(), "haz pruebas", "hecho")
 	if r.currentSession.Title != "Sesion de pruebas runtime" {
 		t.Fatalf("expected generated title, got %q", r.currentSession.Title)
+	}
+}
+
+func TestRuntimeSkillsIntegration(t *testing.T) {
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWd)
+	}()
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	skillDir := filepath.Join(tmpDir, ".agents", "skills", "test-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := `---\nname: test-skill\ndescription: "A simple testing skill"\n---\n# Test Skill Body\n`
+	skillContent = strings.ReplaceAll(skillContent, `\n`, "\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRuntime()
+	if len(r.availableSkills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(r.availableSkills))
+	}
+	if r.availableSkills[0].Name != "test-skill" {
+		t.Errorf("expected skill name 'test-skill', got %q", r.availableSkills[0].Name)
+	}
+
+	spec, found := r.tools.Spec("activate_skill")
+	if !found {
+		t.Fatal("expected activate_skill tool to be registered")
+	}
+	if !strings.Contains(spec.Usage, "test-skill") {
+		t.Errorf("expected usage to contain skill name, got %q", spec.Usage)
+	}
+
+	info := r.enrichContext(context.Background(), system.ContextInfo{}, "test query")
+	if len(info.AvailableSkills) != 1 {
+		t.Fatalf("expected 1 available skill in context, got %d", len(info.AvailableSkills))
+	}
+	if info.AvailableSkills[0].Name != "test-skill" {
+		t.Errorf("expected skill 'test-skill' in context, got %q", info.AvailableSkills[0].Name)
 	}
 }

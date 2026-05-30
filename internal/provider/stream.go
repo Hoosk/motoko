@@ -60,11 +60,16 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 }
 
 func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+	var raw strings.Builder
+	usage := Usage{}
+	toolCalls := make(map[int]*chatCompletionToolCall)
+	mappedIndexes := make(map[int]int)
+
 	payload := map[string]interface{}{
 		"model": c.model,
 		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
-		}, toChatMessages(messages)...),
+		}, toChatMessages(messages, isGoogleEndpoint(c.baseURL))...),
 		"temperature": 0.2,
 		"stream":      true,
 	}
@@ -74,12 +79,9 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		payload["parallel_tool_calls"] = false
 	}
 
-	var raw strings.Builder
-	toolCalls := map[int]*chatCompletionToolCall{}
-	usage := Usage{}
-	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, map[string]string{
-		"Authorization": "Bearer " + c.apiKey,
-	}, func(data string) error {
+	headers := geminiAuthHeaders(c.baseURL, c.apiKey)
+
+	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
 			Choices []chatCompletionChoice `json:"choices"`
 			Usage   *chatCompletionUsage   `json:"usage"`
@@ -100,7 +102,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 					}
 				}
 			}
-			mergeChatToolCallDeltas(toolCalls, delta.ToolCalls)
+			mergeChatToolCallDeltas(toolCalls, delta.ToolCalls, mappedIndexes)
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage.providerUsage()

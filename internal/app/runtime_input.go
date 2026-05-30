@@ -17,10 +17,19 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 		return r.handleSlashCommand(trimmed, info)
 	}
 
-	for _, field := range strings.Fields(trimmed) {
-		if strings.HasPrefix(field, "@") && r.isAgentMention(field) {
-			r.SetAgentMode(strings.TrimPrefix(field, "@"))
-			break
+	// Detect leading agent mention like "@search find all symbols"
+	fields := strings.Fields(trimmed)
+	if len(fields) > 0 && strings.HasPrefix(fields[0], "@") && r.isAgentMention(fields[0]) {
+		agentName := strings.TrimPrefix(fields[0], "@")
+		r.SetAgentMode(agentName)
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+	} else {
+		// Generic fallback: check any word in the message
+		for _, field := range fields {
+			if strings.HasPrefix(field, "@") && r.isAgentMention(field) {
+				r.SetAgentMode(strings.TrimPrefix(field, "@"))
+				break
+			}
 		}
 	}
 	r.mentionedFiles = r.extractMentionedFiles(trimmed)

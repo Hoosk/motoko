@@ -37,6 +37,7 @@ type Model struct {
 	SelectionDragged bool
 	SelectionAnchor  TextPos
 	SelectionFocus   TextPos
+	ShowReasoning    bool
 }
 
 func New(width, height int) Model {
@@ -47,6 +48,7 @@ func New(width, height int) Model {
 		SelectedMessage: -1,
 		Width:           width,
 		Height:          height,
+		ShowReasoning:   true,
 	}
 	return m
 }

@@ -35,9 +35,16 @@ type ProviderConfig struct {
 	ThinkingBudget int            `json:"thinking_budget,omitempty"`
 }
 
+type SearchConfig struct {
+	MaxResults      int      `json:"max_results,omitempty"`
+	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
+}
+
 type AppConfig struct {
 	ActiveProvider string           `json:"active_provider"`
 	Providers      []ProviderConfig `json:"providers"`
+	Search         SearchConfig     `json:"search,omitempty"`
 }
 
 func Load() (*AppConfig, error) {
@@ -49,7 +56,10 @@ func Load() (*AppConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &AppConfig{}, nil
+			cfg := &AppConfig{}
+			cfg.Search.MaxResults = 100
+			cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
+			return cfg, nil
 		}
 		return nil, err
 	}
@@ -58,11 +68,27 @@ func Load() (*AppConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	if cfg.Search.MaxResults <= 0 {
+		cfg.Search.MaxResults = 100
+	}
+	if len(cfg.Search.ExcludePatterns) == 0 {
+		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
+	}
+	for i, p := range cfg.Providers {
+		if strings.HasPrefix(p.APIKey, "enc:") {
+			dec, err := Decrypt(p.APIKey)
+			if err != nil {
+				return nil, fmt.Errorf("error al descifrar API key para %s: %w", p.Name, err)
+			}
+			cfg.Providers[i].APIKey = dec
+		}
+	}
 	for i := range cfg.Providers {
 		cfg.Providers[i] = NormalizeProvider(cfg.Providers[i])
 	}
 	cfg.sortProviders()
 	return &cfg, nil
+
 }
 
 func Path() (string, error) {
@@ -82,12 +108,30 @@ func (c *AppConfig) Save() error {
 		return err
 	}
 	c.sortProviders()
-	data, err := json.MarshalIndent(c, "", "  ")
+
+	// Create a copy of config with encrypted API keys
+	var encryptedCfg AppConfig
+	encryptedCfg.ActiveProvider = c.ActiveProvider
+	encryptedCfg.Search = c.Search
+	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
+	for i, p := range c.Providers {
+		encryptedCfg.Providers[i] = p
+		if p.APIKey != "" && !strings.HasPrefix(p.APIKey, "enc:") {
+			encKey, err := Encrypt(p.APIKey)
+			if err != nil {
+				return err
+			}
+			encryptedCfg.Providers[i].APIKey = encKey
+		}
+	}
+
+	data, err := json.MarshalIndent(encryptedCfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
 }
+
 
 func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
 	provider = NormalizeProvider(provider)

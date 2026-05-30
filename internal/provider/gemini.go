@@ -44,5 +44,13 @@ func (c *geminiClient) compatibleClient() *openAIClient {
 }
 
 func normalizeGeminiOpenAIBaseURL(baseURL string) string {
-	return strings.TrimSpace(baseURL)
+	val := strings.TrimSpace(baseURL)
+	if val == "" {
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	}
+	val = strings.TrimRight(val, "/")
+	if strings.Contains(strings.ToLower(val), "generativelanguage.googleapis.com") && !strings.HasSuffix(val, "/openai") && !strings.HasSuffix(val, "openai") {
+		return val + "/openai"
+	}
+	return val
 }
