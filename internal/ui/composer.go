@@ -161,28 +161,6 @@ func (m ComposerModel) View() string {
 		return ""
 	}
 
-	// Create header block showing active agent status and subagents
-	agentName := m.runtime.AgentName()
-	agentLabel := agentActivityLabel(agentName)
-	var coloredLabel string
-	if strings.EqualFold(agentName, "plan") {
-		coloredLabel = styles.BlueStyle.Bold(true).Render("● " + agentLabel)
-	} else if strings.EqualFold(agentName, "build") {
-		coloredLabel = styles.BoldNeonStyle.Render("● " + agentLabel)
-	} else {
-		coloredLabel = styles.WarmGoldStyle.Bold(true).Render("● " + agentLabel)
-	}
-
-	activeSubs := m.runtime.ActiveSubagents()
-	if len(activeSubs) > 0 {
-		subTexts := make([]string, len(activeSubs))
-		for i, sub := range activeSubs {
-			subTexts[i] = styles.BlueStyle.Render(sub)
-		}
-		coloredLabel += styles.GrayStyle.Render(" [subagents: ") + strings.Join(subTexts, ", ") + styles.GrayStyle.Render("]")
-	}
-	headerBlock := lipgloss.NewStyle().MarginBottom(1).Render(coloredLabel)
-
 	prompt := m.renderInputPrompt()
 	rows := m.textarea.Height()
 	promptLines := make([]string, rows)
@@ -202,7 +180,6 @@ func (m ComposerModel) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
 	var blocks []string
-	blocks = append(blocks, headerBlock)
 	blocks = append(blocks, body)
 	if mentionDropdown != "" {
 		blocks = append(blocks, mentionDropdown)
@@ -351,36 +328,98 @@ func (m ComposerModel) renderInputPrompt() string {
 }
 
 func (m ComposerModel) renderSuggestionsLine() string {
-	statusWidth := 22
-	status := lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Left).Render("")
-	if m.thinking {
-		status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Left).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
+	chromeWidth := m.width - 4
+	if chromeWidth < 0 {
+		chromeWidth = 0
 	}
+
+	statusWidth := 22
+	showStatus := true
+	if chromeWidth < 45 {
+		showStatus = false
+	}
+
+	var status string
+	if showStatus {
+		if m.thinking {
+			status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Right).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
+		} else {
+			status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Right).Render("")
+		}
+	}
+
+	availWidth := chromeWidth
+	if showStatus {
+		availWidth -= statusWidth
+	}
+	if availWidth < 0 {
+		availWidth = 0
+	}
+
 	var detail string
 	if len(m.suggestions) == 0 {
 		if m.runtime.InputMode() == app.InputModeShell {
-			detail = styles.InputHintStyle.Render("Direct shell active. Enter to execute. /chat to exit. Ctrl+T for tools.")
-			return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
+			if chromeWidth < 50 {
+				detail = "Shell active • /chat to exit"
+			} else if chromeWidth < 75 {
+				detail = "Direct shell active • /chat: exit • Ctrl+T: tools"
+			} else {
+				detail = "Direct shell active. Enter to execute. /chat to exit. Ctrl+T for tools."
+			}
+		} else {
+			if chromeWidth < 50 {
+				detail = "Tab: suggest • Ctrl+H: help"
+			} else if chromeWidth < 75 {
+				detail = "Tab: rotate suggestions • /provider add • /models"
+			} else {
+				detail = "Tab to rotate suggestions. /provider add for config. /models for selection."
+			}
 		}
-		detail = styles.InputHintStyle.Render("Tab to rotate suggestions. /provider add for config. /models for selection.")
+		detail = styles.InputHintStyle.Render(detail)
+	} else {
+		// Render completions
+		limit := len(m.suggestions)
+		// Dynamically decrease limit if it doesn't fit
+		for limit > 0 {
+			items := make([]string, 0, limit)
+			for i := 0; i < min(limit, len(m.suggestions)); i++ {
+				if i == m.selectedSuggestion {
+					items = append(items, styles.SelectionStyle.Render(m.suggestions[i]))
+				} else {
+					items = append(items, styles.SuggestionStyle.Render(m.suggestions[i]))
+				}
+			}
+			detail = strings.Join(items, "   ")
+			if lipgloss.Width(detail) <= availWidth || limit == 1 {
+				break
+			}
+			limit--
+		}
+		// If even 1 suggestion is too wide, truncate it
+		if lipgloss.Width(detail) > availWidth && availWidth > 5 {
+			detail = truncate(detail, availWidth)
+		}
+	}
+
+	if showStatus {
+		// Pad detail to availWidth so status is right-aligned
+		detailLen := lipgloss.Width(detail)
+		pad := availWidth - detailLen
+		if pad > 0 {
+			detail += strings.Repeat(" ", pad)
+		}
 		return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
 	}
-	limit := min(3, len(m.suggestions))
-	items := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		if i == m.selectedSuggestion {
-			items = append(items, styles.SelectionStyle.Render(m.suggestions[i]))
-			continue
-		}
-		items = append(items, styles.SuggestionStyle.Render(m.suggestions[i]))
-	}
-	detail = strings.Join(items, "   ")
-	return lipgloss.JoinHorizontal(lipgloss.Left, detail, status)
+	return detail
 }
 
 func (m ComposerModel) renderMentionDropdownBlock() string {
 	if len(m.mentionSuggestions) == 0 {
 		return ""
+	}
+	chromeWidth := m.width - 4
+	if chromeWidth < 0 {
+		chromeWidth = 0
 	}
 	idx := m.mentionIndex
 	if idx < 0 || idx >= len(m.mentionSuggestions) {
@@ -391,6 +430,9 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	limit := min(4, len(m.mentionSuggestions))
 	for i := 0; i < limit; i++ {
 		line := m.mentionSuggestions[i]
+		if len(line) > chromeWidth-2 && chromeWidth > 5 {
+			line = truncate(line, chromeWidth-2)
+		}
 		if i == idx {
 			rows = append(rows, styles.PopupSelectionStyle.Render(line))
 		} else {
@@ -442,7 +484,7 @@ func composerActivityLabel(agentName string) string {
 }
 
 func (m ComposerModel) Height() int {
-	height := m.textarea.Height() + 8 // base height: textarea(2) + suggestions(2) + chrome(4) + header(2)
+	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)
 	if len(m.mentionSuggestions) > 0 {
 		// MarginTop(1) = 1 line
 		// Title "Mentions" = 1 line

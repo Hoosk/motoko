@@ -107,3 +107,20 @@ func TestModelCreation(t *testing.T) {
 		t.Error("expected runtime to be set")
 	}
 }
+
+func TestModelResumeHistory(t *testing.T) {
+	r := app.NewRuntime(app.RuntimeOptions{Resume: true})
+	m := NewModel(r)
+
+	expectedEntries := r.StartupEntries()
+	visibleEntries := m.timeline.model.VisibleEntries()
+
+	if len(visibleEntries) != len(expectedEntries) {
+		t.Errorf("expected %d entries, got %d", len(expectedEntries), len(visibleEntries))
+	}
+	for i, entry := range expectedEntries {
+		if visibleEntries[i].Text != entry.Text || visibleEntries[i].Kind != entry.Kind {
+			t.Errorf("entry %d mismatch: got %v, want %v", i, visibleEntries[i], entry)
+		}
+	}
+}

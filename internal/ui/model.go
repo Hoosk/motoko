@@ -55,13 +55,21 @@ type Model struct {
 }
 
 func NewModel(runtime *app.Runtime) Model {
-	return Model{
+	m := Model{
 		runtime:  runtime,
 		timeline: NewTimelineModel(),
 		composer: NewComposerModel(runtime),
 		footer:   NewFooterModel(runtime),
 		sidebar:  NewSidebarModel(runtime),
 	}
+
+	// Load startup entries (e.g. resumed session history)
+	for _, entry := range runtime.StartupEntries() {
+		m.timeline.appendEntry(entry)
+	}
+	m.timeline.renderMessages()
+
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -108,6 +116,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.SyncLayout()
+
+	case CopySelectionMsg:
+		if msg.Err == nil {
+			m.notificationShow = true
+			m.notificationText = "Copied to clipboard"
+			m.notificationTime = time.Now()
+			cmds = append(cmds, m.hideNotification())
+		} else {
+			m.notificationShow = true
+			m.notificationText = "Copy failed: " + msg.Err.Error()
+			m.notificationTime = time.Now()
+			cmds = append(cmds, m.hideNotification())
+		}
 
 	case NotificationMsg:
 		m.notificationShow = true
@@ -322,12 +343,128 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.sidebar, cmd = m.sidebar.Update(msg)
 	cmds = append(cmds, cmd)
 
+	m.SyncLayout()
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) renderComposerToolbar(width int) string {
+	agentName := m.runtime.AgentName()
+	var modeIndicator string
+	if agentName == "plan" {
+		modeIndicator = styles.BoldVioletStyle.Render("● plan")
+	} else if agentName == "build" {
+		modeIndicator = styles.BoldNeonStyle.Render("● build")
+	} else {
+		modeIndicator = styles.WarmGoldStyle.Render("● " + agentName)
+	}
+
+	var statusStr string
+	if m.timeline.model.Thinking || m.footer.thinking {
+		frame := thinkingFrames[m.footer.thinkingFrame]
+		statusStr = "  " + styles.BoldNeonStyle.Render(frame) + " " + styles.BlueStyle.Render(agentActivityLabel(agentName) + "...")
+	} else {
+		statusStr = "  " + styles.GrayStyle.Render("idle")
+	}
+
+	left := modeIndicator + statusStr
+
+	var subagentsStr string
+	activeSubagents := m.runtime.ActiveSubagents()
+	if len(activeSubagents) > 0 {
+		subagentsStr = "  " + styles.BoldBlueStyle.Render("Subagents: ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
+	}
+
+	helpHint := styles.GrayStyle.Render("Ctrl+H help • Ctrl+A modes • Ctrl+T tools • Ctrl+R reasoning")
+
+	leftContent := "  " + left
+	if subagentsStr != "" {
+		leftContent += "   " + subagentsStr
+	}
+
+	leftLen := lipgloss.Width(leftContent)
+	rightLen := lipgloss.Width(helpHint)
+	paddingLen := width - leftLen - rightLen - 2 // Account for right margin
+	if paddingLen < 0 {
+		paddingLen = 0
+	}
+
+	toolbarContent := leftContent + strings.Repeat(" ", paddingLen) + helpHint
+	return toolbarContent
 }
 
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+
+	sidebarWidth := m.sidebar.width
+	mainWidth := m.width - sidebarWidth
+
+	composerView := m.composer.View()
+	toolbarView := m.renderComposerToolbar(mainWidth)
+	timelineView := m.timeline.View()
+	footerView := m.footer.View()
+
+	var mainView string
+	if sidebarWidth > 0 {
+		mainContent := lipgloss.JoinVertical(lipgloss.Left, timelineView, toolbarView, composerView)
+		sidebarView := m.sidebar.View()
+		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
+	} else {
+		mainView = lipgloss.JoinVertical(lipgloss.Left, timelineView, toolbarView, composerView)
+	}
+
+	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
+
+	// Dynamic popup width: adapt to terminal, capped at 72
+	popupWidth := m.width - 10
+	if popupWidth > 72 {
+		popupWidth = 72
+	}
+	if popupWidth < 30 {
+		popupWidth = 30
+	}
+	popupStyle := styles.PopupStyle.Width(popupWidth)
+
+	if m.notificationShow {
+		toast := styles.PopupStyle.
+			Padding(0, 1).
+			Width(30).
+			BorderForeground(styles.MainNeon).
+			Render(styles.BoldNeonStyle.Render("✓ ") +
+				styles.WhiteStyle.Render(m.notificationText))
+		base = overlayBase(base, toast, m.width, m.height)
+	} else if m.providerForm.active {
+		popup := popupStyle.Render(m.providerForm.View(m.runtime))
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.modelPicker.active {
+		popup := popupStyle.Render(m.modelPicker.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.sessionPicker.active {
+		popup := popupStyle.Render(m.sessionPicker.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.modePopup.active {
+		popup := popupStyle.Render(m.modePopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.showTools {
+		popup := popupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.showHelp {
+		popup := popupStyle.Render(helpView())
+		base = overlayCenter(base, popup, m.width, m.height)
+	}
+
+	lines := strings.Split(base, "\n")
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Model) SyncLayout() {
+	if m.width == 0 || m.height == 0 {
+		return
 	}
 
 	sidebarWidth := 36
@@ -345,68 +482,17 @@ func (m Model) View() string {
 
 	footerHeight := 1
 	m.footer.width = m.width
-	footerView := m.footer.View()
 
-	// The sidebar should cover exactly the same height as timeline + composer
-	timelineHeight := m.height - footerHeight - composerHeight
+	toolbarHeight := 1
+
+	timelineHeight := m.height - footerHeight - composerHeight - toolbarHeight
 	if timelineHeight < 4 {
 		timelineHeight = 4
 	}
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	timelineView := m.timeline.View()
-
-	var mainView string
-	if sidebarWidth > 0 {
-		m.sidebar.width = sidebarWidth
-		// Use lipgloss.Height to ensure exact matching if there's any internal padding/border
-		m.sidebar.height = lipgloss.Height(timelineView) + lipgloss.Height(composerView)
-		sidebarView := m.sidebar.View()
-		mainContent := lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
-		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
-	} else {
-		mainView = lipgloss.JoinVertical(lipgloss.Left, timelineView, composerView)
-	}
-
-	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
-
-	if m.notificationShow {
-		toast := styles.PopupStyle.
-			Padding(0, 1).
-			Width(30).
-			BorderForeground(styles.MainNeon).
-			Render(styles.BoldNeonStyle.Render("✓ ") +
-				styles.WhiteStyle.Render(m.notificationText))
-		base = overlayBase(base, toast, m.width, m.height)
-	} else if m.providerForm.active {
-		popup := styles.PopupStyle.Render(m.providerForm.View(m.runtime))
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.modelPicker.active {
-		popup := styles.PopupStyle.Render(m.modelPicker.View())
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.sessionPicker.active {
-		popup := styles.PopupStyle.Render(m.sessionPicker.View())
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.modePopup.active {
-		popup := styles.PopupStyle.Render(m.modePopup.View())
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.showTools {
-		popup := styles.PopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.showHelp {
-		popup := styles.PopupStyle.Render(helpView())
-		base = overlayCenter(base, popup, m.width, m.height)
-	}
-
-	lines := strings.Split(base, "\n")
-	if len(lines) > m.height {
-		lines = lines[:m.height]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m *Model) SyncLayout() {
-	// Handled in View for now to ensure consistency
+	m.sidebar.width = sidebarWidth
+	m.sidebar.height = timelineHeight + toolbarHeight + composerHeight
 }
 
 type hideNotificationMsg struct{}

@@ -387,3 +387,14 @@ func wrapOneLine(line string, width int) string {
 	}
 	return out.String()
 }
+
+func truncate(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+

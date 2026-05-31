@@ -108,10 +108,9 @@ var (
 			Underline(true)
 
 	PopupStyle = lipgloss.NewStyle().
-			Width(72).
-			MaxWidth(72).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(MainNeon).
+			Background(Surface).
 			Padding(1, 2)
 
 	PopupTitleStyle = lipgloss.NewStyle().
