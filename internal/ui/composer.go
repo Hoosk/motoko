@@ -62,6 +62,11 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if msg.Type == tea.MouseWheelUp || msg.Type == tea.MouseWheelDown {
+			return m, nil
+		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -209,7 +214,7 @@ func (m *ComposerModel) SyncLayout(width, height int) {
 }
 
 func (m *ComposerModel) syncLayout() {
-	if m.width <= 0 || m.height <= 0 {
+	if m.width <= 0 {
 		return
 	}
 	// Overhead: Chrome (4) + promptBlock (3) = 7
@@ -217,7 +222,6 @@ func (m *ComposerModel) syncLayout() {
 	m.textarea.SetWidth(textareaWidth)
 	m.textarea.SetHeight(2)
 }
-
 func (m *ComposerModel) refreshSuggestions() {
 	m.syncInputChrome()
 	if m.thinking {

@@ -159,6 +159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timeline.resetMessages()
 		}
 
+		m.timeline.model.AutoScroll = true
 		for _, entry := range resp.Entries {
 			m.timeline.appendEntry(entry)
 		}
@@ -303,6 +304,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "esc":
+			if m.showTools || m.showHelp {
+				m.showTools = false
+				m.showHelp = false
+				return m, nil
+			}
 		case "ctrl+p":
 			m.providerForm.Open(m.runtime)
 		case "ctrl+m":

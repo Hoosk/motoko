@@ -212,6 +212,7 @@ func (m *TimelineModel) resetMessages() {
 	}
 	m.model.Entries = nil
 	m.model.SelectedMessage = -1
+	m.model.AutoScroll = true
 	if m.model.Viewport.Width > 0 {
 		m.renderMessages()
 	}
@@ -219,6 +220,7 @@ func (m *TimelineModel) resetMessages() {
 
 func (m *TimelineModel) appendEntry(entry app.Entry) {
 	m.model.Entries = append(m.model.Entries, entry)
+	m.model.AutoScroll = true
 }
 
 func (m *TimelineModel) renderMessages() {
@@ -262,10 +264,14 @@ func (m *TimelineModel) renderMessages() {
 }
 
 func (m *TimelineModel) SetThinking(thinking bool) {
+	if m.model.Thinking == thinking {
+		return
+	}
 	m.model.Thinking = thinking
 	if thinking {
 		m.model.ThinkingFrame = 0
 	}
+	m.renderMessages()
 }
 
 func (m *TimelineModel) SetStreaming(streaming bool) {
