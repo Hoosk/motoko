@@ -340,7 +340,41 @@ func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) 
 		t.Fatalf("expected one status entry, got %#v", resp)
 	}
 	text := resp.Entries[0].Text
-	for _, want := range []string{"mode: plan", "input: shell", "workspace: motoko", "pending approval: git status"} {
+	for _, want := range []string{
+		"mode: plan",
+		"input: shell",
+		"workspace: motoko",
+		"pending approval: git status",
+		"agents.md guidelines: not found",
+		"design.md specification: not found",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in status text %q", want, text)
+		}
+	}
+}
+
+func TestHandleInputStatusIncludesLoadedAgentsAndDesign(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Write mock AGENTS.md and DESIGN.md
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("agents"), 0644); err != nil {
+		t.Fatalf("failed to write AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "DESIGN.md"), []byte("design"), 0644); err != nil {
+		t.Fatalf("failed to write DESIGN.md: %v", err)
+	}
+
+	r := NewRuntime()
+	resp := r.HandleInput("/status", system.ContextInfo{Workspace: "motoko", Path: tmpDir})
+	if len(resp.Entries) != 1 {
+		t.Fatalf("expected one status entry, got %#v", resp)
+	}
+	text := resp.Entries[0].Text
+	for _, want := range []string{
+		"agents.md guidelines: loaded",
+		"design.md specification: loaded",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in status text %q", want, text)
 		}

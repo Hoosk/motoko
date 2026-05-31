@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/config"
@@ -183,6 +185,20 @@ func (r *Runtime) statusText(info system.ContextInfo) string {
 		pending = r.pending.Command
 	}
 
+	agentsStatus := "not found"
+	if info.Path != "" {
+		if _, err := os.Stat(filepath.Join(info.Path, "AGENTS.md")); err == nil {
+			agentsStatus = "loaded"
+		}
+	}
+
+	designStatus := "not found"
+	if info.Path != "" {
+		if _, err := os.Stat(filepath.Join(info.Path, "DESIGN.md")); err == nil {
+			designStatus = "loaded"
+		}
+	}
+
 	return strings.Join([]string{
 		fmt.Sprintf("mode: %s", r.mode),
 		fmt.Sprintf("input: %s", r.inputMode),
@@ -190,6 +206,8 @@ func (r *Runtime) statusText(info system.ContextInfo) string {
 		fmt.Sprintf("active provider: %s", r.ProviderSummary()),
 		fmt.Sprintf("workspace: %s", info.Workspace),
 		fmt.Sprintf("git: %s", info.GitSummary()),
+		fmt.Sprintf("agents.md guidelines: %s", agentsStatus),
+		fmt.Sprintf("design.md specification: %s", designStatus),
 		fmt.Sprintf("pending approval: %s", pending),
 		"policy: plan asks for shell approval; build runs safe commands and asks for sensitive ones.",
 	}, "\n")

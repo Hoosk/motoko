@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -274,6 +275,7 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		"",
 		"--- OPERATING RULES ---",
 		"- TACHIKOMA FIRST: Always check '[Background Signals]' and '[Context]' sections before using any tool.",
+		"- AGENTS & DESIGN RULES: If 'AGENTS.md' guidelines are present, strictly follow them for code conventions, build and test setups. If 'DESIGN.md' specifications are present, strictly adhere to them for any UI, TUI, or visual styling.",
 		"- If a signal mentions 'available on-demand', use the 'inspect' tool for that worker before using 'read', 'grep', or 'bash'.",
 		"- Use tools only to explore parts of the codebase NOT already covered by the provided context.",
 		"- If you use a tool, request only one tool at a time. The system will return the result to you.",
@@ -325,6 +327,30 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		"[Pre-extracted Relevant Snippets]:",
 		info.RelevantSnippetsSummary(),
 		"",
+	)
+
+	// Load AGENTS.md if it exists in the workspace root path
+	if info.Path != "" {
+		agentsPath := filepath.Join(info.Path, "AGENTS.md")
+		if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
+			lines = append(lines,
+				"--- AGENTS GUIDELINES (AGENTS.md) ---",
+				string(data),
+				"",
+			)
+		}
+
+		designPath := filepath.Join(info.Path, "DESIGN.md")
+		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
+			lines = append(lines,
+				"--- DESIGN SPECIFICATION (DESIGN.md) ---",
+				string(data),
+				"",
+			)
+		}
+	}
+
+	lines = append(lines,
 		"--- AVAILABLE TOOLS ---",
 	)
 	for _, spec := range specs {
