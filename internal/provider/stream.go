@@ -29,7 +29,7 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var completed *responses.Response
 	for stream.Next() {
@@ -232,7 +232,7 @@ func postJSONStream(ctx context.Context, client *http.Client, url string, body a
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		message := strings.TrimSpace(string(body))

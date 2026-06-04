@@ -19,7 +19,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	}
 
 	if matches > 1 {
-		return "", fmt.Errorf("el bloque SEARCH aparece %d veces de forma exacta; la sustitucion debe ser unica. Proporciona mas contexto.", matches)
+		return "", fmt.Errorf("el bloque SEARCH aparece %d veces de forma exacta; la sustitucion debe ser unica. Proporciona mas contexto", matches)
 	}
 
 	if err := validateFuzzySearchBlock(search); err != nil {
@@ -64,10 +64,10 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	}
 
 	if len(matchIndices) == 0 {
-		return "", fmt.Errorf("no se encontro el bloque SEARCH ni siquiera ignorando espacios e indentacion. Revisa el contenido actual del archivo.")
+		return "", fmt.Errorf("no se encontro el bloque SEARCH ni siquiera ignorando espacios e indentacion. Revisa el contenido actual del archivo")
 	}
 	if len(matchIndices) > 1 {
-		return "", fmt.Errorf("el bloque SEARCH coincide en %d lugares ignorando espacios; debe ser unico. Proporciona mas lineas de contexto.", len(matchIndices))
+		return "", fmt.Errorf("el bloque SEARCH coincide en %d lugares ignorando espacios; debe ser unico. Proporciona mas lineas de contexto", len(matchIndices))
 	}
 
 	startLine := matchIndices[0]

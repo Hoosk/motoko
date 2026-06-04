@@ -82,7 +82,7 @@ func TestLoadAgentsFileDirFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Test fallback file candidate
 	agentsFilePath := filepath.Join(tmpDir, "agents.ini")

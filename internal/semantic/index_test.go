@@ -27,24 +27,24 @@ func TestBuildSnapshotExtractsGoSymbols(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Snapshot.Files) != 1 {
-		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Snapshot.Files))
+	if len(snapshot.Files) != 1 {
+		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Files))
 	}
-	got := snapshot.Snapshot.Files[0].Descriptor()
-	if got == "" || snapshot.Snapshot.Files[0].Language != "go" {
-		t.Fatalf("unexpected file summary: %#v", snapshot.Snapshot.Files[0])
+	got := snapshot.Files[0].Descriptor()
+	if got == "" || snapshot.Files[0].Language != "go" {
+		t.Fatalf("unexpected file summary: %#v", snapshot.Files[0])
 	}
-	if len(snapshot.Snapshot.Files[0].Symbols) < 2 {
-		t.Fatalf("expected extracted symbols, got %#v", snapshot.Snapshot.Files[0].Symbols)
+	if len(snapshot.Files[0].Symbols) < 2 {
+		t.Fatalf("expected extracted symbols, got %#v", snapshot.Files[0].Symbols)
 	}
-	if snapshot.Snapshot.Files[0].Symbols[0].Range.Start == 0 || snapshot.Snapshot.Files[0].Symbols[0].Range.End == 0 {
-		t.Fatalf("expected symbol ranges, got %#v", snapshot.Snapshot.Files[0].Symbols)
+	if snapshot.Files[0].Symbols[0].Range.Start == 0 || snapshot.Files[0].Symbols[0].Range.End == 0 {
+		t.Fatalf("expected symbol ranges, got %#v", snapshot.Files[0].Symbols)
 	}
 }
 
 func TestRelevantFilesPrefersPromptMatches(t *testing.T) {
 	snapshot := Snapshot{}
-	snapshot.Snapshot.Files = []FileSummary{
+	snapshot.Files = []FileSummary{
 		{Path: "internal/ui/model.go", Language: "go", Symbols: []Symbol{{Name: "NewModel", Kind: "func"}, {Name: "Update", Kind: "method"}}},
 		{Path: "internal/app/runtime.go", Language: "go", Changed: true, Symbols: []Symbol{{Name: "RunAgent", Kind: "func"}, {Name: "HandleInput", Kind: "func"}}},
 		{Path: "internal/provider/provider.go", Language: "go", Symbols: []Symbol{{Name: "ListModels", Kind: "func"}}},
@@ -62,7 +62,7 @@ func TestRelevantFilesPrefersPromptMatches(t *testing.T) {
 func TestRelevantSnippetsPicksMatchingSymbol(t *testing.T) {
 	content := []byte("package app\n\ntype Runtime struct{}\n\nfunc NewRuntime() *Runtime {\n\treturn &Runtime{}\n}\n\nfunc RunAgent() error {\n\treturn nil\n}\n")
 	snapshot := Snapshot{}
-	snapshot.Snapshot.Files = []FileSummary{{
+	snapshot.Files = []FileSummary{{
 		Path:     "internal/app/runtime.go",
 		Language: "go",
 		Changed:  true,
@@ -105,8 +105,8 @@ func TestBuildSnapshotSkipsGitIgnoredFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Snapshot.Files) != 1 || snapshot.Snapshot.Files[0].Path != "internal/app/runtime.go" {
-		t.Fatalf("expected ignored files skipped, got %#v", snapshot.Snapshot.Files)
+	if len(snapshot.Files) != 1 || snapshot.Files[0].Path != "internal/app/runtime.go" {
+		t.Fatalf("expected ignored files skipped, got %#v", snapshot.Files)
 	}
 }
 
@@ -125,10 +125,10 @@ func TestBuildSnapshotExtractsGoImportsAndExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Snapshot.Files) != 1 {
-		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Snapshot.Files))
+	if len(snapshot.Files) != 1 {
+		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Files))
 	}
-	file := snapshot.Snapshot.Files[0]
+	file := snapshot.Files[0]
 	if len(file.Imports) != 1 || file.Imports[0] != "fmt" {
 		t.Fatalf("expected fmt import, got %#v", file.Imports)
 	}
@@ -139,7 +139,7 @@ func TestBuildSnapshotExtractsGoImportsAndExports(t *testing.T) {
 
 func TestRelevantFilesFallsBackToChangedFilesWithoutPromptMatches(t *testing.T) {
 	snapshot := Snapshot{}
-	snapshot.Snapshot.Files = []FileSummary{
+	snapshot.Files = []FileSummary{
 		{Path: "internal/ui/model.go", Language: "go", Symbols: []Symbol{{Name: "Model", Kind: "type"}}},
 		{Path: "internal/app/runtime.go", Language: "go", Changed: true, Symbols: []Symbol{{Name: "RunAgent", Kind: "func"}}},
 	}
@@ -163,7 +163,7 @@ func TestSnapshotSummaryIncludesDirectoriesLanguagesAndChangedPaths(t *testing.T
 		},
 	}
 
-	summary := snapshot.Snapshot.Summary()
+	summary := snapshot.Summary()
 	if !strings.Contains(summary, "files:2") || !strings.Contains(summary, "dirs:internal/app, internal/ui") || !strings.Contains(summary, "langs:go:2") || !strings.Contains(summary, "changed:internal/app/runtime.go") {
 		t.Fatalf("unexpected summary %q", summary)
 	}
@@ -205,7 +205,7 @@ func TestSemanticGraphExpansion(t *testing.T) {
 	// - File B (config.go): doesn't match prompt ("runtime") but is connected to A via imports/exports
 	// - File C (model.go): completely unrelated
 	snapshot := Snapshot{}
-	snapshot.Snapshot.Files = []FileSummary{
+	snapshot.Files = []FileSummary{
 		{
 			Path:     "internal/app/runtime.go",
 			Language: "go",

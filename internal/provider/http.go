@@ -29,7 +29,7 @@ func postJSON(ctx context.Context, client *http.Client, url string, body any, he
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return decodeJSONResponse(resp, out)
 }
@@ -47,7 +47,7 @@ func getJSON(ctx context.Context, client *http.Client, url string, headers map[s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return decodeJSONResponse(resp, out)
 }

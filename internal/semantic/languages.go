@@ -80,7 +80,3 @@ func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language strin
 	return symbols, imports, exports
 }
 
-func extractSymbols(content []byte, lang *sitter.Language, language string) []Symbol {
-	s, _, _ := extractSymbolsAndDeps(content, lang, language)
-	return s
-}

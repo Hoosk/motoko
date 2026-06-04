@@ -28,7 +28,7 @@ func WatchHelper(ctx context.Context, rootPaths []string, debounce time.Duration
 	}
 
 	go func() {
-		defer watcher.Close()
+		defer func() { _ = watcher.Close() }()
 
 		var timer *time.Timer
 

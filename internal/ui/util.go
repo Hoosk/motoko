@@ -20,14 +20,6 @@ import (
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var thinkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-const logoArt = `
-  __  __  ____ _____ ____  _  _____
- |  \/  |/ __ \_   _/ __ \| |/ / _ \
- | \  / | |  | || || |  | | ' / | | |
- | |\/| | |  | || || |  | |  <| | | |
- | |  | | |__| || || |__| | . \ |_| |
- |_|  |_|\____/ |_| \____/|_|\_\___/
-`
 
 func writeClipboard(text string) error {
 	seq := osc52.New(text)
@@ -168,22 +160,6 @@ func clamp(value, minValue, maxValue int) int {
 	return value
 }
 
-func estimateTextareaHeight(value string, width int) int {
-	if width <= 1 {
-		return 3
-	}
-	lines := strings.Split(value, "\n")
-	count := 0
-	for _, line := range lines {
-		lineWidth := lipgloss.Width(line)
-		if lineWidth == 0 {
-			count++
-			continue
-		}
-		count += (lineWidth-1)/width + 1
-	}
-	return max(3, count)
-}
 
 func truncateANSI(s string, maxCols int) string {
 	if maxCols <= 0 {
@@ -311,82 +287,6 @@ func stripANSI(value string) string {
 	return ansiPattern.ReplaceAllString(value, "")
 }
 
-// wrapText wraps text to fit within width visible columns, respecting
-// existing \n characters. Word-boundary aware; falls back to character
-// breaks for words longer than width. Unicode-aware via go-runewidth.
-func wrapText(text string, width int) string {
-	if width <= 0 {
-		return text
-	}
-	lines := strings.Split(text, "\n")
-	result := make([]string, 0, len(lines))
-	for _, line := range lines {
-		result = append(result, wrapOneLine(line, width))
-	}
-	return strings.Join(result, "\n")
-}
-
-// wrapOneLine wraps a single line at word boundaries to fit within width cols.
-func wrapOneLine(line string, width int) string {
-	if runewidth.StringWidth(line) <= width {
-		return line
-	}
-	runes := []rune(line)
-	var out strings.Builder
-	col := 0
-
-	for i := 0; i < len(runes); {
-		r := runes[i]
-		if r == ' ' || r == '\t' {
-			rw := runewidth.RuneWidth(r)
-			// Emit space only if we have content on the line and it fits.
-			if col > 0 && col+rw <= width {
-				out.WriteRune(r)
-				col += rw
-			}
-			i++
-			continue
-		}
-		// Measure the next word.
-		j, wordW := i, 0
-		for j < len(runes) && runes[j] != ' ' && runes[j] != '\t' {
-			wordW += runewidth.RuneWidth(runes[j])
-			j++
-		}
-		word := runes[i:j]
-		switch {
-		case col == 0:
-			// At start of a (possibly new) line: write with force-breaks if needed.
-			for _, wr := range word {
-				wrW := runewidth.RuneWidth(wr)
-				if col+wrW > width && col > 0 {
-					out.WriteByte('\n')
-					col = 0
-				}
-				out.WriteRune(wr)
-				col += wrW
-			}
-		case col+wordW <= width:
-			out.WriteString(string(word))
-			col += wordW
-		default:
-			// Word doesn't fit: wrap and write (with force-breaks for very long words).
-			out.WriteByte('\n')
-			col = 0
-			for _, wr := range word {
-				wrW := runewidth.RuneWidth(wr)
-				if col+wrW > width && col > 0 {
-					out.WriteByte('\n')
-					col = 0
-				}
-				out.WriteRune(wr)
-				col += wrW
-			}
-		}
-		i = j
-	}
-	return out.String()
-}
 
 func truncate(s string, maxLen int) string {
 	if maxLen <= 0 {

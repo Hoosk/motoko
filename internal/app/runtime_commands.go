@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/system"
@@ -42,6 +43,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/sessions List or switch between workspace sessions",
 			"/tools    Show all registered tools",
 			"/tool     Execute a specific runtime tool",
+			"/task     Manage running background tasks",
 			"/approve  Execute the pending shell action",
 			"/deny     Cancel the pending shell action",
 			"!<cmd>    Execute an explicit shell command",
@@ -166,6 +168,45 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			tracelog.Logf("=== TRACE ENABLED ===")
 		}
 		return Response{}
+	case "task":
+		if len(parts) < 2 {
+			tasks := r.ListTasks()
+			if len(tasks) == 0 {
+				return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active background tasks."}}}
+			}
+			var sb strings.Builder
+			sb.WriteString("Active tasks:\n")
+			for _, t := range tasks {
+				fmt.Fprintf(&sb, "- %s: %q (started %s ago)\n", t.ID, t.Command, time.Since(t.Started).Round(time.Second))
+			}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.TrimSpace(sb.String())}}}
+		}
+
+		subcmd := strings.ToLower(parts[1])
+		switch subcmd {
+		case "list":
+			tasks := r.ListTasks()
+			if len(tasks) == 0 {
+				return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active background tasks."}}}
+			}
+			var sb strings.Builder
+			sb.WriteString("Active tasks:\n")
+			for _, t := range tasks {
+				fmt.Fprintf(&sb, "- %s: %q (started %s ago)\n", t.ID, t.Command, time.Since(t.Started).Round(time.Second))
+			}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.TrimSpace(sb.String())}}}
+		case "terminate":
+			if len(parts) < 3 {
+				return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /task terminate <idTask>"}}}
+			}
+			id := parts[2]
+			if err := r.TerminateTask(id); err != nil {
+				return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+			}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Task %s terminated.", id)}}}
+		default:
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s. Usage: /task or /task terminate <idTask>", subcmd)}}}
+		}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}

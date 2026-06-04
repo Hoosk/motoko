@@ -44,7 +44,7 @@ func (d *DiffTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 
 	refresh := func() {
 		diff, err := d.computeSemanticDiff(ctx)
-		status := "idle"
+		var status string
 		var payload any
 		if err != nil {
 			status = "error: " + err.Error()
@@ -107,9 +107,7 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 				continue
 			}
 			newRange := parts[2] // +line,count
-			if strings.HasPrefix(newRange, "+") {
-				newRange = newRange[1:]
-			}
+			newRange = strings.TrimPrefix(newRange, "+")
 
 			startLine := 0
 			rangeParts := strings.Split(newRange, ",")

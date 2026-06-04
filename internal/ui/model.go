@@ -20,6 +20,10 @@ type ShellResultMsg struct {
 	Result app.ShellResult
 }
 
+type TaskEventMsg struct {
+	Event app.TaskEvent
+}
+
 type AgentResultMsg struct {
 	Prompt    string
 	Result    agent.Result
@@ -28,9 +32,8 @@ type AgentResultMsg struct {
 }
 
 type agentStreamBuffer struct {
-	mu     sync.Mutex
-	events []app.AgentStreamEvent
-	done   bool
+	mu   sync.Mutex
+	done bool
 }
 
 type Model struct {
@@ -49,6 +52,7 @@ type Model struct {
 	sessionPicker    sessionPickerState
 	agentStream      chan app.AgentStreamEvent
 	agentBuffer      *agentStreamBuffer
+	taskStatus       string
 	modePopup        modePopupState
 	showHelp         bool
 	showTools        bool
@@ -78,6 +82,7 @@ func (m Model) Init() tea.Cmd {
 		m.composer.Init(),
 		m.footer.Init(),
 		m.sidebar.Init(),
+		m.waitTaskEvent(),
 	)
 }
 
@@ -193,6 +198,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case app.ActionShell:
 				cmds = append(cmds, m.runShell(resp.Action.ShellCommand))
 
+			case app.ActionTask:
+				cmds = append(cmds, m.runTask(resp.Action.TaskCommand))
+
 			case app.ActionCompact:
 				cmds = append(cmds, m.compactSession())
 			}
@@ -245,6 +253,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timeline.appendEntry(app.Entry{Kind: kind, Text: msg.Result.Output})
 		}
 		m.timeline.renderMessages()
+
+	case TaskEventMsg:
+		m.footer.taskCount = m.runtime.ActiveTasks()
+		if msg.Event.Done {
+			m.taskStatus = "idle"
+			for _, entry := range m.runtime.HandleTaskResult(msg.Event).Entries {
+				m.timeline.appendEntry(entry)
+			}
+			m.timeline.renderMessages()
+
+			// Auto wake up! Only trigger if agent is configured and not already thinking
+			if m.runtime.AgentConfigured() && !m.timeline.model.Thinking {
+				cmds = append(cmds, func() tea.Msg {
+					return SubmitPromptMsg{Prompt: "[System: Task " + msg.Event.ID + " finished. Please continue.]"}
+				})
+			}
+		} else {
+			m.taskStatus = msg.Event.Command
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + msg.Event.Command})
+			m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
+			m.timeline.renderMessages()
+		}
+		cmds = append(cmds, m.waitTaskEvent())
 
 	case ProviderModelsMsg:
 		if msg.Err != nil {
@@ -358,18 +389,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) renderComposerToolbar(width int) string {
 	agentName := m.runtime.AgentName()
 	var modeIndicator string
-	if agentName == "plan" {
+	switch agentName {
+	case "plan":
 		modeIndicator = styles.BoldVioletStyle.Render("● plan")
-	} else if agentName == "build" {
+	case "build":
 		modeIndicator = styles.BoldNeonStyle.Render("● build")
-	} else {
+	default:
 		modeIndicator = styles.WarmGoldStyle.Render("● " + agentName)
 	}
 
 	var statusStr string
 	if m.timeline.model.Thinking || m.footer.thinking {
 		frame := thinkingFrames[m.footer.thinkingFrame]
-		statusStr = "  " + styles.BoldNeonStyle.Render(frame) + " " + styles.BlueStyle.Render(agentActivityLabel(agentName) + "...")
+		statusStr = "  " + styles.BoldNeonStyle.Render(frame) + " " + styles.BlueStyle.Render(agentActivityLabel(agentName)+"...")
 	} else {
 		statusStr = "  " + styles.GrayStyle.Render("idle")
 	}

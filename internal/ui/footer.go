@@ -19,6 +19,7 @@ type FooterModel struct {
 	contextTokens int
 	thinking      bool
 	thinkingFrame int
+	taskCount     int
 }
 
 func NewFooterModel(runtime *app.Runtime) FooterModel {
@@ -51,6 +52,8 @@ func (m FooterModel) Update(msg tea.Msg) (FooterModel, tea.Cmd) {
 		if m.thinking {
 			m.thinkingFrame = (m.thinkingFrame + 1) % len(thinkingFrames)
 		}
+	case TaskEventMsg:
+		m.taskCount = m.runtime.ActiveTasks()
 	}
 
 	return m, nil
@@ -88,6 +91,10 @@ func (m FooterModel) View() string {
 
 	if pending := m.runtime.PendingApproval(); pending != "" {
 		parts = append(parts, styles.ErrorStyle.Render("⚠ "+pending))
+	}
+
+	if m.taskCount > 0 {
+		parts = append(parts, styles.BoldBlueStyle.Render(fmt.Sprintf("tasks:%d", m.taskCount)))
 	}
 
 	footerWidth := m.width - 2

@@ -356,6 +356,10 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 	for _, spec := range specs {
 		lines = append(lines, fmt.Sprintf("- %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
 	}
+	lines = append(lines,
+		"",
+		"- task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step. For those, use the 'bash' tool instead. Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task.",
+	)
 	return strings.Join(lines, "\n")
 }
 

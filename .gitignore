@@ -1,0 +1,11 @@
+# Antigravity CLI metadata
+.antigravity/
+.antigravitycli/
+
+# Compiled binaries and build outputs
+motoko
+/bin/
+
+# Test coverage
+*.out
+coverage.out

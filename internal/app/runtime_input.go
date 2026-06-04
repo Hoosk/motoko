@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
 )
 
@@ -35,15 +36,19 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 	r.mentionedFiles = r.extractMentionedFiles(trimmed)
 
 	if strings.HasPrefix(trimmed, "!") {
-		return r.handleShell(strings.TrimSpace(trimmed[1:]))
+		return r.handleCommand(strings.TrimSpace(trimmed[1:]))
 	}
 
 	if r.inputMode == InputModeShell {
-		return r.handleShell(trimmed)
+		return r.handleCommand(trimmed)
 	}
 
 	if r.AgentConfigured() {
-		return Response{Entries: []Entry{{Kind: EntryUser, Text: trimmed}}, Action: &Action{Type: ActionAgent, AgentPrompt: trimmed}}
+		var entries []Entry
+		if !strings.HasPrefix(trimmed, "[System:") {
+			entries = append(entries, Entry{Kind: EntryUser, Text: trimmed})
+		}
+		return Response{Entries: entries, Action: &Action{Type: ActionAgent, AgentPrompt: trimmed}}
 	}
 
 	return Response{Entries: []Entry{
@@ -59,6 +64,32 @@ func (r *Runtime) HandleShellResult(result ShellResult) Response {
 	output := strings.TrimSpace(result.Output)
 	if output == "" {
 		output = "(sin salida)"
+	}
+
+	if result.ExitCode == 0 {
+		entries = append(entries, Entry{Kind: EntryOutput, Text: output})
+		return Response{Entries: entries}
+	}
+
+	entries = append(entries, Entry{Kind: EntryError, Text: output})
+	return Response{Entries: entries}
+}
+
+func (r *Runtime) HandleTaskResult(result TaskEvent) Response {
+	status := fmt.Sprintf("Task finished in %s with exit code %d.", result.Duration.Round(10_000_000), result.ExitCode)
+	entries := []Entry{{Kind: EntrySystem, Text: status}}
+
+	output := strings.TrimSpace(result.Output)
+	if output == "" {
+		output = "(no output)"
+	}
+
+	if r.currentSession != nil {
+		r.currentSession.History = append(r.currentSession.History, provider.ConversationItem{
+			Role:    provider.RoleUser,
+			Content: fmt.Sprintf("[System: Task %s finished with exit code %d.\nOutput:\n%s]", result.ID, result.ExitCode, output),
+		})
+		_ = r.currentSession.Save()
 	}
 
 	if result.ExitCode == 0 {
@@ -95,4 +126,9 @@ func (r *Runtime) handleShell(command string) Response {
 		},
 		Action: &Action{Type: ActionShell, ShellCommand: command},
 	}
+}
+
+
+func (r *Runtime) handleCommand(command string) Response {
+	return r.handleShell(command)
 }

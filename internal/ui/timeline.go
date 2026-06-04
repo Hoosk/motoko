@@ -72,6 +72,14 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 					if strings.TrimSpace(event.Content) != "" {
 						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
 					}
+				case "task_started":
+					m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + event.Title})
+					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
+				case "task_finished":
+					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+					if strings.TrimSpace(event.ReasoningContent) != "" {
+						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
+					}
 				case "output":
 					m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
 				case "error":
@@ -103,16 +111,18 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		}
 
 	case tea.MouseMsg:
-		switch msg.Type {
-		case tea.MouseLeft:
-			if m.BeginSelection(msg.X, msg.Y) {
-				return nil
+		switch msg.Action {
+		case tea.MouseActionPress:
+			if msg.Button == tea.MouseButtonLeft {
+				if m.BeginSelection(msg.X, msg.Y) {
+					return nil
+				}
 			}
-		case tea.MouseMotion:
+		case tea.MouseActionMotion:
 			if m.UpdateSelection(msg.X, msg.Y) {
 				return nil
 			}
-		case tea.MouseRelease:
+		case tea.MouseActionRelease:
 			if cmd := m.EndSelection(msg.X, msg.Y); cmd != nil {
 				return cmd
 			}

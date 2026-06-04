@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -63,7 +62,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		if msg.Type == tea.MouseWheelUp || msg.Type == tea.MouseWheelDown {
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			return m, nil
 		}
 
@@ -338,10 +337,7 @@ func (m ComposerModel) renderSuggestionsLine() string {
 	}
 
 	statusWidth := 22
-	showStatus := true
-	if chromeWidth < 45 {
-		showStatus = false
-	}
+	showStatus := chromeWidth >= 45
 
 	var status string
 	if showStatus {
@@ -446,22 +442,6 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	return lipgloss.NewStyle().MarginTop(1).Render(strings.Join(rows, "\n"))
 }
 
-func (m ComposerModel) renderMentionDropdown() string {
-	limit := min(4, len(m.mentionSuggestions))
-	idx := m.mentionIndex
-	if idx < 0 || idx >= len(m.mentionSuggestions) {
-		idx = 0
-	}
-	items := make([]string, 0, limit)
-	for i := 0; i < limit; i++ {
-		if i == idx {
-			items = append(items, styles.PopupSelectionStyle.Render(m.mentionSuggestions[i]))
-		} else {
-			items = append(items, styles.SuggestionStyle.Render(m.mentionSuggestions[i]))
-		}
-	}
-	return strings.Join(items, "   ")
-}
 
 func (m *ComposerModel) SetThinking(thinking bool) {
 	m.thinking = thinking
@@ -484,7 +464,7 @@ func shouldApplySuggestionOnEnter(current, suggestion string) bool {
 }
 
 func composerActivityLabel(agentName string) string {
-	return fmt.Sprintf("%s", agentActivityLabel(agentName))
+	return agentActivityLabel(agentName)
 }
 
 func (m ComposerModel) Height() int {

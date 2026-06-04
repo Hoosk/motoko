@@ -11,7 +11,7 @@ func TestParseSkillFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	skillContent := `---
 name: test-skill
@@ -49,7 +49,7 @@ func TestDiscover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create workspace dir: %v", err)
 	}
-	defer os.RemoveAll(tmpWorkspace)
+	defer func() { _ = os.RemoveAll(tmpWorkspace) }()
 
 	projSkillsDir := filepath.Join(tmpWorkspace, ".agents", "skills", "proj-skill-1")
 	if err := os.MkdirAll(projSkillsDir, 0o755); err != nil {

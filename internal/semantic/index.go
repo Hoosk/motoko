@@ -37,7 +37,7 @@ func (idx *Index) Ensure(ctx context.Context) (*Snapshot, error) {
 	idx.mu.RLock()
 	s := idx.lastSnapshot
 	idx.mu.RUnlock()
-	if s != nil && time.Since(s.Snapshot.GeneratedAt) < staleAfter {
+	if s != nil && time.Since(s.GeneratedAt) < staleAfter {
 		return s, nil
 	}
 	return idx.Refresh(ctx)
@@ -65,16 +65,16 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		defer cancel()
 	}
 	snapshot := &Snapshot{}
-	snapshot.Snapshot.GeneratedAt = time.Now()
-	snapshot.Snapshot.Root = root
-	snapshot.Snapshot.LanguageCounts = make(map[string]int)
+	snapshot.GeneratedAt = time.Now()
+	snapshot.Root = root
+	snapshot.LanguageCounts = make(map[string]int)
 
 	matcher, err := workspaceignore.Load(root)
 	if err != nil {
 		return nil, err
 	}
 	changed := findChangedFiles(root)
-	snapshot.Snapshot.ChangedPaths = changed
+	snapshot.ChangedPaths = changed
 	changedMap := make(map[string]bool)
 	for _, p := range changed {
 		changedMap[p] = true
@@ -135,12 +135,12 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 			Exports:  exports,
 			Content:  content,
 		}
-		snapshot.Snapshot.Files = append(snapshot.Snapshot.Files, summary)
-		snapshot.Snapshot.LanguageCounts[langName]++
+		snapshot.Files = append(snapshot.Files, summary)
+		snapshot.LanguageCounts[langName]++
 		dir := filepath.Dir(rel)
 		if dir != "." && !dirsSeen[dir] {
 			dirsSeen[dir] = true
-			snapshot.Snapshot.Directories = append(snapshot.Snapshot.Directories, dir)
+			snapshot.Directories = append(snapshot.Directories, dir)
 		}
 		return nil
 	})

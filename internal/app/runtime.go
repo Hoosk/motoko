@@ -56,6 +56,7 @@ type ActionType string
 
 const (
 	ActionShell   ActionType = "shell"
+	ActionTask    ActionType = "task"
 	ActionAgent   ActionType = "agent"
 	ActionCompact ActionType = "compact"
 )
@@ -63,7 +64,22 @@ const (
 type Action struct {
 	Type         ActionType
 	ShellCommand string
+	TaskCommand  string
 	AgentPrompt  string
+}
+
+type TaskEvent struct {
+	ID       string
+	Command  string
+	Done     bool
+	ExitCode int
+	Output   string
+	Duration time.Duration
+}
+
+type TaskEventResult struct {
+	Event TaskEvent
+	OK    bool
 }
 
 type Response struct {
@@ -76,6 +92,7 @@ type Response struct {
 type pendingShell struct {
 	Command string
 }
+
 
 type SubagentInfo struct {
 	Name      string
@@ -102,9 +119,11 @@ type Runtime struct {
 	wasResumed        bool
 	mentionedFiles    []string
 	availableSkills   []skills.Skill
+	backgroundCtx     context.Context
 
-	subagentsMu       sync.Mutex
-	activeSubagents   map[string]*SubagentInfo
+	subagentsMu     sync.Mutex
+	activeSubagents map[string]*SubagentInfo
+	tasks           *TaskManager
 }
 
 type RuntimeOptions struct {
@@ -151,6 +170,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		workspaceID:       workspaceID,
 		availableSkills:   sList,
 		activeSubagents:   make(map[string]*SubagentInfo),
+		tasks:             NewTaskManager(),
 	}
 
 	// Setup default tachikomas
@@ -161,6 +181,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	// Register tools that depend on tachikomas
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))
 	r.tools.Register(tools.NewDelegateTool(r))
+	r.tools.Register(tools.NewTaskTool(r))
 
 	if len(sList) > 0 {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
@@ -236,6 +257,44 @@ func (r *Runtime) PendingApproval() string {
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
 	return r.tools.Specs()
+}
+
+func (r *Runtime) StartTask(ctx context.Context, command string) (string, error) {
+	if r.tasks == nil {
+		return "", fmt.Errorf("task manager no inicializado")
+	}
+	if r.backgroundCtx != nil {
+		ctx = r.backgroundCtx
+	}
+	return r.tasks.Launch(ctx, command)
+}
+
+func (r *Runtime) TerminateTask(id string) error {
+	if r.tasks == nil {
+		return fmt.Errorf("task manager no inicializado")
+	}
+	return r.tasks.Terminate(id)
+}
+
+func (r *Runtime) ListTasks() []*TaskState {
+	if r.tasks == nil {
+		return nil
+	}
+	return r.tasks.List()
+}
+
+func (r *Runtime) NextTaskEvent(ctx context.Context) TaskEventResult {
+	if r.tasks == nil {
+		return TaskEventResult{}
+	}
+	return r.tasks.Next(ctx)
+}
+
+func (r *Runtime) ActiveTasks() int {
+	if r.tasks == nil {
+		return 0
+	}
+	return r.tasks.ActiveTasks()
 }
 
 func (r *Runtime) AgentConfigured() bool {
@@ -437,6 +496,7 @@ func (r *Runtime) ActiveSubagents() []string {
 }
 
 func (r *Runtime) Start(ctx context.Context) {
+	r.backgroundCtx = ctx
 	if r.tachikomas != nil {
 		r.tachikomas.Start(ctx)
 	}

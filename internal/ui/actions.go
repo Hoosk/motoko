@@ -106,6 +106,16 @@ func (m *Model) runShell(command string) tea.Cmd {
 	}
 }
 
+func (m *Model) runTask(command string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := m.runtime.StartTask(context.Background(), command)
+		if err != nil {
+			return ErrorMsg{Err: err}
+		}
+		return NotificationMsg{Text: "Task launched in background"}
+	}
+}
+
 func (m *Model) compactSession() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -118,3 +128,12 @@ func (m *Model) compactSession() tea.Cmd {
 	}
 }
 
+func (m Model) waitTaskEvent() tea.Cmd {
+	return func() tea.Msg {
+		res := m.runtime.NextTaskEvent(context.Background())
+		if !res.OK {
+			return nil
+		}
+		return TaskEventMsg{Event: res.Event}
+	}
+}

@@ -60,10 +60,10 @@ func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error
 	// - The model can clearly distinguish skill instructions from other conversation content
 	// - Relative paths can be resolved against the skill's base directory
 	outputBuilder := &strings.Builder{}
-	outputBuilder.WriteString(fmt.Sprintf("<skill_content name=%q>\n", found.Name))
+	fmt.Fprintf(outputBuilder, "<skill_content name=%q>\n", found.Name)
 	outputBuilder.WriteString(found.Body)
 	outputBuilder.WriteString("\n\n")
-	outputBuilder.WriteString(fmt.Sprintf("Skill directory: %s\n", filepath.Dir(found.Location)))
+	fmt.Fprintf(outputBuilder, "Skill directory: %s\n", filepath.Dir(found.Location))
 	outputBuilder.WriteString("Relative paths in this skill are relative to the skill directory.\n")
 	outputBuilder.WriteString("</skill_content>")
 

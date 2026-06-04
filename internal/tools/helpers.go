@@ -137,7 +137,7 @@ func isTextFile(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	buffer := make([]byte, 8192)
 	n, err := file.Read(buffer)

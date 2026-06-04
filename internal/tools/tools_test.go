@@ -324,7 +324,7 @@ func TestPatchToolInsertsAfterASTNode(t *testing.T) {
 	if oneIdx == -1 || newIdx == -1 || twoIdx == -1 {
 		t.Fatalf("expected all three functions present, got %q", text)
 	}
-	if !(oneIdx < newIdx && newIdx < twoIdx) {
+	if oneIdx >= newIdx || newIdx >= twoIdx {
 		t.Fatalf("expected One() < New() < Two(), got %q", text)
 	}
 }
