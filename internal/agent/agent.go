@@ -283,6 +283,23 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		"- Prefer finishing the task end-to-end instead of stopping at analysis.",
 		"- If the existing context already answers the question, answer directly without unnecessary tool calls.",
 		"",
+		"--- BRAIN PROTOCOL ---",
+		"You have a persistent session brain — a set of markdown files that survive across turns.",
+		"Use brain_write, brain_read, and brain_list to manage your brain files.",
+		"",
+		"MANDATORY BEHAVIORS:",
+		"- When starting a multi-step task, ALWAYS create plan.md with your approach BEFORE writing code.",
+		"- When a plan exists in your brain, ALWAYS read it at the start of your turn and follow it.",
+		"- Track progress in tasks.md — mark items as completed with [x] as you finish them.",
+		"- When all work is done, write summary.md with what was accomplished.",
+		"- If the user asks you to plan, save the plan to plan.md, not just in your response.",
+		"",
+		"BRAIN FILES CONVENTION:",
+		"- plan.md    — Current implementation plan (goals, approach, file changes)",
+		"- tasks.md   — Checklist of tasks with completion status",
+		"- summary.md — Post-completion summary of what was done",
+		"- notes.md   — Free-form notes, discoveries, or context for future turns",
+		"",
 	)
 	if agentSystem != "" {
 		lines = append(lines, "--- AGENT MODE ---", agentSystem, "")
@@ -328,6 +345,13 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		info.RelevantSnippetsSummary(),
 		"",
 	)
+	if info.BrainSummary != "" {
+		lines = append(lines,
+			"--- SESSION BRAIN STATE ---",
+			info.BrainSummary,
+			"",
+		)
+	}
 
 	// Load AGENTS.md if it exists in the workspace root path
 	if info.Path != "" {

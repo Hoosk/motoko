@@ -72,6 +72,24 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 }
 
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
+	if r.brain != nil {
+		var sb strings.Builder
+		sb.WriteString(r.brain.Summary())
+		if r.brain.Exists("plan") {
+			if plan := r.brain.PlanSummary(); plan != "" {
+				sb.WriteString("\n\n[plan.md]:\n")
+				sb.WriteString(plan)
+			}
+		}
+		if r.brain.Exists("tasks") {
+			if tasks := r.brain.TasksSummary(); tasks != "" {
+				sb.WriteString("\n\n[tasks.md]:\n")
+				sb.WriteString(tasks)
+			}
+		}
+		info.BrainSummary = sb.String()
+	}
+
 	if len(r.availableSkills) > 0 {
 		info.AvailableSkills = make([]system.SkillDef, len(r.availableSkills))
 		for i, s := range r.availableSkills {

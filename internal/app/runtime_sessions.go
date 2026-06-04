@@ -8,6 +8,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app/sessiontitle"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
 )
@@ -22,6 +23,7 @@ func (r *Runtime) LoadSession(id string) error {
 		return err
 	}
 	r.currentSession = s
+	r.brain, _ = brain.New(r.workspaceID, s.ID)
 	return nil
 }
 
@@ -106,6 +108,9 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		return err
 	}
 	r.currentSession.CompactWith(strings.TrimSpace(resp.FinalText))
+	if r.brain != nil {
+		_ = r.brain.Write("summary.md", strings.TrimSpace(resp.FinalText))
+	}
 	return r.currentSession.Save()
 }
 

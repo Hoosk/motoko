@@ -630,3 +630,77 @@ func TestRuntimeSkillsIntegration(t *testing.T) {
 		t.Errorf("expected skill 'test-skill' in context, got %q", info.AvailableSkills[0].Name)
 	}
 }
+
+func TestRuntimeBrainCommands(t *testing.T) {
+	withSessionBaseDir(t)
+
+	r := NewRuntime()
+	if r.brain == nil {
+		t.Fatal("expected session brain to be initialized")
+	}
+
+	// Test writing via tool
+	_, err := r.tools.Run(context.Background(), "brain_write", "plan.md This is my plan")
+	if err != nil {
+		t.Fatalf("failed to write plan via tool: %v", err)
+	}
+
+	// Test /brain plan command
+	resp := r.handleSlashCommand("/brain plan", system.ContextInfo{})
+	if len(resp.Entries) < 2 {
+		t.Fatalf("expected at least 2 entries, got %d", len(resp.Entries))
+	}
+	if !strings.Contains(resp.Entries[1].Text, "This is my plan") {
+		t.Errorf("expected plan output, got: %q", resp.Entries[1].Text)
+	}
+
+	// Test /brain tasks shortcut (empty case)
+	resp = r.handleSlashCommand("/brain tasks", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != EntryError {
+		t.Errorf("expected error entry for missing tasks.md, got: %#v", resp)
+	}
+
+	// Test writing tasks
+	_, err = r.tools.Run(context.Background(), "brain_write", "tasks.md - [ ] Task 1")
+	if err != nil {
+		t.Fatalf("failed to write tasks: %v", err)
+	}
+
+	// Test /brain tasks command
+	resp = r.handleSlashCommand("/brain tasks", system.ContextInfo{})
+	if len(resp.Entries) < 2 {
+		t.Fatalf("expected at least 2 entries, got %d", len(resp.Entries))
+	}
+	if !strings.Contains(resp.Entries[1].Text, "- [ ] Task 1") {
+		t.Errorf("expected tasks output, got: %q", resp.Entries[1].Text)
+	}
+
+	// Test /brain list
+	resp = r.handleSlashCommand("/brain list", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "plan.md") {
+		t.Errorf("expected file listing containing plan.md, got: %#v", resp)
+	}
+
+	// Test /brain read
+	resp = r.handleSlashCommand("/brain read plan.md", system.ContextInfo{})
+	if len(resp.Entries) < 2 || !strings.Contains(resp.Entries[1].Text, "This is my plan") {
+		t.Errorf("expected plan file content, got: %#v", resp)
+	}
+
+	// Test enrichContext system prompt integration
+	info := r.enrichContext(context.Background(), system.ContextInfo{}, "query")
+	if !strings.Contains(info.BrainSummary, "plan.md") || !strings.Contains(info.BrainSummary, "This is my plan") {
+		t.Errorf("expected brain summary to contain plan and its contents, got: %q", info.BrainSummary)
+	}
+
+	// Test /brain clear
+	resp = r.handleSlashCommand("/brain clear", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "deleted") {
+		t.Errorf("expected deletion confirmation, got: %#v", resp)
+	}
+
+	if r.brain.Exists("plan") {
+		t.Error("plan should not exist after brain clear")
+	}
+}
+

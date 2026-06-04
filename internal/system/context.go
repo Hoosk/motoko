@@ -28,6 +28,7 @@ type ContextInfo struct {
 	RelevantFiles    []string
 	RelevantSnippets []string
 	AvailableSkills  []SkillDef
+	BrainSummary     string
 
 	// OnDemandSignals contains references to heavy data that isn't included in the prompt
 	// but is available if the agent requests it via tools.
