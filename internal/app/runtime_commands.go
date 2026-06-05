@@ -410,10 +410,14 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
 		}
+		var deleteErrors []string
 		for _, f := range files {
 			if err := r.brain.Delete(f.Name); err != nil {
-				return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to delete brain file %s: %v", f.Name, err)}}}
+				deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Name, err))
 			}
+		}
+		if len(deleteErrors) > 0 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to delete some brain files: %s", strings.Join(deleteErrors, "; "))}}}
 		}
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "All session brain files deleted."}}}
 	default:
