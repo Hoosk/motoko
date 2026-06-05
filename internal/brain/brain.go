@@ -212,9 +212,20 @@ func (b *Brain) TasksSummary() string {
 }
 
 func isInvalidName(name string) bool {
+	if name == "." || name == ".." {
+		return true
+	}
 	if filepath.IsAbs(name) {
 		return true
 	}
+	// Reject path separators on all platforms to prevent subdirectories and traversal.
+	if strings.ContainsAny(name, "/\\") {
+		return true
+	}
+	// Reject drive letters and alternate data streams.
+	if strings.Contains(name, ":") {
+		return true
+	}
 	prefix := ".." + string(filepath.Separator)
-	return name == ".." || strings.HasPrefix(name, prefix)
+	return strings.HasPrefix(name, prefix)
 }

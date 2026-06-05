@@ -86,9 +86,20 @@ func TestBrain(t *testing.T) {
 	}
 
 	// 7. Invalid name protection
-	err = b.Write("../outside", "malicious")
-	if err == nil {
-		t.Error("expected error writing outside directory")
+	invalidNames := []string{
+		"../outside",
+		"sub/file",
+		"sub\\file",
+		"notes.md:stream",
+		"C:notes.md",
+		".",
+		"..",
+	}
+	for _, bad := range invalidNames {
+		err = b.Write(bad, "malicious")
+		if err == nil {
+			t.Errorf("expected error writing invalid filename %q, but succeeded", bad)
+		}
 	}
 
 	err = b.Write("notes..md", "safe")
