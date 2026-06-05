@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -93,7 +94,6 @@ type pendingShell struct {
 	Command string
 }
 
-
 type SubagentInfo struct {
 	Name      string
 	Prompt    string
@@ -114,6 +114,8 @@ type Runtime struct {
 	currentAgentName  string
 	availableAgents   []agent.AgentDef
 	currentSession    *session.Session
+	brain             *brain.Brain
+	brainInitErr      error
 	workspaceID       string
 	contextWindow     int
 	wasResumed        bool
@@ -182,6 +184,9 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))
 	r.tools.Register(tools.NewDelegateTool(r))
 	r.tools.Register(tools.NewTaskTool(r))
+	r.tools.Register(tools.NewBrainWriteTool(r))
+	r.tools.Register(tools.NewBrainReadTool(r))
+	r.tools.Register(tools.NewBrainListTool(r))
 
 	if len(sList) > 0 {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
@@ -196,6 +201,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if r.currentSession == nil {
 		r.currentSession = session.New(workspaceID, workspacePath)
 	}
+	r.brain, r.brainInitErr = brain.New(workspaceID, r.currentSession.ID)
 	r.refreshAgent()
 	return r
 }
@@ -421,6 +427,25 @@ func (r *Runtime) StartupEntries() []Entry {
 		return nil
 	}
 	entries := []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Sesion resumida: %s", r.currentSession.Title)}}
+	if r.brain != nil {
+		var hints []string
+		if r.brain.Exists("plan") {
+			if plan, err := r.brain.Read("plan"); err == nil {
+				hints = append(hints, fmt.Sprintf("plan.md (%.1fKB)", float64(len(plan))/1024.0))
+			}
+		}
+		if r.brain.Exists("tasks") {
+			if tasks, err := r.brain.Read("tasks"); err == nil {
+				hints = append(hints, fmt.Sprintf("tasks.md (%.1fKB)", float64(len(tasks))/1024.0))
+			}
+		}
+		if len(hints) > 0 {
+			entries = append(entries, Entry{
+				Kind: EntrySystem,
+				Text: fmt.Sprintf("Session brain found: %s. The agent will continue from the existing plan.", strings.Join(hints, ", ")),
+			})
+		}
+	}
 	entries = append(entries, r.CurrentSessionEntries()...)
 	return entries
 }
@@ -529,4 +554,8 @@ func (r *Runtime) providerClient(cfg config.ProviderConfig) (provider.Client, er
 		return r.newProviderClient(cfg)
 	}
 	return provider.NewClient(cfg)
+}
+
+func (r *Runtime) GetBrain() *brain.Brain {
+	return r.brain
 }

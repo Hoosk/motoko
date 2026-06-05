@@ -27,6 +27,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Available commands:",
 			"/help     Show this help message",
+			"/brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
 			"/clear    Clear the timeline history",
 			"/compact  Manually compact the active session",
 			"/mode     Open the agent mode selector",
@@ -207,6 +208,8 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		default:
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s. Usage: /task or /task terminate <idTask>", subcmd)}}}
 		}
+	case "brain":
+		return r.handleBrainCommand(parts[1:])
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}
@@ -344,4 +347,97 @@ func (r *Runtime) providerListText() string {
 		lines = append(lines, fmt.Sprintf("%s %s [%s] %s", marker, providerCfg.Name, label, model))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (r *Runtime) handleBrainCommand(parts []string) Response {
+	if r.brain == nil {
+		if r.brainInitErr != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Session brain not initialized: %v", r.brainInitErr)}}}
+		}
+		return Response{Entries: []Entry{{Kind: EntryError, Text: "Session brain not initialized."}}}
+	}
+
+	if len(parts) == 0 {
+		return r.listBrainFiles()
+	}
+
+	subcmd := strings.ToLower(parts[0])
+	switch subcmd {
+	case "list":
+		return r.listBrainFiles()
+	case "read":
+		if len(parts) < 2 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /brain read <filename>"}}}
+		}
+		filename := parts[1]
+		content, err := r.brain.Read(filename)
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to read brain file: %v", err)}}}
+		}
+		return Response{Entries: []Entry{
+			{Kind: EntrySystem, Text: fmt.Sprintf("--- Brain File: %s ---", filename)},
+			{Kind: EntrySystem, Text: content},
+		}}
+	case "plan":
+		content, err := r.brain.Read("plan.md")
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "No plan.md found in session brain."}}}
+		}
+		return Response{Entries: []Entry{
+			{Kind: EntrySystem, Text: "--- Session Plan (plan.md) ---"},
+			{Kind: EntrySystem, Text: content},
+		}}
+	case "tasks":
+		content, err := r.brain.Read("tasks.md")
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "No tasks.md found in session brain."}}}
+		}
+		return Response{Entries: []Entry{
+			{Kind: EntrySystem, Text: "--- Session Tasks (tasks.md) ---"},
+			{Kind: EntrySystem, Text: content},
+		}}
+	case "summary":
+		content, err := r.brain.Read("summary.md")
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: "No summary.md found in session brain."}}}
+		}
+		return Response{Entries: []Entry{
+			{Kind: EntrySystem, Text: "--- Session Summary (summary.md) ---"},
+			{Kind: EntrySystem, Text: content},
+		}}
+	case "clear":
+		files, err := r.brain.List()
+		if err != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
+		}
+		var deleteErrors []string
+		for _, f := range files {
+			if err := r.brain.Delete(f.Name); err != nil {
+				deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Name, err))
+			}
+		}
+		if len(deleteErrors) > 0 {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to delete some brain files: %s", strings.Join(deleteErrors, "; "))}}}
+		}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "All session brain files deleted."}}}
+	default:
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s. Available subcommands: list, read, plan, tasks, summary, clear.", subcmd)}}}
+	}
+}
+
+func (r *Runtime) listBrainFiles() Response {
+	files, err := r.brain.List()
+	if err != nil {
+		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
+	}
+	if len(files) == 0 {
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No brain files in the current session."}}}
+	}
+	var sb strings.Builder
+	sb.WriteString("Session brain files:\n")
+	for _, f := range files {
+		ago := time.Since(f.ModTime).Truncate(time.Second)
+		fmt.Fprintf(&sb, "- %s (%d bytes, updated %s ago)\n", f.Name, f.SizeBytes, ago)
+	}
+	return Response{Entries: []Entry{{Kind: EntrySystem, Text: strings.TrimSpace(sb.String())}}}
 }
