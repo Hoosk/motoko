@@ -58,7 +58,7 @@ func (b *Brain) Write(name, content string) error {
 		return fmt.Errorf("filename cannot be empty")
 	}
 	name = filepath.Clean(name)
-	if strings.Contains(name, "..") || filepath.IsAbs(name) {
+	if isInvalidName(name) {
 		return fmt.Errorf("invalid brain file name: %s", name)
 	}
 	if !strings.HasSuffix(name, ".md") {
@@ -81,7 +81,7 @@ func (b *Brain) Read(name string) (string, error) {
 		return "", fmt.Errorf("filename cannot be empty")
 	}
 	name = filepath.Clean(name)
-	if strings.Contains(name, "..") || filepath.IsAbs(name) {
+	if isInvalidName(name) {
 		return "", fmt.Errorf("invalid brain file name: %s", name)
 	}
 	if !strings.HasSuffix(name, ".md") {
@@ -135,7 +135,7 @@ func (b *Brain) Delete(name string) error {
 		return fmt.Errorf("filename cannot be empty")
 	}
 	name = filepath.Clean(name)
-	if strings.Contains(name, "..") || filepath.IsAbs(name) {
+	if isInvalidName(name) {
 		return fmt.Errorf("invalid brain file name: %s", name)
 	}
 	if !strings.HasSuffix(name, ".md") {
@@ -159,7 +159,7 @@ func (b *Brain) Exists(name string) bool {
 		return false
 	}
 	name = filepath.Clean(name)
-	if strings.Contains(name, "..") || filepath.IsAbs(name) {
+	if isInvalidName(name) {
 		return false
 	}
 	if !strings.HasSuffix(name, ".md") {
@@ -209,4 +209,12 @@ func (b *Brain) TasksSummary() string {
 		return content[:1000] + "\n... [tasks.md truncated, use brain_read to view full tasks list] ..."
 	}
 	return content
+}
+
+func isInvalidName(name string) bool {
+	if filepath.IsAbs(name) {
+		return true
+	}
+	prefix := ".." + string(filepath.Separator)
+	return name == ".." || strings.HasPrefix(name, prefix)
 }

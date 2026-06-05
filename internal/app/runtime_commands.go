@@ -351,6 +351,9 @@ func (r *Runtime) providerListText() string {
 
 func (r *Runtime) handleBrainCommand(parts []string) Response {
 	if r.brain == nil {
+		if r.brainInitErr != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Session brain not initialized: %v", r.brainInitErr)}}}
+		}
 		return Response{Entries: []Entry{{Kind: EntryError, Text: "Session brain not initialized."}}}
 	}
 
@@ -408,7 +411,9 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
 		}
 		for _, f := range files {
-			_ = r.brain.Delete(f.Name)
+			if err := r.brain.Delete(f.Name); err != nil {
+				return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to delete brain file %s: %v", f.Name, err)}}}
+			}
 		}
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "All session brain files deleted."}}}
 	default:

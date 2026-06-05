@@ -19,7 +19,11 @@ func (p *testBrainProvider) GetBrain() *brain.Brain {
 
 func TestBrainTools(t *testing.T) {
 	tmpDir := t.TempDir()
+	prev := session.SessionsBaseDir
 	session.SessionsBaseDir = tmpDir
+	t.Cleanup(func() {
+		session.SessionsBaseDir = prev
+	})
 
 	br, err := brain.New("workspace123", "session456")
 	if err != nil {
@@ -55,6 +59,20 @@ func TestBrainTools(t *testing.T) {
 	}
 	if !strings.Contains(res.Summary, "Successfully wrote") {
 		t.Errorf("unexpected summary: %s", res.Summary)
+	}
+
+	// 3b. Preserve leading and trailing spaces in content
+	res, err = writeTool.Run(ctx, "notes.md  line with leading and trailing spaces  ")
+	if err != nil {
+		t.Fatalf("write with spacing failed: %v", err)
+	}
+
+	res, err = readTool.Run(ctx, "notes.md")
+	if err != nil {
+		t.Fatalf("read notes failed: %v", err)
+	}
+	if res.Output != " line with leading and trailing spaces  " {
+		t.Errorf("got %q, want %q", res.Output, " line with leading and trailing spaces  ")
 	}
 
 	// 4. Read plan

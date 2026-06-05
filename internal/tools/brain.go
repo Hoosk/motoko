@@ -31,7 +31,7 @@ func (t *BrainWriteTool) Spec() Spec {
 
 func (t *BrainWriteTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
-	args = strings.TrimSpace(args)
+	args = strings.TrimLeft(args, " \t\n\r")
 	idx := strings.IndexFunc(args, func(c rune) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 	})
@@ -39,7 +39,7 @@ func (t *BrainWriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
 	}
 	filename := strings.TrimSpace(args[:idx])
-	content := strings.TrimSpace(args[idx:])
+	content := args[idx+1:]
 	if filename == "" || content == "" {
 		return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
 	}

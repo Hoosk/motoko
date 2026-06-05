@@ -9,7 +9,11 @@ import (
 
 func TestBrain(t *testing.T) {
 	tmpDir := t.TempDir()
+	prev := session.SessionsBaseDir
 	session.SessionsBaseDir = tmpDir
+	t.Cleanup(func() {
+		session.SessionsBaseDir = prev
+	})
 
 	b, err := New("workspace123", "session456")
 	if err != nil {
@@ -87,6 +91,11 @@ func TestBrain(t *testing.T) {
 		t.Error("expected error writing outside directory")
 	}
 
+	err = b.Write("notes..md", "safe")
+	if err != nil {
+		t.Errorf("expected notes..md to be valid, got error: %v", err)
+	}
+
 	// 8. Delete
 	err = b.Delete("plan")
 	if err != nil {
@@ -99,7 +108,11 @@ func TestBrain(t *testing.T) {
 
 func TestBrainTruncation(t *testing.T) {
 	tmpDir := t.TempDir()
+	prev := session.SessionsBaseDir
 	session.SessionsBaseDir = tmpDir
+	t.Cleanup(func() {
+		session.SessionsBaseDir = prev
+	})
 
 	b, _ := New("w", "s")
 

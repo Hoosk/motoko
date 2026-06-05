@@ -23,7 +23,10 @@ func (r *Runtime) LoadSession(id string) error {
 		return err
 	}
 	r.currentSession = s
-	r.brain, _ = brain.New(r.workspaceID, s.ID)
+	r.brain, r.brainInitErr = brain.New(r.workspaceID, s.ID)
+	if r.brainInitErr != nil {
+		return fmt.Errorf("failed to initialize session brain: %w", r.brainInitErr)
+	}
 	return nil
 }
 
@@ -109,7 +112,9 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 	}
 	r.currentSession.CompactWith(strings.TrimSpace(resp.FinalText))
 	if r.brain != nil {
-		_ = r.brain.Write("summary.md", strings.TrimSpace(resp.FinalText))
+		if err := r.brain.Write("summary.md", strings.TrimSpace(resp.FinalText)); err != nil {
+			return fmt.Errorf("failed to persist compact summary to session brain: %w", err)
+		}
 	}
 	return r.currentSession.Save()
 }

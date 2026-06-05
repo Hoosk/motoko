@@ -94,7 +94,6 @@ type pendingShell struct {
 	Command string
 }
 
-
 type SubagentInfo struct {
 	Name      string
 	Prompt    string
@@ -116,6 +115,7 @@ type Runtime struct {
 	availableAgents   []agent.AgentDef
 	currentSession    *session.Session
 	brain             *brain.Brain
+	brainInitErr      error
 	workspaceID       string
 	contextWindow     int
 	wasResumed        bool
@@ -201,7 +201,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if r.currentSession == nil {
 		r.currentSession = session.New(workspaceID, workspacePath)
 	}
-	r.brain, _ = brain.New(workspaceID, r.currentSession.ID)
+	r.brain, r.brainInitErr = brain.New(workspaceID, r.currentSession.ID)
 	r.refreshAgent()
 	return r
 }
