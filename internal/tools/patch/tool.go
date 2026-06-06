@@ -24,18 +24,18 @@ type Result struct {
 }
 
 type request struct {
+	Unified *unifiedPatch
 	Path    string
 	Search  string
 	Replace string
 	AST     []*astPatch
-	Unified *unifiedPatch
 }
 
 type astPatch struct {
 	Path     string
-	Selector astSelector
 	Action   string
 	Replace  string
+	Selector astSelector
 }
 
 type astSelector struct {
@@ -54,16 +54,16 @@ type unifiedPatch struct {
 }
 
 type unifiedHunk struct {
+	Lines    []unifiedHunkLine
 	OldStart int
 	OldCount int
 	NewStart int
 	NewCount int
-	Lines    []unifiedHunkLine
 }
 
 type unifiedHunkLine struct {
-	Kind      byte
 	Text      string
+	Kind      byte
 	NoNewline bool
 }
 

@@ -22,10 +22,10 @@ type Matcher struct {
 // ignorePattern represents a single parsed .gitignore pattern used as
 // a fallback when git ls-files is not available.
 type ignorePattern struct {
-	pattern string // normalized pattern (no leading /, no trailing /)
-	dirOnly bool   // was originally suffixed with /
-	rooted  bool   // contained an interior / so it is anchored to base
-	base    string // relative path of the directory containing .gitignore
+	pattern string
+	base    string
+	dirOnly bool
+	rooted  bool
 }
 
 // parseIgnoreLine parses a single line from a .gitignore file.

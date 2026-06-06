@@ -19,24 +19,24 @@ type TextPos struct {
 }
 
 type Model struct {
-	Viewport         viewport.Model
 	ViewportContent  string
 	Messages         []string
 	Entries          []app.Entry
 	RenderLines      []RenderLine
-	SelectedMessage  int
-	Width            int
-	Height           int
-	AutoScroll       bool
-	Streaming        bool
 	StreamedRunes    []rune
-	StreamEntryIndex int
-	Thinking         bool
+	Viewport         viewport.Model
+	SelectionFocus   TextPos
+	SelectionAnchor  TextPos
+	Height           int
+	Width            int
 	ThinkingFrame    int
+	SelectedMessage  int
+	StreamEntryIndex int
+	AutoScroll       bool
 	Selecting        bool
 	SelectionDragged bool
-	SelectionAnchor  TextPos
-	SelectionFocus   TextPos
+	Thinking         bool
+	Streaming        bool
 	ShowReasoning    bool
 }
 

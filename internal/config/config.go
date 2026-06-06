@@ -37,8 +37,8 @@ type ProviderConfig struct {
 }
 
 type SearchConfig struct {
-	MaxResults      int      `json:"max_results,omitempty"`
 	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	MaxResults      int      `json:"max_results,omitempty"`
 	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
 }
 
@@ -105,8 +105,8 @@ func (c *AppConfig) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+	if mkdirErr := os.MkdirAll(filepath.Dir(path), 0o700); mkdirErr != nil {
+		return mkdirErr
 	}
 	c.sortProviders()
 
@@ -118,9 +118,9 @@ func (c *AppConfig) Save() error {
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p
 		if p.APIKey != "" && !strings.HasPrefix(p.APIKey, "enc:") {
-			encKey, err := Encrypt(p.APIKey)
-			if err != nil {
-				return err
+			encKey, encErr := Encrypt(p.APIKey)
+			if encErr != nil {
+				return encErr
 			}
 			encryptedCfg.Providers[i].APIKey = encKey
 		}

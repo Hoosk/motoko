@@ -11,10 +11,10 @@ import (
 )
 
 type sessionPickerState struct {
+	sessions []*session.Session
+	index    int
 	active   bool
 	loading  bool
-	index    int
-	sessions []*session.Session
 }
 
 func (p *sessionPickerState) Open() {

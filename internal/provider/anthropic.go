@@ -14,10 +14,9 @@ import (
 )
 
 type anthropicClient struct {
+	sdkClient          *anthropic.Client
 	baseClient
-	thinkingBudget int
-	sdkClient      *anthropic.Client
-
+	thinkingBudget     int
 	mu                 sync.Mutex
 	capabilitiesLoaded bool
 	isAdaptive         bool
@@ -203,194 +202,235 @@ func batchResponseFromSDK(batch *anthropic.BetaMessageBatch) BatchResponse {
 	}
 }
 
-func toSDKTools(tools ToolSet) []anthropic.ToolUnionParam {
+type parsedBlock struct {
+	toolUseInput map[string]any
+	toolUseID    string
+	toolUseName  string
+	toolResultID string
+	toolOutput   string
+	text         string
+	isToolUse    bool
+	isToolResult bool
+	isText       bool
+}
+
+func parseConversationItem(msg ConversationItem) (string, []parsedBlock) {
+	role := normalizeConversationRole(msg.Role)
+	if role == RoleSystem {
+		return "", nil
+	}
+
+	var blocks []parsedBlock
+	if call, ok := parseAssistantToolCallContent(msg.Content); ok {
+		var toolInput map[string]any
+		if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
+			toolInput = map[string]any{"input": call.Input}
+		}
+		blocks = append(blocks, parsedBlock{
+			isToolUse:    true,
+			toolUseID:    call.CallID,
+			toolUseName:  call.Name,
+			toolUseInput: toolInput,
+		})
+	} else if msg.Role == RoleTool {
+		call, output := parseToolResultContent(msg.Content)
+		blocks = append(blocks, parsedBlock{
+			isToolResult: true,
+			toolResultID: call.CallID,
+			toolOutput:   output,
+		})
+	} else {
+		blocks = append(blocks, parsedBlock{
+			isText: true,
+			text:   msg.Content,
+		})
+	}
+	return role, blocks
+}
+
+func buildSDKMessages[MsgT any, RoleT any, BlockT any](
+	messages []ConversationItem,
+	roleUser RoleT,
+	roleAssistant RoleT,
+	buildBlock func(b parsedBlock) BlockT,
+	setCacheControl func(block *BlockT),
+	buildMessage func(role RoleT, blocks []BlockT) MsgT,
+) []MsgT {
+	result := make([]MsgT, 0, len(messages))
+	for i, msg := range messages {
+		role, blocks := parseConversationItem(msg)
+		if role == "" {
+			continue
+		}
+
+		var sdkRole RoleT
+		if role == RoleUser {
+			sdkRole = roleUser
+		} else {
+			sdkRole = roleAssistant
+		}
+
+		sdkBlocks := make([]BlockT, len(blocks))
+		for j, b := range blocks {
+			sdkBlocks[j] = buildBlock(b)
+		}
+
+		if i == len(messages)-1 && role == RoleUser && len(sdkBlocks) > 0 {
+			setCacheControl(&sdkBlocks[len(sdkBlocks)-1])
+		}
+
+		result = append(result, buildMessage(sdkRole, sdkBlocks))
+	}
+	return result
+}
+
+func buildSDKTools[T any](tools ToolSet, buildFn func(t LocalToolDefinition, isLast bool) T) []T {
 	if len(tools.Local) == 0 {
 		return nil
 	}
-	result := make([]anthropic.ToolUnionParam, 0, len(tools.Local))
+	result := make([]T, 0, len(tools.Local))
 	for i, tool := range tools.Local {
-		t := tool
+		result = append(result, buildFn(tool, i == len(tools.Local)-1))
+	}
+	return result
+}
+
+func toolProperties(t LocalToolDefinition) map[string]any {
+	return map[string]any{
+		"input": map[string]any{
+			"type":        "string",
+			"description": toolInputDescription(t),
+		},
+	}
+}
+
+func toSDKTools(tools ToolSet) []anthropic.ToolUnionParam {
+	return buildSDKTools(tools, func(t LocalToolDefinition, isLast bool) anthropic.ToolUnionParam {
 		tParam := anthropic.ToolParam{
 			Name:        t.Name,
 			Description: anthropic.String(strings.TrimSpace(t.Description)),
 			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: map[string]any{
-					"input": map[string]any{
-						"type":        "string",
-						"description": toolInputDescription(t),
-					},
-				},
-				Required: []string{"input"},
+				Properties: toolProperties(t),
+				Required:   []string{"input"},
 			},
 		}
-		if i == len(tools.Local)-1 {
+		if isLast {
 			tParam.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		}
-		result = append(result, anthropic.ToolUnionParam{OfTool: &tParam})
-	}
-	return result
+		return anthropic.ToolUnionParam{OfTool: &tParam}
+	})
 }
 
 func toSDKMessages(messages []ConversationItem) []anthropic.MessageParam {
-	result := make([]anthropic.MessageParam, 0, len(messages))
-	for i, msg := range messages {
-		role := normalizeConversationRole(msg.Role)
-		if role == RoleSystem {
-			continue
-		}
-
-		var sdkRole anthropic.MessageParamRole
-		if role == RoleUser {
-			sdkRole = anthropic.MessageParamRoleUser
-		} else {
-			sdkRole = anthropic.MessageParamRoleAssistant
-		}
-
-		var blocks []anthropic.ContentBlockParamUnion
-
-		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
-			var toolInput map[string]any
-			if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
-				toolInput = map[string]any{"input": call.Input}
+	return buildSDKMessages(
+		messages,
+		anthropic.MessageParamRoleUser,
+		anthropic.MessageParamRoleAssistant,
+		func(b parsedBlock) anthropic.ContentBlockParamUnion {
+			if b.isToolUse {
+				return anthropic.ContentBlockParamUnion{
+					OfToolUse: &anthropic.ToolUseBlockParam{
+						ID:    b.toolUseID,
+						Name:  b.toolUseName,
+						Input: b.toolUseInput,
+					},
+				}
 			}
-			blocks = append(blocks, anthropic.ContentBlockParamUnion{
-				OfToolUse: &anthropic.ToolUseBlockParam{
-					ID:    call.CallID,
-					Name:  call.Name,
-					Input: toolInput,
-				},
-			})
-		} else if msg.Role == RoleTool {
-			call, output := parseToolResultContent(msg.Content)
-			blocks = append(blocks, anthropic.ContentBlockParamUnion{
-				OfToolResult: &anthropic.ToolResultBlockParam{
-					ToolUseID: call.CallID,
-					Content: []anthropic.ToolResultBlockParamContentUnion{
-						{
-							OfText: &anthropic.TextBlockParam{
-								Text: output,
+			if b.isToolResult {
+				return anthropic.ContentBlockParamUnion{
+					OfToolResult: &anthropic.ToolResultBlockParam{
+						ToolUseID: b.toolResultID,
+						Content: []anthropic.ToolResultBlockParamContentUnion{
+							{
+								OfText: &anthropic.TextBlockParam{
+									Text: b.toolOutput,
+								},
 							},
 						},
 					},
-				},
-			})
-		} else {
-			blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
-		}
-
-		if i == len(messages)-1 && sdkRole == anthropic.MessageParamRoleUser && len(blocks) > 0 {
-			lastIdx := len(blocks) - 1
-			b := blocks[lastIdx]
-			if b.OfText != nil {
-				b.OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
-				blocks[lastIdx] = b
-			} else if b.OfToolResult != nil {
-				b.OfToolResult.CacheControl = anthropic.NewCacheControlEphemeralParam()
-				blocks[lastIdx] = b
+				}
 			}
-		}
-
-		result = append(result, anthropic.MessageParam{
-			Role:    sdkRole,
-			Content: blocks,
-		})
-	}
-	return result
+			return anthropic.NewTextBlock(b.text)
+		},
+		func(block *anthropic.ContentBlockParamUnion) {
+			if block.OfText != nil {
+				block.OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
+			} else if block.OfToolResult != nil {
+				block.OfToolResult.CacheControl = anthropic.NewCacheControlEphemeralParam()
+			}
+		},
+		func(role anthropic.MessageParamRole, blocks []anthropic.ContentBlockParamUnion) anthropic.MessageParam {
+			return anthropic.MessageParam{
+				Role:    role,
+				Content: blocks,
+			}
+		},
+	)
 }
 
 func toSDKBetaMessages(messages []ConversationItem) []anthropic.BetaMessageParam {
-	result := make([]anthropic.BetaMessageParam, 0, len(messages))
-	for i, msg := range messages {
-		role := normalizeConversationRole(msg.Role)
-		if role == RoleSystem {
-			continue
-		}
-
-		var sdkRole anthropic.BetaMessageParamRole
-		if role == RoleUser {
-			sdkRole = anthropic.BetaMessageParamRoleUser
-		} else {
-			sdkRole = anthropic.BetaMessageParamRoleAssistant
-		}
-
-		var blocks []anthropic.BetaContentBlockParamUnion
-
-		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
-			var toolInput map[string]any
-			if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
-				toolInput = map[string]any{"input": call.Input}
-			}
-			blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-				OfToolUse: &anthropic.BetaToolUseBlockParam{
-					ID:    call.CallID,
-					Name:  call.Name,
-					Input: toolInput,
-				},
-			})
-		} else if msg.Role == RoleTool {
-			call, output := parseToolResultContent(msg.Content)
-			blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-				OfToolResult: &anthropic.BetaToolResultBlockParam{
-					ToolUseID: call.CallID,
-					Content: []anthropic.BetaToolResultBlockParamContentUnion{
-						{
-							OfText: &anthropic.BetaTextBlockParam{
-								Text: output,
+	return buildSDKMessages(
+		messages,
+		anthropic.BetaMessageParamRoleUser,
+		anthropic.BetaMessageParamRoleAssistant,
+		func(b parsedBlock) anthropic.BetaContentBlockParamUnion {
+			switch {
+			case b.isToolUse:
+				return anthropic.BetaContentBlockParamUnion{
+					OfToolUse: &anthropic.BetaToolUseBlockParam{
+						ID:    b.toolUseID,
+						Name:  b.toolUseName,
+						Input: b.toolUseInput,
+					},
+				}
+			case b.isToolResult:
+				return anthropic.BetaContentBlockParamUnion{
+					OfToolResult: &anthropic.BetaToolResultBlockParam{
+						ToolUseID: b.toolResultID,
+						Content: []anthropic.BetaToolResultBlockParamContentUnion{
+							{
+								OfText: &anthropic.BetaTextBlockParam{
+									Text: b.toolOutput,
+								},
 							},
 						},
 					},
-				},
-			})
-		} else {
-			blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
-		}
-
-		if i == len(messages)-1 && sdkRole == anthropic.BetaMessageParamRoleUser && len(blocks) > 0 {
-			lastIdx := len(blocks) - 1
-			b := blocks[lastIdx]
-			if b.OfText != nil {
-				b.OfText.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
-				blocks[lastIdx] = b
-			} else if b.OfToolResult != nil {
-				b.OfToolResult.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
-				blocks[lastIdx] = b
+				}
+			default:
+				return anthropic.NewBetaTextBlock(b.text)
 			}
-		}
-
-		result = append(result, anthropic.BetaMessageParam{
-			Role:    sdkRole,
-			Content: blocks,
-		})
-	}
-	return result
+		},
+		func(block *anthropic.BetaContentBlockParamUnion) {
+			if block.OfText != nil {
+				block.OfText.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+			} else if block.OfToolResult != nil {
+				block.OfToolResult.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+			}
+		},
+		func(role anthropic.BetaMessageParamRole, blocks []anthropic.BetaContentBlockParamUnion) anthropic.BetaMessageParam {
+			return anthropic.BetaMessageParam{
+				Role:    role,
+				Content: blocks,
+			}
+		},
+	)
 }
 
 func toSDKBetaTools(tools ToolSet) []anthropic.BetaToolUnionParam {
-	if len(tools.Local) == 0 {
-		return nil
-	}
-	result := make([]anthropic.BetaToolUnionParam, 0, len(tools.Local))
-	for i, tool := range tools.Local {
-		t := tool
+	return buildSDKTools(tools, func(t LocalToolDefinition, isLast bool) anthropic.BetaToolUnionParam {
 		tParam := anthropic.BetaToolParam{
 			Name:        t.Name,
 			Description: anthropic.String(strings.TrimSpace(t.Description)),
 			InputSchema: anthropic.BetaToolInputSchemaParam{
-				Properties: map[string]any{
-					"input": map[string]any{
-						"type":        "string",
-						"description": toolInputDescription(t),
-					},
-				},
-				Required: []string{"input"},
+				Properties: toolProperties(t),
+				Required:   []string{"input"},
 			},
 		}
-		if i == len(tools.Local)-1 {
+		if isLast {
 			tParam.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
 		}
-		result = append(result, anthropic.BetaToolUnionParam{OfTool: &tParam})
-	}
-	return result
+		return anthropic.BetaToolUnionParam{OfTool: &tParam}
+	})
 }
 
 func responseFromSDK(decoded *anthropic.Message) Response {

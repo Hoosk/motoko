@@ -12,18 +12,18 @@ import (
 
 type ComposerModel struct {
 	textarea           textarea.Model
-	suggestions        []string
-	suggestionBase     []string
+	runtime            *app.Runtime
+	savedInput         string
 	mentionSuggestions []string
+	suggestionBase     []string
+	history            []string
+	suggestions        []string
 	mentionIndex       int
 	selectedSuggestion int
-	runtime            *app.Runtime
 	width              int
 	height             int
-	thinking           bool
-	history            []string
 	historyIndex       int
-	savedInput         string
+	thinking           bool
 }
 
 func NewComposerModel(runtime *app.Runtime) ComposerModel {

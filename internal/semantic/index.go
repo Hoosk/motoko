@@ -25,8 +25,8 @@ const (
 )
 
 type Index struct {
-	mu           sync.RWMutex
 	lastSnapshot *Snapshot
+	mu           sync.RWMutex
 }
 
 func NewIndex() *Index {
@@ -84,8 +84,8 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		if walkErr != nil {
 			return nil
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
@@ -115,8 +115,8 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		if !isSupported(rel) {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxIndexedFileSize {
+		info, infoErr := d.Info()
+		if infoErr != nil || info.Size() > maxIndexedFileSize {
 			return nil
 		}
 		content, err := os.ReadFile(path)

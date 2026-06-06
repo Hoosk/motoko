@@ -72,10 +72,10 @@ type Action struct {
 type TaskEvent struct {
 	ID       string
 	Command  string
-	Done     bool
-	ExitCode int
 	Output   string
+	ExitCode int
 	Duration time.Duration
+	Done     bool
 }
 
 type TaskEventResult struct {
@@ -84,10 +84,10 @@ type TaskEventResult struct {
 }
 
 type Response struct {
-	Entries []Entry
 	Action  *Action
-	Clear   bool
 	Signal  string
+	Entries []Entry
+	Clear   bool
 }
 
 type pendingShell struct {
@@ -95,37 +95,36 @@ type pendingShell struct {
 }
 
 type SubagentInfo struct {
+	StartedAt time.Time
 	Name      string
 	Prompt    string
-	StartedAt time.Time
 }
 
 type Runtime struct {
-	mode              Mode
-	inputMode         InputMode
-	pending           *pendingShell
-	tools             *tools.Registry
+	brainInitErr      error
+	backgroundCtx     context.Context
+	currentSession    *session.Session
+	brain             *brain.Brain
 	agent             *agent.Agent
 	newProviderClient func(config.ProviderConfig) (provider.Client, error)
 	config            *config.AppConfig
-	debug             bool
+	tasks             *TaskManager
 	semantic          *semantic.Index
 	tachikomas        *tachikoma.Manager
+	activeSubagents   map[string]*SubagentInfo
+	pending           *pendingShell
+	tools             *tools.Registry
+	mode              Mode
+	workspaceID       string
+	inputMode         InputMode
 	currentAgentName  string
 	availableAgents   []agent.AgentDef
-	currentSession    *session.Session
-	brain             *brain.Brain
-	brainInitErr      error
-	workspaceID       string
-	contextWindow     int
-	wasResumed        bool
 	mentionedFiles    []string
 	availableSkills   []skills.Skill
-	backgroundCtx     context.Context
-
-	subagentsMu     sync.Mutex
-	activeSubagents map[string]*SubagentInfo
-	tasks           *TaskManager
+	contextWindow     int
+	subagentsMu       sync.Mutex
+	wasResumed        bool
+	debug             bool
 }
 
 type RuntimeOptions struct {
@@ -167,7 +166,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		config:            cfg,
 		semantic:          semantic.NewIndex(),
 		tachikomas:        tachikoma.NewManager(),
-		currentAgentName:  "plan",
+		currentAgentName:  string(ModePlan),
 		availableAgents:   allAgents,
 		workspaceID:       workspaceID,
 		availableSkills:   sList,

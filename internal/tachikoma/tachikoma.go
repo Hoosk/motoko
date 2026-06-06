@@ -13,10 +13,10 @@ const updatesBufferSize = 32
 
 // Update represents a status update from a Tachikoma
 type Update struct {
+	Payload interface{}
 	Name    string
 	Status  string
 	Done    bool
-	Payload interface{}
 }
 
 // Tachikoma is the interface for background context gatherers
@@ -27,11 +27,11 @@ type Tachikoma interface {
 
 // Manager coordinates multiple Tachikomas
 type Manager struct {
-	tachikomas []Tachikoma
 	updates    chan Update
+	state      map[string]Update
+	tachikomas []Tachikoma
 	wg         sync.WaitGroup
 	mu         sync.RWMutex
-	state      map[string]Update
 }
 
 func NewManager() *Manager {

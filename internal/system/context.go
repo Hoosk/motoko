@@ -14,25 +14,22 @@ type SkillDef struct {
 }
 
 type ContextInfo struct {
-	Workspace        string
+	Signals          map[string]string
+	OnDemandSignals  map[string]string
 	Path             string
 	GitBranch        string
-	HasGit           bool
-	GitDirty         bool
-	Staged           int
-	Unstaged         int
-	Untracked        int
-	ModifiedFiles    []string // List of files with changes
-	Signals          map[string]string
-	SemanticSummary  string
-	RelevantFiles    []string
-	RelevantSnippets []string
-	AvailableSkills  []SkillDef
 	BrainSummary     string
-
-	// OnDemandSignals contains references to heavy data that isn't included in the prompt
-	// but is available if the agent requests it via tools.
-	OnDemandSignals map[string]string
+	Workspace        string
+	SemanticSummary  string
+	RelevantSnippets []string
+	ModifiedFiles    []string
+	RelevantFiles    []string
+	AvailableSkills  []SkillDef
+	Untracked        int
+	Unstaged         int
+	Staged           int
+	GitDirty         bool
+	HasGit           bool
 }
 
 func GetContextInfo() ContextInfo {

@@ -25,10 +25,10 @@ type TaskEventMsg struct {
 }
 
 type AgentResultMsg struct {
-	Prompt    string
-	Result    agent.Result
-	Assistant string
 	Err       error
+	Prompt    string
+	Assistant string
+	Result    agent.Result
 }
 
 type agentStreamBuffer struct {
@@ -37,23 +37,23 @@ type agentStreamBuffer struct {
 }
 
 type Model struct {
+	notificationTime time.Time
 	runtime          *app.Runtime
-	timeline         TimelineModel
+	agentBuffer      *agentStreamBuffer
+	agentStream      chan app.AgentStreamEvent
 	composer         ComposerModel
-	footer           FooterModel
+	providerForm     providerForm
+	taskStatus       string
+	notificationText string
+	modelPicker      modelPickerState
+	modePopup        modePopupState
+	sessionPicker    sessionPickerState
 	sidebar          SidebarModel
+	footer           FooterModel
+	timeline         TimelineModel
 	width            int
 	height           int
 	notificationShow bool
-	notificationText string
-	notificationTime time.Time
-	providerForm     providerForm
-	modelPicker      modelPickerState
-	sessionPicker    sessionPickerState
-	agentStream      chan app.AgentStreamEvent
-	agentBuffer      *agentStreamBuffer
-	taskStatus       string
-	modePopup        modePopupState
 	showHelp         bool
 	showTools        bool
 	showSidebar      bool

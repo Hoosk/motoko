@@ -114,10 +114,10 @@ type BatchRequestItem struct {
 type BatchResponse struct {
 	ID               string
 	ProcessingStatus string
+	ResultsURL       string
 	ProcessingCount  int
 	SucceededCount   int
 	ErroredCount     int
-	ResultsURL       string
 }
 
 type BatchClient interface {

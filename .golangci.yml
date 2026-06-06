@@ -16,6 +16,8 @@ linters:
       severity: low
     govet:
       enable-all: true
+    goconst:
+      ignore-tests: true
   exclusions:
     generated: lax
     presets:

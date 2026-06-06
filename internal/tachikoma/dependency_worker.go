@@ -161,9 +161,9 @@ func parseGoMod(content string) (string, []string) {
 
 func parsePackageJSON(content string) (string, []string) {
 	var data struct {
-		Name            string            `json:"name"`
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
+		Name            string            `json:"name"`
 	}
 	err := json.Unmarshal([]byte(content), &data)
 	if err != nil {
@@ -266,4 +266,3 @@ func parseGemfile(content string) []string {
 	sort.Strings(deps)
 	return deps
 }
-

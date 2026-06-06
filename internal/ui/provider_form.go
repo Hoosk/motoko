@@ -11,14 +11,14 @@ import (
 )
 
 type providerForm struct {
-	active      bool
-	fieldIndex  int
-	presetIndex int
 	name        string
 	baseURL     string
 	apiKey      string
-	loading     bool
 	status      string
+	fieldIndex  int
+	presetIndex int
+	active      bool
+	loading     bool
 }
 
 func (f *providerForm) Open(runtime *app.Runtime) {

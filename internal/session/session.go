@@ -71,7 +71,8 @@ func (s *Session) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	err = os.MkdirAll(dir, 0o700)
+	if err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(s, "", "  ")

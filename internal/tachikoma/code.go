@@ -8,8 +8,8 @@ import (
 )
 
 type CodeTachikoma struct {
-	interval time.Duration
 	index    *semantic.Index
+	interval time.Duration
 }
 
 func NewCodeTachikoma(index *semantic.Index, interval time.Duration) *CodeTachikoma {

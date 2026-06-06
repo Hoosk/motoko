@@ -27,11 +27,11 @@ func NewClient(cfg config.ProviderConfig) (Client, error) {
 }
 
 type baseClient struct {
+	httpClient   *http.Client
 	providerName string
 	baseURL      string
 	apiKey       string
 	model        string
-	httpClient   *http.Client
 }
 
 func newBaseClient(providerName, baseURL, apiKey, model string) baseClient {

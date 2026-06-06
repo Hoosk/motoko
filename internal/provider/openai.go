@@ -19,8 +19,8 @@ import (
 
 type openAIClient struct {
 	baseClient
-	thinkingBudget int
 	sdkClient      openai.Client
+	thinkingBudget int
 	forceChat      bool
 }
 

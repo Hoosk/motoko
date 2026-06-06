@@ -16,12 +16,12 @@ const (
 )
 
 type modelPickerState struct {
-	active          bool
-	step            int
 	models          []provider.ModelInfo
+	thinkingBudgets []int
+	step            int
 	index           int
 	thinkingIndex   int
-	thinkingBudgets []int
+	active          bool
 }
 
 func (p *modelPickerState) Open(models []provider.ModelInfo) {

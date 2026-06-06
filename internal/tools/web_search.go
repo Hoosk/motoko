@@ -77,57 +77,49 @@ func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
 	}, nil
 }
 
-func (t *WebSearchTool) fetchMojeek(ctx context.Context, query string) ([]SearchResponseItem, error) {
-	searchURL := fmt.Sprintf("https://www.mojeek.com/search?q=%s", url.QueryEscape(query))
+func (t *WebSearchTool) fetchHTML(ctx context.Context, searchURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status code %d", resp.StatusCode)
+		return "", fmt.Errorf("status code %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	return parseMojeekHTML(string(bodyBytes)), nil
+	return string(bodyBytes), nil
+}
+
+func (t *WebSearchTool) fetchMojeek(ctx context.Context, query string) ([]SearchResponseItem, error) {
+	searchURL := fmt.Sprintf("https://www.mojeek.com/search?q=%s", url.QueryEscape(query))
+	html, err := t.fetchHTML(ctx, searchURL)
+	if err != nil {
+		return nil, err
+	}
+	return parseMojeekHTML(html), nil
 }
 
 func (t *WebSearchTool) fetchDuckDuckGo(ctx context.Context, query string) ([]SearchResponseItem, error) {
 	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	html, err := t.fetchHTML(ctx, searchURL)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status code %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseDuckDuckGoHTML(string(bodyBytes)), nil
+	return parseDuckDuckGoHTML(html), nil
 }
+
 
 func parseMojeekHTML(html string) []SearchResponseItem {
 	var items []SearchResponseItem

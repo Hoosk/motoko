@@ -57,11 +57,11 @@ type chatCompletionDelta struct {
 }
 
 type chatCompletionToolCall struct {
+	RawMap   map[string]any             `json:"-"`
+	Function chatCompletionToolFunction `json:"function"`
 	ID       string                     `json:"id"`
 	Type     string                     `json:"type"`
-	Function chatCompletionToolFunction `json:"function"`
 	Raw      json.RawMessage            `json:"-"`
-	RawMap   map[string]any             `json:"-"`
 }
 
 func (c *chatCompletionToolCall) UnmarshalJSON(data []byte) error {
@@ -77,11 +77,11 @@ func (c *chatCompletionToolCall) UnmarshalJSON(data []byte) error {
 }
 
 type chatCompletionToolCallDelta struct {
-	Index    int                        `json:"index"`
+	Function chatCompletionToolFunction `json:"function"`
 	ID       string                     `json:"id"`
 	Type     string                     `json:"type"`
-	Function chatCompletionToolFunction `json:"function"`
 	Raw      json.RawMessage            `json:"-"`
+	Index    int                        `json:"index"`
 }
 
 func (c *chatCompletionToolCallDelta) UnmarshalJSON(data []byte) error {

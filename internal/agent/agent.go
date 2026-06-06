@@ -19,13 +19,13 @@ import (
 const defaultMaxToolIterations = 24
 
 type Result struct {
-	Assistant  string
-	Steps      []Step
-	Usage      provider.Usage
-	AgentLabel string
-	Duration   time.Duration
 	Context    ContextSnapshot
+	Assistant  string
+	AgentLabel string
+	Steps      []Step
 	History    []provider.ConversationItem
+	Usage      provider.Usage
+	Duration   time.Duration
 }
 
 type ContextSnapshot struct {
@@ -44,8 +44,8 @@ type Step struct {
 type Agent struct {
 	provider    provider.Client
 	tools       *tools.Registry
-	debug       bool
 	agentSystem string
+	debug       bool
 }
 
 type StreamEvent struct {
@@ -141,9 +141,9 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		}
 
 		type toolResult struct {
-			idx         int
-			steps       []Step
 			historyItem provider.ConversationItem
+			steps       []Step
+			idx         int
 		}
 		ch := make(chan toolResult, len(pending))
 		var wg sync.WaitGroup

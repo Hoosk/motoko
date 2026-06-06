@@ -85,8 +85,8 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
-			Choices []chatCompletionChoice `json:"choices"`
 			Usage   *chatCompletionUsage   `json:"usage"`
+			Choices []chatCompletionChoice `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return err
