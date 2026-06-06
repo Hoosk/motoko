@@ -94,7 +94,6 @@ func Decrypt(ciphertext string) (string, error) {
 		ciphertext = ciphertext[4:]
 	}
 
-
 	key, err := GenerateOrLoadKey()
 	if err != nil {
 		return "", err

@@ -61,6 +61,35 @@ func TestTimelineStreamingKeepsToolEventsSeparate(t *testing.T) {
 	}
 }
 
+func TestTimelineHidesWebToolOutputs(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+	m.SetStreaming(true)
+
+	// A normal tool should print its full output
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "read", Content: "contenido completo"}})
+	// Web tools should print a summarized message
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "web_fetch", Content: "lorem ipsum dolor"}})
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "web_search", Content: "some results here"}})
+
+	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
+	if !strings.Contains(got, "contenido completo") {
+		t.Fatalf("expected full output for non-web tools, got %q", got)
+	}
+	if strings.Contains(got, "lorem ipsum dolor") {
+		t.Fatalf("expected web_fetch output to be hidden/summarized, got %q", got)
+	}
+	if !strings.Contains(got, "[web_fetch: 17 characters]") {
+		t.Fatalf("expected web_fetch summary, got %q", got)
+	}
+	if strings.Contains(got, "some results here") {
+		t.Fatalf("expected web_search output to be hidden/summarized, got %q", got)
+	}
+	if !strings.Contains(got, "[web_search: 17 characters]") {
+		t.Fatalf("expected web_search summary, got %q", got)
+	}
+}
+
 func TestTimelineUpdateIgnoresNonStreamingState(t *testing.T) {
 	m := NewTimelineModel()
 	m.SyncLayout(80, 20)

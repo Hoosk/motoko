@@ -17,10 +17,11 @@ const (
 	ProviderKindAnthropic        ProviderKind = "anthropic"
 	ProviderKindGemini           ProviderKind = "gemini"
 
-	ProviderPresetOpenAI     ProviderPreset = "openai"
-	ProviderPresetOpenRouter ProviderPreset = "openrouter"
-	ProviderPresetAnthropic  ProviderPreset = "anthropic"
-	ProviderPresetGemini     ProviderPreset = "gemini"
+	ProviderPresetOpenAI           ProviderPreset = "openai"
+	ProviderPresetOpenRouter       ProviderPreset = "openrouter"
+	ProviderPresetAnthropic        ProviderPreset = "anthropic"
+	ProviderPresetGemini           ProviderPreset = "gemini"
+	ProviderPresetOpenAICompatible ProviderPreset = "openai-compatible"
 )
 
 type ProviderConfig struct {
@@ -132,7 +133,6 @@ func (c *AppConfig) Save() error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-
 func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
 	provider = NormalizeProvider(provider)
 
@@ -216,6 +216,8 @@ func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
 		return "https://api.anthropic.com"
 	case ProviderPresetGemini:
 		return "https://generativelanguage.googleapis.com/v1beta/openai/"
+	case ProviderPresetOpenAICompatible:
+		return "http://localhost:11434/v1"
 	default:
 		return ""
 	}
@@ -245,7 +247,7 @@ func UniqueSortedKeep(items []string, extra ...string) []string {
 }
 
 func ValidProviderPresets() []ProviderPreset {
-	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini}
+	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible}
 }
 
 func DefaultProviderName(preset ProviderPreset) string {
@@ -258,7 +260,7 @@ func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
 
 	// 1. Exact preset match
 	switch p {
-	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini:
+	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible:
 		return p
 	}
 
@@ -290,7 +292,7 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 
 	// 2. Kind from normalized preset
 	switch normalizePreset(preset, kind) {
-	case ProviderPresetOpenAI, ProviderPresetOpenRouter:
+	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetOpenAICompatible:
 		return ProviderKindOpenAICompatible
 	case ProviderPresetAnthropic:
 		return ProviderKindAnthropic

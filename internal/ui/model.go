@@ -56,15 +56,17 @@ type Model struct {
 	modePopup        modePopupState
 	showHelp         bool
 	showTools        bool
+	showSidebar      bool
 }
 
 func NewModel(runtime *app.Runtime) Model {
 	m := Model{
-		runtime:  runtime,
-		timeline: NewTimelineModel(),
-		composer: NewComposerModel(runtime),
-		footer:   NewFooterModel(runtime),
-		sidebar:  NewSidebarModel(runtime),
+		runtime:     runtime,
+		timeline:    NewTimelineModel(),
+		composer:    NewComposerModel(runtime),
+		footer:      NewFooterModel(runtime),
+		sidebar:     NewSidebarModel(runtime),
+		showSidebar: true,
 	}
 
 	// Load startup entries (e.g. resumed session history)
@@ -345,9 +347,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.providerForm.Open(m.runtime)
 		case "ctrl+m":
 			cmds = append(cmds, m.listModels())
-		case "ctrl+s":
+		case "ctrl+o":
 			m.sessionPicker.Open()
 			cmds = append(cmds, m.listSessions())
+		case "ctrl+s", "alt+s":
+			m.showSidebar = !m.showSidebar
+			m.SyncLayout()
 		case "ctrl+a":
 			m.modePopup.Open(m.runtime)
 		case "ctrl+t":
@@ -456,25 +461,27 @@ func (m Model) View() string {
 
 	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
 
-	// Dynamic popup width: adapt to terminal, capped at 72
+	// Dynamic popup width: adapt to terminal, capped at 50
 	popupWidth := m.width - 10
-	if popupWidth > 72 {
-		popupWidth = 72
+	if popupWidth > 50 {
+		popupWidth = 50
 	}
 	if popupWidth < 30 {
 		popupWidth = 30
 	}
 	popupStyle := styles.PopupStyle.Width(popupWidth)
 
-	if m.notificationShow {
-		toast := styles.PopupStyle.
-			Padding(0, 1).
-			Width(30).
-			BorderForeground(styles.MainNeon).
-			Render(styles.BoldNeonStyle.Render("✓ ") +
-				styles.WhiteStyle.Render(m.notificationText))
-		base = overlayBase(base, toast, m.width, m.height)
-	} else if m.providerForm.active {
+	// Dynamic wide popup width: adapt to terminal, capped at 76
+	widePopupWidth := m.width - 10
+	if widePopupWidth > 76 {
+		widePopupWidth = 76
+	}
+	if widePopupWidth < 40 {
+		widePopupWidth = 40
+	}
+	widePopupStyle := styles.PopupStyle.Width(widePopupWidth)
+
+	if m.providerForm.active {
 		popup := popupStyle.Render(m.providerForm.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.modelPicker.active {
@@ -484,14 +491,24 @@ func (m Model) View() string {
 		popup := popupStyle.Render(m.sessionPicker.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.modePopup.active {
-		popup := popupStyle.Render(m.modePopup.View())
+		popup := widePopupStyle.Render(m.modePopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.showTools {
-		popup := popupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
+		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.showHelp {
 		popup := popupStyle.Render(helpView())
 		base = overlayCenter(base, popup, m.width, m.height)
+	}
+
+	if m.notificationShow {
+		toast := styles.PopupStyle.
+			Padding(0, 1).
+			Width(30).
+			BorderForeground(styles.MainNeon).
+			Render(styles.BoldNeonStyle.Render("✓ ") +
+				styles.WhiteStyle.Render(m.notificationText))
+		base = overlayBase(base, toast, m.width, m.height)
 	}
 
 	lines := strings.Split(base, "\n")
@@ -510,7 +527,7 @@ func (m *Model) SyncLayout() {
 	if m.width < 110 {
 		sidebarWidth = 28
 	}
-	if m.width < 90 {
+	if m.width < 90 || !m.showSidebar {
 		sidebarWidth = 0
 	}
 	mainWidth := m.width - sidebarWidth

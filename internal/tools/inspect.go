@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -78,6 +79,24 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 				output += fmt.Sprintf("\n- %s:\n", path)
 				for _, c := range changes {
 					output += fmt.Sprintf("    [%s] %s %s\n", strings.ToUpper(c.Type), c.Kind, c.Name)
+				}
+			}
+		case tachikoma.ProjectDependencies:
+			output += "Detected Dependencies by Ecosystem:\n"
+			if len(p.Ecosystems) == 0 {
+				output += "  No dependencies detected."
+			} else {
+				var ecosystems []string
+				for eco := range p.Ecosystems {
+					ecosystems = append(ecosystems, eco)
+				}
+				sort.Strings(ecosystems)
+				for _, eco := range ecosystems {
+					output += fmt.Sprintf("  %s:\n", eco)
+					deps := p.Ecosystems[eco]
+					for _, dep := range deps {
+						output += fmt.Sprintf("    - %s\n", dep)
+					}
 				}
 			}
 		default:

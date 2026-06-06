@@ -153,6 +153,9 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 			m.clearSuggestionCycle()
 			m.historyIndex = -1
 			m.savedInput = ""
+			if m.runtime != nil && m.runtime.Tachikomas() != nil {
+				m.runtime.Tachikomas().SetActivePrompt(m.textarea.Value())
+			}
 		}
 		m.refreshSuggestions()
 	}
@@ -441,7 +444,6 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	}
 	return lipgloss.NewStyle().MarginTop(1).Render(strings.Join(rows, "\n"))
 }
-
 
 func (m *ComposerModel) SetThinking(thinking bool) {
 	m.thinking = thinking

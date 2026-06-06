@@ -79,4 +79,3 @@ func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language strin
 	})
 	return symbols, imports, exports
 }
-

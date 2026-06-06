@@ -52,3 +52,14 @@ func TestPopulateGitStatusCountsEntries(t *testing.T) {
 		t.Fatalf("git counters should never be negative: %#v", info)
 	}
 }
+
+func TestGetGitInfo(t *testing.T) {
+	info := GetGitInfo(".")
+	if !info.HasGit {
+		t.Log("Note: running test in non-git workspace")
+		return
+	}
+	if info.GitBranch == "" {
+		t.Error("expected non-empty GitBranch when HasGit is true")
+	}
+}

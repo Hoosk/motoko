@@ -19,4 +19,3 @@ func entriesForProviderModels(models []provider.ModelInfo, err error) []app.Entr
 		Text: fmt.Sprintf("%d modelos cargados. Usa /models para verlos o /models <modelo> para seleccionarlo.", len(models)),
 	}}
 }
-

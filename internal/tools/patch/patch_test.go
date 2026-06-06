@@ -194,4 +194,3 @@ func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
 		})
 	}
 }
-

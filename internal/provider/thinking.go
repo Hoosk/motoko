@@ -33,7 +33,7 @@ func budgetToReasoningEffort(budget int) string {
 // claude-opus-4-7 and newer generation models require adaptive thinking.
 func isAnthropicAdaptiveThinkingModel(model string) bool {
 	lower := strings.ToLower(model)
-	return strings.Contains(lower, "opus-4-7")
+	return strings.Contains(lower, "opus-4-7") || strings.Contains(lower, "opus-4-8") || strings.Contains(lower, "opus-4-9")
 }
 
 // isGemini3Model reports whether the model belongs to the Gemini 3.x series,

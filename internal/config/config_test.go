@@ -193,3 +193,15 @@ func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
 	}
 }
 
+func TestNormalizeProviderSupportsOpenAICompatiblePreset(t *testing.T) {
+	got := NormalizeProvider(ProviderConfig{Preset: ProviderPresetOpenAICompatible})
+	if got.Kind != ProviderKindOpenAICompatible {
+		t.Fatalf("expected openai-compatible preset to map to openai-compatible, got %q", got.Kind)
+	}
+	if got.BaseURL != "http://localhost:11434/v1" {
+		t.Fatalf("expected openai-compatible default base url, got %q", got.BaseURL)
+	}
+	if got.Name != "openai-compatible" {
+		t.Fatalf("expected openai-compatible default name, got %q", got.Name)
+	}
+}

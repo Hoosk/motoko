@@ -179,6 +179,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
 	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
 	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
+	r.tachikomas.Add(tachikoma.NewSearchTachikoma(r.semantic))
+	r.tachikomas.Add(tachikoma.NewDependencyTachikoma())
 
 	// Register tools that depend on tachikomas
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -81,7 +82,11 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
 					}
 				case "output":
-					m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
+					if event.Title == "web_search" || event.Title == "web_fetch" {
+						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("[%s: %d characters]", event.Title, len(event.Content))})
+					} else {
+						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
+					}
 				case "error":
 					m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
 				case "debug":

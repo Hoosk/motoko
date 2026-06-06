@@ -30,6 +30,17 @@ func (f *providerForm) Open(runtime *app.Runtime) {
 	f.fieldIndex = 0
 }
 
+func (f *providerForm) isOpenAICompatible(runtime *app.Runtime) bool {
+	return f.currentProviderPreset(runtime) == config.ProviderPresetOpenAICompatible
+}
+
+func (f *providerForm) fieldCount(runtime *app.Runtime) int {
+	if f.isOpenAICompatible(runtime) {
+		return 6
+	}
+	return 4
+}
+
 func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -41,12 +52,12 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			f.active = false
 			return nil
 		case "tab", "down", "ctrl+n":
-			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount()
+			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
 			return nil
 		case "up", "ctrl+p":
 			f.fieldIndex--
 			if f.fieldIndex < 0 {
-				f.fieldIndex = f.fieldCount() - 1
+				f.fieldIndex = f.fieldCount(runtime) - 1
 			}
 			return nil
 		case "left":
@@ -57,6 +68,16 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 					f.presetIndex = len(presets) - 1
 				}
 				f.syncPreset(runtime)
+			} else {
+				saveIdx := 2
+				cancelIdx := 3
+				if f.isOpenAICompatible(runtime) {
+					saveIdx = 4
+					cancelIdx = 5
+				}
+				if f.fieldIndex == cancelIdx {
+					f.fieldIndex = saveIdx
+				}
 			}
 			return nil
 		case "right":
@@ -64,11 +85,32 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				presets := runtime.ProviderPresets()
 				f.presetIndex = (f.presetIndex + 1) % len(presets)
 				f.syncPreset(runtime)
+			} else {
+				saveIdx := 2
+				cancelIdx := 3
+				if f.isOpenAICompatible(runtime) {
+					saveIdx = 4
+					cancelIdx = 5
+				}
+				if f.fieldIndex == saveIdx {
+					f.fieldIndex = cancelIdx
+				}
 			}
 			return nil
 		case "backspace":
-			if f.fieldIndex == 1 {
-				f.apiKey = trimLastRune(f.apiKey)
+			if f.isOpenAICompatible(runtime) {
+				switch f.fieldIndex {
+				case 1:
+					f.name = trimLastRune(f.name)
+				case 2:
+					f.baseURL = trimLastRune(f.baseURL)
+				case 3:
+					f.apiKey = trimLastRune(f.apiKey)
+				}
+			} else {
+				if f.fieldIndex == 1 {
+					f.apiKey = trimLastRune(f.apiKey)
+				}
 			}
 			return nil
 		case "enter":
@@ -77,8 +119,19 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			if len(msg.Runes) == 0 {
 				return nil
 			}
-			if f.fieldIndex == 1 {
-				f.apiKey += string(msg.Runes)
+			if f.isOpenAICompatible(runtime) {
+				switch f.fieldIndex {
+				case 1:
+					f.name += string(msg.Runes)
+				case 2:
+					f.baseURL += string(msg.Runes)
+				case 3:
+					f.apiKey += string(msg.Runes)
+				}
+			} else {
+				if f.fieldIndex == 1 {
+					f.apiKey += string(msg.Runes)
+				}
 			}
 			return nil
 		}
@@ -92,28 +145,42 @@ func (f *providerForm) View(runtime *app.Runtime) string {
 	}
 	preset := f.currentProviderPreset(runtime)
 	presetLine := renderProviderField(0, f.fieldIndex,
-		"Provider", string(preset)+"  ◀ ▶")
-	apiKeyLine := renderProviderField(1, f.fieldIndex,
-		"API Key", maskSecret(f.apiKey))
+		"Provider", string(preset)+"  < >")
 
-	saveBtn := renderProviderButton(2, f.fieldIndex, buttonLabel(f.loading, "save"))
-	cancelBtn := renderProviderButton(3, f.fieldIndex, "cancel")
+	var lines []string
+	lines = append(lines, styles.PopupTitleStyle.Render("Add Provider"))
+	lines = append(lines, styles.PopupMutedStyle.Render("Select a provider and enter details."))
+	lines = append(lines, "")
+	lines = append(lines, presetLine)
+
+	var saveBtn, cancelBtn string
+
+	if f.isOpenAICompatible(runtime) {
+		nameLine := renderProviderField(1, f.fieldIndex, "Name", f.name)
+		urlLine := renderProviderField(2, f.fieldIndex, "Base URL", f.baseURL)
+		apiKeyLine := renderProviderField(3, f.fieldIndex, "API Key", maskSecret(f.apiKey))
+		lines = append(lines, nameLine, urlLine, apiKeyLine)
+
+		saveBtn = renderProviderButton(4, f.fieldIndex, buttonLabel(f.loading, "save"))
+		cancelBtn = renderProviderButton(5, f.fieldIndex, "cancel")
+	} else {
+		apiKeyLine := renderProviderField(1, f.fieldIndex, "API Key", maskSecret(f.apiKey))
+		lines = append(lines, apiKeyLine)
+
+		saveBtn = renderProviderButton(2, f.fieldIndex, buttonLabel(f.loading, "save"))
+		cancelBtn = renderProviderButton(3, f.fieldIndex, "cancel")
+	}
+
+	lines = append(lines, "")
 	buttons := lipgloss.JoinHorizontal(lipgloss.Left, saveBtn, "   ", cancelBtn)
+	lines = append(lines, buttons)
+	lines = append(lines, "")
+	if f.status != "" {
+		lines = append(lines, styles.SystemStyle.Render(f.status))
+	}
 
-	return strings.Join([]string{
-		styles.PopupTitleStyle.Render("Add Provider"),
-		styles.PopupMutedStyle.Render("Select a provider and enter your API key."),
-		"",
-		presetLine,
-		apiKeyLine,
-		"",
-		buttons,
-		"",
-		styles.SystemStyle.Render(f.status),
-	}, "\n")
+	return strings.Join(lines, "\n")
 }
-
-func (f *providerForm) fieldCount() int { return 4 }
 
 func (f *providerForm) currentProviderPreset(runtime *app.Runtime) config.ProviderPreset {
 	presets := runtime.ProviderPresets()
@@ -128,6 +195,14 @@ func (f *providerForm) currentProviderPreset(runtime *app.Runtime) config.Provid
 
 func (f *providerForm) configFromForm(runtime *app.Runtime) config.ProviderConfig {
 	preset := f.currentProviderPreset(runtime)
+	if f.isOpenAICompatible(runtime) {
+		return config.NormalizeProvider(config.ProviderConfig{
+			Name:    strings.TrimSpace(f.name),
+			Preset:  preset,
+			BaseURL: strings.TrimSpace(f.baseURL),
+			APIKey:  strings.TrimSpace(f.apiKey),
+		})
+	}
 	return config.NormalizeProvider(config.ProviderConfig{
 		Name:    config.DefaultProviderName(preset),
 		Preset:  preset,
@@ -137,15 +212,33 @@ func (f *providerForm) configFromForm(runtime *app.Runtime) config.ProviderConfi
 }
 
 func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
+	saveIdx := 2
+	cancelIdx := 3
+	if f.isOpenAICompatible(runtime) {
+		saveIdx = 4
+		cancelIdx = 5
+	}
+
 	switch f.fieldIndex {
-	case 3: // Cancel
+	case cancelIdx: // Cancel
 		f.active = false
 		return nil
-	case 2: // Save
+	case saveIdx: // Save
 		cfg := f.configFromForm(runtime)
-		if strings.TrimSpace(cfg.APIKey) == "" {
-			f.status = "API Key is required."
-			return nil
+		if f.isOpenAICompatible(runtime) {
+			if strings.TrimSpace(cfg.Name) == "" {
+				f.status = "Name is required."
+				return nil
+			}
+			if strings.TrimSpace(cfg.BaseURL) == "" {
+				f.status = "Base URL is required."
+				return nil
+			}
+		} else {
+			if strings.TrimSpace(cfg.APIKey) == "" {
+				f.status = "API Key is required."
+				return nil
+			}
 		}
 		if err := runtime.SaveProvider(cfg, true); err != nil {
 			f.status = err.Error()
@@ -157,31 +250,46 @@ func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
 			loadProviderModels(runtime, cfg),
 		)
 	default:
-		f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount()
+		f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
 		return nil
 	}
 }
 
 func (f *providerForm) syncPreset(runtime *app.Runtime) {
 	preset := f.currentProviderPreset(runtime)
-	f.name = config.DefaultProviderName(preset)
-	f.baseURL = config.DefaultBaseURL(preset, "")
+	if preset == config.ProviderPresetOpenAICompatible {
+		f.name = ""
+		f.baseURL = "http://localhost:11434/v1"
+	} else {
+		f.name = config.DefaultProviderName(preset)
+		f.baseURL = config.DefaultBaseURL(preset, "")
+	}
 }
 
 func renderProviderField(index, active int, label, value string) string {
-	line := styles.PopupFieldLabelStyle.Render(label+": ") + styles.PopupFieldValueStyle.Render(value)
 	if index == active {
-		return styles.PopupSelectionStyle.Render(line)
+		return styles.PopupSelectionStyle.Render(label + ": " + value)
 	}
-	return line
+	return styles.PopupFieldLabelStyle.Render(label+": ") + styles.PopupFieldValueStyle.Render(value)
 }
 
+var (
+	activeButtonStyle = lipgloss.NewStyle().
+				Background(styles.MainNeon).
+				Foreground(lipgloss.Color("#000000")).
+				Bold(true)
+	inactiveButtonStyle = lipgloss.NewStyle().
+				Background(styles.BorderColor).
+				Foreground(styles.Gray).
+				Bold(true)
+)
+
 func renderProviderButton(index, active int, label string) string {
-	text := "[ " + label + " ]"
+	text := " " + strings.ToUpper(label) + " "
 	if index == active {
-		return styles.PopupSelectionStyle.Render(text)
+		return activeButtonStyle.Render(text)
 	}
-	return styles.PopupFieldLabelStyle.Render(text)
+	return inactiveButtonStyle.Render(text)
 }
 
 func maskSecret(value string) string {

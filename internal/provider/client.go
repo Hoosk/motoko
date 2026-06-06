@@ -50,6 +50,19 @@ func (c baseClient) Configured() bool {
 	return c.baseURL != "" && c.apiKey != "" && c.model != ""
 }
 
+func (c baseClient) ConfigurationError() error {
+	if c.baseURL == "" {
+		return fmt.Errorf("provider no configurado: URL base vacía")
+	}
+	if c.apiKey == "" {
+		return fmt.Errorf("provider no configurado: API Key vacía")
+	}
+	if c.model == "" {
+		return fmt.Errorf("provider no configurado: modelo no especificado")
+	}
+	return nil
+}
+
 func (c baseClient) listReady() bool {
 	return c.baseURL != "" && c.apiKey != ""
 }

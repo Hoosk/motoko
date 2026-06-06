@@ -100,7 +100,6 @@ func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummar
 	return result
 }
 
-
 func fallbackFiles(s Snapshot, limit int) []FileSummary {
 	if limit <= 0 {
 		return nil
@@ -323,4 +322,3 @@ func areConnected(a, b FileSummary) bool {
 	}
 	return false
 }
-

@@ -27,13 +27,14 @@ func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error
 	events, _ := WatchHelper(ctx, []string{".", ".git"}, 1*time.Second)
 
 	refresh := func() {
-		info := system.GetContextInfo()
+		baseInfo := system.GetContextInfo()
+		gitInfo := system.GetGitInfo(baseInfo.Path)
 		status := "git not detected"
-		if info.HasGit {
-			status = info.GitSummary()
+		if gitInfo.HasGit {
+			status = gitInfo.GitSummary()
 		}
 
-		publish(Update{Name: g.Name(), Status: status, Payload: info})
+		publish(Update{Name: g.Name(), Status: status, Payload: gitInfo})
 	}
 
 	// Initial refresh

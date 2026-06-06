@@ -276,6 +276,7 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		"--- OPERATING RULES ---",
 		"- TACHIKOMA FIRST: Always check '[Background Signals]' and '[Context]' sections before using any tool.",
 		"- AGENTS & DESIGN RULES: If 'AGENTS.md' guidelines are present, strictly follow them for code conventions, build and test setups. If 'DESIGN.md' specifications are present, strictly adhere to them for any UI, TUI, or visual styling.",
+		"- WEB SEARCH & FETCH PROTOCOL: When you use 'web_search', do not just rely on the search snippets. Always identify the most relevant URL(s) and use the 'web_fetch' tool to visit and read their full contents to obtain accurate details. Limit search and fetch activities to a maximum of 2-3 queries per task to avoid excessive network load.",
 		"- If a signal mentions 'available on-demand', use the 'inspect' tool for that worker before using 'read', 'grep', or 'bash'.",
 		"- Use tools only to explore parts of the codebase NOT already covered by the provided context.",
 		"- If you use a tool, request only one tool at a time. The system will return the result to you.",

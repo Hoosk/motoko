@@ -99,7 +99,11 @@ func (p modePopupState) View() string {
 			line += "  " + desc
 		}
 		if i == idx {
-			rows = append(rows, styles.PopupSelectionStyle.Render(line))
+			plainLine := a.Name
+			if a.System != "" {
+				plainLine += "  " + truncateAgentDesc(a.System, 60)
+			}
+			rows = append(rows, styles.PopupSelectionStyle.Render(plainLine))
 		} else {
 			rows = append(rows, line)
 		}

@@ -45,7 +45,23 @@ func GetContextInfo() ContextInfo {
 		info.Path = cwd
 	}
 
-	// Git Info
+	info.Signals = make(map[string]string)
+	info.OnDemandSignals = make(map[string]string)
+
+	return info
+}
+
+func GetGitInfo(workspacePath string) ContextInfo {
+	info := ContextInfo{
+		Path: workspacePath,
+	}
+	if workspacePath != "" {
+		info.Workspace = filepath.Base(workspacePath)
+	}
+
+	info.Signals = make(map[string]string)
+	info.OnDemandSignals = make(map[string]string)
+
 	// Try to get branch name
 	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	if info.Path != "" {

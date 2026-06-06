@@ -20,7 +20,6 @@ import (
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var thinkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-
 func writeClipboard(text string) error {
 	seq := osc52.New(text)
 	if os.Getenv("TMUX") != "" {
@@ -104,7 +103,7 @@ func helpView() string {
 	rows := [][]string{
 		{formatShortcut("enter", "send"), formatShortcut("tab", "focus shell")},
 		{formatShortcut("ctrl+p", "providers"), formatShortcut("ctrl+m", "models")},
-		{formatShortcut("ctrl+s", "sessions"), formatShortcut("ctrl+c", "exit")},
+		{formatShortcut("ctrl+o", "sessions"), formatShortcut("ctrl+s", "sidebar")},
 		{formatShortcut("ctrl+l", "clear"), formatShortcut("ctrl+r", "reset session")},
 		{formatShortcut("/", "commands"), formatShortcut("@", "mention file")},
 	}
@@ -159,7 +158,6 @@ func clamp(value, minValue, maxValue int) int {
 	}
 	return value
 }
-
 
 func truncateANSI(s string, maxCols int) string {
 	if maxCols <= 0 {
@@ -269,13 +267,15 @@ func overlayCenter(base, overlay string, width, height int) string {
 				leftPadding = strings.Repeat(" ", startX-leftWidth)
 			}
 
-			rightPadding := ""
 			rightStart := startX + oWidth
-			if rightStart < width {
-				rightPadding = strings.Repeat(" ", width-rightStart)
+			rightPart := rightPartANSI(baseLine, rightStart)
+			rightWidth := lipgloss.Width(rightPart)
+			rightPadding := ""
+			if rightStart+rightWidth < width {
+				rightPadding = strings.Repeat(" ", width-(rightStart+rightWidth))
 			}
 
-			res[i] = leftPart + leftPadding + oLine + rightPadding
+			res[i] = leftPart + leftPadding + oLine + rightPart + rightPadding
 		} else {
 			res[i] = baseLine
 		}
@@ -283,10 +283,42 @@ func overlayCenter(base, overlay string, width, height int) string {
 	return strings.Join(res, "\n")
 }
 
+func rightPartANSI(str string, startCol int) string {
+	runes := []rune(str)
+	var out strings.Builder
+	col := 0
+	i := 0
+	for i < len(runes) {
+		r := runes[i]
+		if r == '\x1b' {
+			j := i + 1
+			for j < len(runes) {
+				if (runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z') {
+					j++
+					break
+				}
+				j++
+			}
+			out.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+		rw := runewidth.RuneWidth(r)
+		if rw == 0 {
+			rw = 1
+		}
+		if col >= startCol {
+			out.WriteRune(r)
+		}
+		col += rw
+		i++
+	}
+	return out.String()
+}
+
 func stripANSI(value string) string {
 	return ansiPattern.ReplaceAllString(value, "")
 }
-
 
 func truncate(s string, maxLen int) string {
 	if maxLen <= 0 {
@@ -297,4 +329,3 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen-1] + "…"
 }
-
