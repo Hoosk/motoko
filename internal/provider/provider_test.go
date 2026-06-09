@@ -21,7 +21,7 @@ func TestNewClientUsesNormalizedProviderKinds(t *testing.T) {
 	}
 }
 
-func TestResponseFromTextKekeepsUsageForPlainText(t *testing.T) {
+func TestResponseFromTextKeepsUsageForPlainText(t *testing.T) {
 	resp := responseFromText("hola", Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5})
 	if resp.FinalText != "hola" || resp.Usage.TotalTokens != 5 {
 		t.Fatalf("unexpected text response %#v", resp)
