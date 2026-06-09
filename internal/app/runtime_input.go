@@ -14,6 +14,10 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 		return Response{}
 	}
 
+	if r.tachikomas != nil {
+		r.tachikomas.SetActivePrompt(trimmed)
+	}
+
 	if strings.HasPrefix(trimmed, "/") {
 		return r.handleSlashCommand(trimmed, info)
 	}
@@ -127,7 +131,6 @@ func (r *Runtime) handleShell(command string) Response {
 		Action: &Action{Type: ActionShell, ShellCommand: command},
 	}
 }
-
 
 func (r *Runtime) handleCommand(command string) Response {
 	return r.handleShell(command)

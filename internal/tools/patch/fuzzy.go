@@ -27,9 +27,9 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	}
 
 	type lineInfo struct {
+		text  string
 		start int
 		end   int
-		text  string
 	}
 	var lines []lineInfo
 	for i := 0; i < len(current); {

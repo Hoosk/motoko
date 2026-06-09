@@ -23,9 +23,9 @@ type Snippet struct {
 	Path      string
 	Language  string
 	Reason    string
+	Content   string
 	StartLine int
 	EndLine   int
-	Content   string
 }
 
 func (s Snippet) Descriptor() string {
@@ -35,12 +35,12 @@ func (s Snippet) Descriptor() string {
 type FileSummary struct {
 	Path     string
 	Language string
-	Lines    int
-	Changed  bool
 	Symbols  []Symbol
 	Imports  []string
 	Exports  []string
 	Content  []byte
+	Lines    int
+	Changed  bool
 }
 
 func (f FileSummary) Descriptor() string {

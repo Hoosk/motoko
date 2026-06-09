@@ -104,6 +104,28 @@ type ModelInfo struct {
 	ContextWindow int
 }
 
+type BatchRequestItem struct {
+	CustomID     string
+	SystemPrompt string
+	Messages     []ConversationItem
+	Tools        ToolSet
+}
+
+type BatchResponse struct {
+	ID               string
+	ProcessingStatus string
+	ResultsURL       string
+	ProcessingCount  int
+	SucceededCount   int
+	ErroredCount     int
+}
+
+type BatchClient interface {
+	CreateBatch(ctx context.Context, requests []BatchRequestItem) (BatchResponse, error)
+	RetrieveBatch(ctx context.Context, batchID string) (BatchResponse, error)
+	CancelBatch(ctx context.Context, batchID string) (BatchResponse, error)
+}
+
 type Client interface {
 	Configured() bool
 	Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error)

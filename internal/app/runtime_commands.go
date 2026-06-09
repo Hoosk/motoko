@@ -157,9 +157,9 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No pending action."}}}
 		}
 
-		command := r.pending.Command
+		pendingCmd := r.pending.Command
 		r.pending = nil
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", command)}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", pendingCmd)}}}
 	case "trace":
 		if !tracelog.Available() {
 			return Response{}

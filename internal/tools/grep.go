@@ -78,8 +78,8 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 			return nil
 		}
 
-		file, err := os.Open(absPath)
-		if err != nil {
+		file, openErr := os.Open(absPath)
+		if openErr != nil {
 			return nil
 		}
 		defer func() { _ = file.Close() }()

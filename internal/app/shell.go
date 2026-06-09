@@ -12,9 +12,9 @@ const shellTimeout = 20 * time.Second
 const maxOutputBytes = 12_000
 
 type ShellDecision struct {
+	Reason           string
 	RequiresApproval bool
 	Deny             bool
-	Reason           string
 }
 
 type ShellResult struct {

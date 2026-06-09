@@ -24,9 +24,9 @@ func parsePatchRequest(input string) (request, error) {
 		return request{}, err
 	}
 	if strings.HasPrefix(body, astMarker) {
-		astPatches, err := parseASTPatchInput(path, body)
-		if err != nil {
-			return request{}, err
+		astPatches, astErr := parseASTPatchInput(path, body)
+		if astErr != nil {
+			return request{}, astErr
 		}
 		return request{Path: path, AST: astPatches}, nil
 	}

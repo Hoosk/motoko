@@ -11,15 +11,15 @@ import (
 )
 
 type FooterModel struct {
-	sysInfo       system.ContextInfo
-	tachikomaInfo map[string]string
 	runtime       *app.Runtime
+	tachikomaInfo map[string]string
+	sysInfo       system.ContextInfo
 	width         int
 	contextWindow int
 	contextTokens int
-	thinking      bool
 	thinkingFrame int
 	taskCount     int
+	thinking      bool
 }
 
 func NewFooterModel(runtime *app.Runtime) FooterModel {

@@ -703,4 +703,3 @@ func TestRuntimeBrainCommands(t *testing.T) {
 		t.Error("plan should not exist after brain clear")
 	}
 }
-

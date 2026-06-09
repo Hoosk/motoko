@@ -10,8 +10,8 @@ import (
 )
 
 type mockTachikoma struct {
-	name    string
 	payload interface{}
+	name    string
 }
 
 func (m *mockTachikoma) Name() string { return m.name }

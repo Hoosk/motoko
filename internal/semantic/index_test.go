@@ -232,7 +232,7 @@ func TestSemanticGraphExpansion(t *testing.T) {
 	// Without graph expansion, config.go would get 0 points and wouldn't be ranked first or potentially included at all.
 	// With graph expansion, runtime.go gets points for "runtime" token match, and propagates 30% of its points to config.go!
 	relevant := snapshot.RelevantFiles("revisa runtime", 2)
-	
+
 	if len(relevant) < 2 {
 		t.Fatalf("expected at least 2 relevant files, got %d", len(relevant))
 	}
@@ -247,4 +247,3 @@ func TestSemanticGraphExpansion(t *testing.T) {
 		t.Fatalf("expected config.go to be ranked second due to semantic connection, got %q", relevant[1].Path)
 	}
 }
-

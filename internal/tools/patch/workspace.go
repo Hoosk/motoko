@@ -80,4 +80,3 @@ func resolveWorkspaceWritePath(target string) (string, string, error) {
 	}
 	return resolveWorkspacePath(target)
 }
-

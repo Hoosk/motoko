@@ -61,9 +61,9 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	if info.IsDir() {
-		entries, err := os.ReadDir(absPath)
-		if err != nil {
-			return Result{}, err
+		entries, readErr := os.ReadDir(absPath)
+		if readErr != nil {
+			return Result{}, readErr
 		}
 
 		var lines []string

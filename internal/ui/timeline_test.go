@@ -61,6 +61,35 @@ func TestTimelineStreamingKeepsToolEventsSeparate(t *testing.T) {
 	}
 }
 
+func TestTimelineHidesWebToolOutputs(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+	m.SetStreaming(true)
+
+	// A normal tool should print its full output
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "read", Content: "contenido completo"}})
+	// Web tools should print a summarized message
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "web_fetch", Content: "lorem ipsum dolor"}})
+	m.Update(AgentStreamEventMsg{Event: app.AgentStreamEvent{Kind: "output", Title: "web_search", Content: "some results here"}})
+
+	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
+	if !strings.Contains(got, "contenido completo") {
+		t.Fatalf("expected full output for non-web tools, got %q", got)
+	}
+	if strings.Contains(got, "lorem ipsum dolor") {
+		t.Fatalf("expected web_fetch output to be hidden/summarized, got %q", got)
+	}
+	if !strings.Contains(got, "[web_fetch: 17 characters]") {
+		t.Fatalf("expected web_fetch summary, got %q", got)
+	}
+	if strings.Contains(got, "some results here") {
+		t.Fatalf("expected web_search output to be hidden/summarized, got %q", got)
+	}
+	if !strings.Contains(got, "[web_search: 17 characters]") {
+		t.Fatalf("expected web_search summary, got %q", got)
+	}
+}
+
 func TestTimelineUpdateIgnoresNonStreamingState(t *testing.T) {
 	m := NewTimelineModel()
 	m.SyncLayout(80, 20)
@@ -192,39 +221,44 @@ func TestInsertANSIHighlight(t *testing.T) {
 	cases := []struct {
 		name     string
 		input    string
+		expected string
 		start    int
 		end      int
-		expected string
 	}{
 		{
-			"plain text",
-			"hello world",
-			0, 5,
-			timeline.SelectionBgOn + "hello" + timeline.SelectionBgOff + " world",
+			name:     "plain text",
+			input:    "hello world",
+			start:    0,
+			end:      5,
+			expected: timeline.SelectionBgOn + "hello" + timeline.SelectionBgOff + " world",
 		},
 		{
-			"middle range",
-			"hello world",
-			6, 11,
-			"hello " + timeline.SelectionBgOn + "world" + timeline.SelectionBgOff,
+			name:     "middle range",
+			input:    "hello world",
+			start:    6,
+			end:      11,
+			expected: "hello " + timeline.SelectionBgOn + "world" + timeline.SelectionBgOff,
 		},
 		{
-			"with existing ansi",
-			"\x1b[31mred\x1b[0m text",
-			0, 3,
-			"\x1b[31m" + timeline.SelectionBgOn + "red" + "\x1b[0m" + timeline.SelectionBgOff + " text",
+			name:     "with existing ansi",
+			input:    "\x1b[31mred\x1b[0m text",
+			start:    0,
+			end:      3,
+			expected: "\x1b[31m" + timeline.SelectionBgOn + "red" + "\x1b[0m" + timeline.SelectionBgOff + " text",
 		},
 		{
-			"range across ansi",
-			"a\x1b[31mb\x1b[0mc",
-			0, 3,
-			timeline.SelectionBgOn + "a\x1b[31mb\x1b[0mc" + timeline.SelectionBgOff,
+			name:     "range across ansi",
+			input:    "a\x1b[31mb\x1b[0mc",
+			start:    0,
+			end:      3,
+			expected: timeline.SelectionBgOn + "a\x1b[31mb\x1b[0mc" + timeline.SelectionBgOff,
 		},
 		{
-			"range inside ansi",
-			"a\x1b[31mbc\x1b[0md",
-			1, 3,
-			"a\x1b[31m" + timeline.SelectionBgOn + "bc" + "\x1b[0m" + timeline.SelectionBgOff + "d",
+			name:     "range inside ansi",
+			input:    "a\x1b[31mbc\x1b[0md",
+			start:    1,
+			end:      3,
+			expected: "a\x1b[31m" + timeline.SelectionBgOn + "bc" + "\x1b[0m" + timeline.SelectionBgOff + "d",
 		},
 	}
 

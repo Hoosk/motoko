@@ -2,6 +2,7 @@ package tachikoma
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -12,10 +13,10 @@ const updatesBufferSize = 32
 
 // Update represents a status update from a Tachikoma
 type Update struct {
+	Payload interface{}
 	Name    string
 	Status  string
 	Done    bool
-	Payload interface{}
 }
 
 // Tachikoma is the interface for background context gatherers
@@ -26,11 +27,11 @@ type Tachikoma interface {
 
 // Manager coordinates multiple Tachikomas
 type Manager struct {
-	tachikomas []Tachikoma
 	updates    chan Update
+	state      map[string]Update
+	tachikomas []Tachikoma
 	wg         sync.WaitGroup
 	mu         sync.RWMutex
-	state      map[string]Update
 }
 
 func NewManager() *Manager {
@@ -43,6 +44,16 @@ func NewManager() *Manager {
 
 func (m *Manager) Add(t Tachikoma) {
 	m.tachikomas = append(m.tachikomas, t)
+}
+
+func (m *Manager) SetActivePrompt(prompt string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tachikomas {
+		if st, ok := t.(*SearchTachikoma); ok {
+			st.SetActivePrompt(prompt)
+		}
+	}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -76,6 +87,15 @@ func (m *Manager) GetContextInfo() system.ContextInfo {
 	for _, update := range m.state {
 		switch update.Name {
 		case "GitTachikoma":
+			if gitInfo, ok := update.Payload.(system.ContextInfo); ok {
+				info.HasGit = gitInfo.HasGit
+				info.GitBranch = gitInfo.GitBranch
+				info.GitDirty = gitInfo.GitDirty
+				info.Staged = gitInfo.Staged
+				info.Unstaged = gitInfo.Unstaged
+				info.Untracked = gitInfo.Untracked
+				info.ModifiedFiles = gitInfo.ModifiedFiles
+			}
 			info.Signals[update.Name] = update.Status
 		case "DiffTachikoma":
 			if diff, ok := update.Payload.(SemanticDiff); ok && len(diff.Files) > 0 {
@@ -102,6 +122,16 @@ func (m *Manager) GetContextInfo() system.ContextInfo {
 							break
 						}
 					}
+				}
+			}
+		case "SearchTachikoma":
+			if snippets, ok := update.Payload.([]semantic.Snippet); ok && len(snippets) > 0 {
+				info.OnDemandSignals[update.Name] = "Highly relevant code snippets for your prompt are available."
+				info.Signals[update.Name] = update.Status
+				for _, snippet := range snippets {
+					formatted := fmt.Sprintf("File: %s\nLanguage: %s\nReason: %s\nLines: %d-%d\n```\n%s\n```",
+						snippet.Path, snippet.Language, snippet.Reason, snippet.StartLine, snippet.EndLine, snippet.Content)
+					info.RelevantSnippets = append(info.RelevantSnippets, formatted)
 				}
 			}
 		default:

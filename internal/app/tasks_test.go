@@ -70,4 +70,3 @@ func TestTaskManagerTerminate(t *testing.T) {
 	}
 	t.Fatal("expected task to terminate and emit done event")
 }
-

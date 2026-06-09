@@ -19,8 +19,9 @@ import (
 
 type openAIClient struct {
 	baseClient
-	thinkingBudget int
 	sdkClient      openai.Client
+	thinkingBudget int
+	useChatCompletions bool
 }
 
 func newOpenAIClient(cfg config.ProviderConfig) Client {
@@ -31,20 +32,21 @@ func newOpenAIClient(cfg config.ProviderConfig) Client {
 		option.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
 	)
 	return &openAIClient{
-		baseClient:     base,
-		thinkingBudget: cfg.ThinkingBudget,
-		sdkClient:      sdkClient,
+		baseClient:         base,
+		thinkingBudget:     cfg.ThinkingBudget,
+		sdkClient:          sdkClient,
+		useChatCompletions: cfg.Preset != config.ProviderPresetOpenAI,
 	}
 }
 
 func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
-	if !c.Configured() {
-		return Response{}, fmt.Errorf("provider no configurado")
+	if err := c.ConfigurationError(); err != nil {
+		return Response{}, err
 	}
 
 	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
-	// We fall back to Chat Completions if we detect Gemini in the URL.
-	if strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
+	// We fall back to Chat Completions if we detect Gemini in the URL or if useChatCompletions is set.
+	if c.useChatCompletions || strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
 		return c.completeChat(ctx, systemPrompt, messages, tools)
 	}
 

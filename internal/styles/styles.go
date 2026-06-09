@@ -127,8 +127,8 @@ var (
 				Foreground(White)
 
 	PopupSelectionStyle = lipgloss.NewStyle().
-				Background(MainNeon).
-				Foreground(lipgloss.Color("#000000")).
+				Background(SelectionHighlight).
+				Foreground(White).
 				Bold(true)
 
 	UserPromptStyle = lipgloss.NewStyle().

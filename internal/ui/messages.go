@@ -45,8 +45,8 @@ type AgentStreamEventMsg struct {
 type ThinkingTickMsg struct{}
 
 type ProviderModelsMsg struct {
-	Models []provider.ModelInfo
 	Err    error
+	Models []provider.ModelInfo
 }
 
 type finalizeStreamMsg struct {
@@ -58,8 +58,8 @@ type SubmitPromptMsg struct {
 }
 
 type CompactResultMsg struct {
-	Response app.Response
 	Err      error
+	Response app.Response
 }
 
 type AgentStreamBatchMsg struct {
@@ -68,8 +68,8 @@ type AgentStreamBatchMsg struct {
 }
 
 type SessionsMsg struct {
-	Sessions []*session.Session
 	Err      error
+	Sessions []*session.Session
 }
 
 type AgentChangedMsg struct {

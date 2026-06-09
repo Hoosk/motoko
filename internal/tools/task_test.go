@@ -8,9 +8,9 @@ import (
 )
 
 type mockTaskRunner struct {
+	err        error
 	started    string
 	terminated string
-	err        error
 }
 
 func (m *mockTaskRunner) StartTask(ctx context.Context, command string) (string, error) {

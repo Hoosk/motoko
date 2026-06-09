@@ -52,8 +52,8 @@ func TestDiscover(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpWorkspace) }()
 
 	projSkillsDir := filepath.Join(tmpWorkspace, ".agents", "skills", "proj-skill-1")
-	if err := os.MkdirAll(projSkillsDir, 0o755); err != nil {
-		t.Fatalf("failed to create project skills dir: %v", err)
+	if mkdirErr := os.MkdirAll(projSkillsDir, 0o755); mkdirErr != nil {
+		t.Fatalf("failed to create project skills dir: %v", mkdirErr)
 	}
 
 	projSkillContent := `---

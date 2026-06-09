@@ -13,20 +13,20 @@ import (
 const taskTimeout = 20 * time.Minute
 
 type TaskState struct {
+	Started  time.Time
+	cancel   context.CancelFunc
 	ID       string
 	Command  string
-	Started  time.Time
-	Running  bool
-	ExitCode int
 	Output   string
-	cancel   context.CancelFunc
+	ExitCode int
+	Running  bool
 }
 
 type TaskManager struct {
-	mu     sync.RWMutex
-	seq    int
 	active map[string]*TaskState
 	events chan TaskEvent
+	seq    int
+	mu     sync.RWMutex
 }
 
 func NewTaskManager() *TaskManager {
