@@ -8,7 +8,7 @@ lint:
 	golangci-lint run ./...
 
 run:
-	go run cmd/server/main.go
+	go run ./cmd/motoko
 
 vet:
 	go vet ./...
@@ -17,7 +17,7 @@ vuln:
 	govulncheck ./...
 
 build:
-	CGO_ENABLED=1 go build -o bin/server cmd/server/main.go
+	CGO_ENABLED=1 go build -o motoko ./cmd/motoko
 
 format:
 	goimports -w .
