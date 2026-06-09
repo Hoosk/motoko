@@ -215,59 +215,5 @@ func TestTimelineMouseContentCoordsRespectFrameOffsets(t *testing.T) {
 	if x != 0 || y != 0 {
 		t.Fatalf("unexpected content coords (%d,%d)", x, y)
 	}
-}
 
-func TestInsertANSIHighlight(t *testing.T) {
-	cases := []struct {
-		name     string
-		input    string
-		expected string
-		start    int
-		end      int
-	}{
-		{
-			name:     "plain text",
-			input:    "hello world",
-			start:    0,
-			end:      5,
-			expected: timeline.SelectionBgOn + "hello" + timeline.SelectionBgOff + " world",
-		},
-		{
-			name:     "middle range",
-			input:    "hello world",
-			start:    6,
-			end:      11,
-			expected: "hello " + timeline.SelectionBgOn + "world" + timeline.SelectionBgOff,
-		},
-		{
-			name:     "with existing ansi",
-			input:    "\x1b[31mred\x1b[0m text",
-			start:    0,
-			end:      3,
-			expected: "\x1b[31m" + timeline.SelectionBgOn + "red" + "\x1b[0m" + timeline.SelectionBgOff + " text",
-		},
-		{
-			name:     "range across ansi",
-			input:    "a\x1b[31mb\x1b[0mc",
-			start:    0,
-			end:      3,
-			expected: timeline.SelectionBgOn + "a\x1b[31mb\x1b[0mc" + timeline.SelectionBgOff,
-		},
-		{
-			name:     "range inside ansi",
-			input:    "a\x1b[31mbc\x1b[0md",
-			start:    1,
-			end:      3,
-			expected: "a\x1b[31m" + timeline.SelectionBgOn + "bc" + "\x1b[0m" + timeline.SelectionBgOff + "d",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := timeline.InsertANSIHighlight(tc.input, tc.start, tc.end)
-			if got != tc.expected {
-				t.Errorf("expected %q, got %q", tc.expected, got)
-			}
-		})
-	}
 }

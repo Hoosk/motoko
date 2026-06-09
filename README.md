@@ -1,135 +1,122 @@
-# Motoko
-
-**The high-performance Terminal AI Assistant for codebase intelligence.**
-
-Motoko is a specialized terminal-based AI agent designed for deep repository understanding and surgical code editing. Inspired by the efficiency of *Ghost in the Shell*, it utilizes the unique **Tachikoma System** to maintain a real-time, high-signal context of your workspace without the overhead of massive token consumption.
-
----
-
-## The Tachikoma System
-
-Unlike traditional AI agents that "blindly" search through files, Motoko relies on a fleet of **Tachikomas**—deterministic background workers that monitor your project:
-
-- **GitTachikoma:** Real-time tracking of branch state, staged changes, and dirty-file summaries.
-- **CodeTachikoma:** Powered by `go-tree-sitter`, it maintains a live index of symbols, functions, and imports across your workspace.
-- **DiffTachikoma:** Correlates `git diff` hunks with the semantic index to report which symbols have been modified.
-- **SearchTachikoma:** Pre-fetches relevant code snippets based on the current prompt, so context is ready before the agent even starts.
-- **DependencyTachikoma:** Detects and summarizes project dependencies across ecosystems (Go, JS/TS, Python, Rust, Ruby).
-
-All Tachikomas run as goroutines and publish updates through a shared channel. They react to file changes via `fsnotify`, keeping the context "hot" at all times.
+<p align="center">
+  <h1 align="center">Motoko</h1>
+</p>
+<p align="center">A local-first AI coding companion for your terminal.</p>
+<p align="center">
+  <a href="https://github.com/Hoosk/motoko/actions/workflows/verify.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/Hoosk/motoko/verify.yml?style=flat-square&branch=master" /></a>
+  <img alt="Go Version" src="https://img.shields.io/github/go-mod/go-version/Hoosk/motoko?style=flat-square" />
+</p>
 
 ---
 
-## Key Features
-
-- **Multi-Agent Modes:** Switch between `plan` (read-only analysis), `build` (active editing), and `search` (codebase exploration) modes. Define custom agents via a `.agents` file.
-- **Session Brain:** Persistent per-session memory where the agent stores plans (`plan.md`), task checklists (`tasks.md`), summaries, and notes. Survives across turns and sessions.
-- **Surgical Patching:** High-precision code editing using fuzzy-matching SEARCH/REPLACE blocks.
-- **Direct Shell Access:** Execute shell commands with an explicit approval safety layer. Background tasks for long-running commands.
-- **Multi-Provider Support:** Integrated with OpenAI, Anthropic, and Google Gemini. Supports streaming and reasoning/thinking modes.
-- **Semantic Context:** Tree-sitter powered AST analysis across Go, Python, Rust, C++, JavaScript, TypeScript, and more.
-- **Web Access:** Built-in `web_search` (Mojeek + DuckDuckGo fallback) and `web_fetch` tools for retrieving external information.
-- **Skills System:** Extensible skill definitions in `.agents/skills/` that the agent can activate on-demand for specialized tasks.
-- **Subagent Delegation:** The agent can spawn sub-agents in different modes to handle parallel tasks.
-- **Auto-Compaction:** Sessions are automatically compacted when the context window reaches 80% capacity.
-- **Local-First Philosophy:** All indexing and analysis happen on your machine. Your code stays local.
-
----
-
-## Installation
-
-### Prerequisites
-- [Go](https://go.dev/doc/install) 1.24 or higher.
-
-### Quick Install (Linux/macOS)
-Run our installer script to build and install Motoko to your local path:
+### Installation
 
 ```bash
+# YOLO
 curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/master/install.sh | bash
+
+# Manual Build
+git clone https://github.com/Hoosk/motoko.git
+cd motoko
+go build -o motoko ./cmd/motoko
+mv motoko /usr/local/bin/ # or any directory in your $PATH
 ```
 
-### Manual Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Hoosk/motoko.git
-   cd motoko
-   ```
-2. Build the binary:
-   ```bash
-   go build -o motoko ./cmd/motoko
-   ```
-3. Move to your PATH:
-   ```bash
-   mv motoko /usr/local/bin/ # or any directory in your $PATH
-   ```
+### Agents & Modes
+
+Motoko includes task-focused agent modes that you can switch between:
+
+*   **build** - Default, full-access agent for codebase edits.
+    *   Has read and write tool access (including shell execution and patching).
+*   **plan** - Read-only agent for architecture analysis and code planning.
+    *   Denies code edits and file modifications by default.
+    *   Focuses on building the session plan before committing to modifications.
+*   **search** - Read-only exploration mode.
+    *   Optimized for codebase queries and semantic search.
+
+Define custom agents using a `.agents` configuration file at the root of your workspace.
 
 ---
 
-## Keyboard Shortcuts
+### Technical Architecture & Context (Tachikomas)
 
-### Navigation & Interaction
-- **Enter**: Send message / Apply selection.
-- **Tab / Right**: Next suggestion / next mention.
-- **Shift + Tab / Left**: Previous suggestion / previous mention.
-- **Up / Down**: Navigate history / Move selection.
-- **Alt + Up / Down**: Navigate through messages in the Timeline.
-- **Alt + C**: Copy selected message content.
-- **Esc**: Close popups / Cancel.
-- **Ctrl + C**: Exit Motoko.
+Unlike tools that perform exhaustive or blind codebase scans, Motoko runs **Tachikomas**—lightweight, deterministic background goroutines that monitor your files and feed structured context into the prompt:
 
-### Layout & Toggles
-- **Ctrl + S / Alt + S**: Toggle Context Sidebar.
-- **Ctrl + T**: Toggle Tool Catalog overlay.
-- **Ctrl + H**: Toggle Help overlay.
-- **Ctrl + R**: Toggle Reasoning/Thinking visibility.
-- **Ctrl + P**: Open Provider configuration form.
-- **Ctrl + M**: Open Model selector.
-- **Ctrl + O**: Open Session picker.
-- **Ctrl + A**: Open Agent/Mode selector.
+*   **Git Tracking (`GitTachikoma`):** Tracks branch state, staged diffs, and untracked/dirty file summaries.
+*   **AST Semantic Indexing (`CodeTachikoma`):** Uses Tree-sitter to parse and index symbols, functions, methods, and imports. Refreshes on file changes.
+*   **Semantic Diff Correlation (`DiffTachikoma`):** Correlates active git diff hunks with the AST index to map edits to specific code symbols.
+*   **Incremental Search (`SearchTachikoma`):** Ranks and pre-retrieves relevant code blocks based on user queries.
+*   **Dependency Audit (`DependencyTachikoma`):** Summarizes project manifests (`go.mod`, `package.json`, `Cargo.toml`, etc.).
+
+All background workers use debounced filesystem notifications (`fsnotify`) and coordinate via a unified Go channel to keep context fresh without impacting system performance.
 
 ---
 
-## Usage Commands
+### Keyboard Shortcuts
 
-- **!command**: Execute shell command directly (e.g., `!ls -la`).
-- **/help**: Show all available commands.
-- **/chat**: Switch to standard chat mode.
-- **/shell**: Switch to direct shell mode.
-- **/plan**: Activate read-only plan mode.
-- **/build**: Activate active build mode.
-- **/agent [name]**: Switch or show active agent mode.
-- **/mode**: Open the agent mode selector popup.
-- **/tool \<name\>**: Manually trigger a specific runtime tool.
-- **/tools**: List all registered tools.
-- **/provider**: Manage configured LLM providers (`list`, `add`, `use`, `remove`).
-- **/models**: List and select available models.
-- **/sessions**: Open the session picker.
-- **/brain**: Interact with the session brain (`list`, `read`, `plan`, `tasks`, `summary`, `clear`).
-- **/context**: View the raw system prompt being sent to the AI.
-- **/status**: Summarize mode, provider, and workspace state.
-- **/compact**: Manually compact the active session.
-- **/task**: List or manage background tasks.
-- **/approve**: Execute the pending shell action.
-- **/deny**: Cancel the pending shell action.
-- **/debug**: Toggle agent debug output.
-- **/trace**: Toggle trace logging (requires `-tags motoko_trace` build).
+| Shortcut | Description |
+| :--- | :--- |
+| **Enter** | Send message / Apply active selection |
+| **Tab** / **Right** | Next inline suggestion / mention |
+| **Shift+Tab** / **Left** | Previous inline suggestion / mention |
+| **Up** / **Down** | Navigate command history / Select options |
+| **Alt + Up / Down** | Scroll through message timeline |
+| **Alt + C** | Copy selected message contents |
+| **Esc** | Close popups / Cancel action |
+| **Ctrl + C** | Exit Motoko |
+| **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility |
+| **Ctrl + T** | Toggle Tool Catalog overlay |
+| **Ctrl + H** | Toggle Help overlay |
+| **Ctrl + R** | Toggle Reasoning/Thinking output visibility |
+| **Ctrl + P** | Open LLM Provider configuration |
+| **Ctrl + M** | Open Model selector |
+| **Ctrl + O** | Open Session picker |
+| **Ctrl + A** | Open Agent Mode selector |
 
 ---
 
-## Configuration
+### Command Reference
 
-Motoko uses a TOML config file stored at `~/.config/motoko/config.toml`. Providers can be configured interactively with `/provider add` or directly in the config file.
+| Command | Action |
+| :--- | :--- |
+| **`!cmd`** | Run shell command directly (e.g. `!go test ./...`) |
+| **`/help`** | Display all available commands and help overlay |
+| **`/chat`** | Switch input mode to standard chat |
+| **`/shell`** | Switch input mode to direct shell execution |
+| **`/plan`** | Shortcut to activate read-only `plan` mode |
+| **`/build`** | Shortcut to activate editing `build` mode |
+| **`/agent [name]`** | Switch to or show active agent mode |
+| **`/mode`** | Open agent mode selection popup |
+| **`/tool <name> <args>`** | Manually execute a registered tool |
+| **`/tools`** | List all available developer tools |
+| **`/provider`** | Manage configurations (`list`, `add`, `use`, `remove`) |
+| **`/models`** | List and select LLM models |
+| **`/sessions`** | Open the session switcher |
+| **`/brain`** | Manage session brain files (`list`, `read`, `plan`, `tasks`, `summary`, `clear`) |
+| **`/context`** | View raw system prompt generated for the next turn |
+| **`/status`** | Display current model, provider, and workspace states |
+| **`/compact`** | Trigger manual conversation compaction |
+| **`/task`** | Manage background commands and task logs |
+| **`/approve`** / **`/deny`** | Accept or reject a pending shell execution request |
+| **`/debug`** | Toggle agent debugging log output |
+| **`/trace`** | Toggle tracing logs (requires compilation with `-tags motoko_trace`) |
 
-### Provider Setup
-```
-/provider add          # Opens interactive form
+---
+
+### Configuration
+
+Motoko reads its configuration from `~/.config/motoko/config.toml`. You can configure API keys and providers interactively using `/provider add` or edit the file manually.
+
+#### Managing Providers
+```bash
+/provider add          # Add a new LLM provider config
 /provider list         # List configured providers
 /provider use <name>   # Switch active provider
-/models                # Select model from active provider
+/models                # Select models for the active provider
 ```
 
-### Thinking/Reasoning Budget
-Use the model selector to adjust the thinking budget. Available levels: off, low (1k), medium (8k), high (24k), xhigh (64k tokens).
+#### Thinking/Reasoning Budget
+Adjust the reasoning budget of supported models (e.g. Claude 3.7 Sonnet) via the model selector (`Ctrl+M` or `/models`). Select between: `off`, `low` (1k tokens), `medium` (8k tokens), `high` (24k tokens), and `xhigh` (64k tokens).
 
 ---
 
