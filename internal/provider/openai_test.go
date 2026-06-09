@@ -150,26 +150,26 @@ func TestBuildResponseParamsLeavesReasoningEmptyWithoutBudget(t *testing.T) {
 	}
 }
 
-func TestOpenAIClientForceChat(t *testing.T) {
-	// Preset OpenAI -> forceChat is false
+func TestOpenAIClientUseChatCompletions(t *testing.T) {
+	// Preset OpenAI -> useChatCompletions is false
 	client := newOpenAIClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetOpenAI,
 		BaseURL: "https://api.openai.com/v1",
 		APIKey:  "key",
 		Model:   "gpt-4",
 	})
-	if client.(*openAIClient).forceChat {
-		t.Fatal("expected forceChat false for OpenAI preset")
+	if client.(*openAIClient).useChatCompletions {
+		t.Fatal("expected useChatCompletions false for OpenAI preset")
 	}
 
-	// Preset OpenAICompatible -> forceChat is true
+	// Preset OpenAICompatible -> useChatCompletions is true
 	clientComp := newOpenAIClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetOpenAICompatible,
 		BaseURL: "http://localhost:11434/v1",
 		APIKey:  "key",
 		Model:   "llama",
 	})
-	if !clientComp.(*openAIClient).forceChat {
-		t.Fatal("expected forceChat true for OpenAICompatible preset")
+	if !clientComp.(*openAIClient).useChatCompletions {
+		t.Fatal("expected useChatCompletions true for OpenAICompatible preset")
 	}
 }

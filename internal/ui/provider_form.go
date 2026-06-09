@@ -234,11 +234,6 @@ func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
 				f.status = "Base URL is required."
 				return nil
 			}
-		} else {
-			if strings.TrimSpace(cfg.APIKey) == "" {
-				f.status = "API Key is required."
-				return nil
-			}
 		}
 		if err := runtime.SaveProvider(cfg, true); err != nil {
 			f.status = err.Error()

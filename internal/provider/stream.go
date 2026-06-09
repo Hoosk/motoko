@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -24,8 +25,8 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	}
 
 	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
-	// We fall back to Chat Completions if we detect Gemini in the URL or if forceChat is set.
-	if c.forceChat || strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
+	// We fall back to Chat Completions if we detect Gemini in the URL or if useChatCompletions is set.
+	if c.useChatCompletions || strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
@@ -235,8 +236,15 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 
+	keys := make([]int, 0, len(toolCalls))
+	for k := range toolCalls {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
 	var pendingCalls []ToolInvocation
-	for _, tc := range toolCalls {
+	for _, k := range keys {
+		tc := toolCalls[k]
 		rawInput := tc.partialInput.String()
 		var parsed struct {
 			Input string `json:"input"`
