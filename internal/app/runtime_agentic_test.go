@@ -5,12 +5,24 @@ import (
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
 func TestRuntime_AgenticImprovements(t *testing.T) {
 	// 1. Setup mock runtime
 	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+		}},
+	}
+	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
+		return fakeProviderClient{}, nil
+	}
 
 	// 2. Test tool registry filtering
 	r.SetAgentMode("plan")
