@@ -6,7 +6,7 @@ Motoko is a specialized terminal-based AI agent designed for deep repository und
 
 ---
 
-## The Tachikoma System 🤖
+## The Tachikoma System
 
 Unlike traditional AI agents that "blindly" search through files, Motoko relies on a fleet of **Tachikomas**—deterministic background workers that monitor your project:
 
@@ -20,7 +20,7 @@ All Tachikomas run as goroutines and publish updates through a shared channel. T
 
 ---
 
-## Key Features 🚀
+## Key Features
 
 - **Multi-Agent Modes:** Switch between `plan` (read-only analysis), `build` (active editing), and `search` (codebase exploration) modes. Define custom agents via a `.agents` file.
 - **Session Brain:** Persistent per-session memory where the agent stores plans (`plan.md`), task checklists (`tasks.md`), summaries, and notes. Survives across turns and sessions.
@@ -36,7 +36,7 @@ All Tachikomas run as goroutines and publish updates through a shared channel. T
 
 ---
 
-## Installation 📦
+## Installation
 
 ### Prerequisites
 - [Go](https://go.dev/doc/install) 1.24 or higher.
@@ -65,7 +65,7 @@ curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/master/install.sh | bas
 
 ---
 
-## Keyboard Shortcuts ⌨️
+## Keyboard Shortcuts
 
 ### Navigation & Interaction
 - **Enter**: Send message / Apply selection.
@@ -89,7 +89,7 @@ curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/master/install.sh | bas
 
 ---
 
-## Usage Commands 🛠️
+## Usage Commands
 
 - **!command**: Execute shell command directly (e.g., `!ls -la`).
 - **/help**: Show all available commands.
@@ -116,7 +116,7 @@ curl -sSL https://raw.githubusercontent.com/Hoosk/motoko/master/install.sh | bas
 
 ---
 
-## Configuration ⚙️
+## Configuration
 
 Motoko uses a TOML config file stored at `~/.config/motoko/config.toml`. Providers can be configured interactively with `/provider add` or directly in the config file.
 
