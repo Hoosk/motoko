@@ -11,15 +11,25 @@ import (
 )
 
 type TimelineModel struct {
-	model timeline.Model
+	model   timeline.Model
+	version string
 }
 
 func NewTimelineModel() TimelineModel {
 	m := TimelineModel{
-		model: timeline.New(80, 20),
+		model:   timeline.New(80, 20),
+		version: "dev",
 	}
 	m.resetMessages()
 	return m
+}
+
+func (m *TimelineModel) getLogo() string {
+	lines := strings.Split(timeline.LogoArt, "\n")
+	if len(lines) > 0 {
+		lines[len(lines)-1] += "  " + m.version
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m TimelineModel) Init() tea.Cmd {
@@ -220,7 +230,7 @@ func (m *TimelineModel) SyncLayout(width, height int) {
 }
 
 func (m *TimelineModel) resetMessages() {
-	styledLogo := styles.BoldNeonStyle.Render("\n" + timeline.LogoArt)
+	styledLogo := styles.BoldNeonStyle.Render("\n" + m.getLogo())
 	m.model.Messages = []string{
 		styledLogo,
 		styles.SystemStyle.Render("Motoko online. /provider add opens the configuration form; /models lists or selects models."),
@@ -246,7 +256,7 @@ func (m *TimelineModel) renderMessages() {
 	selectedIdx := -1
 	m.model.RenderLines = m.model.RenderLines[:0]
 	m.model.Messages = m.model.Messages[:0]
-	styledLogo := styles.BoldNeonStyle.Render("\n" + timeline.LogoArt)
+	styledLogo := styles.BoldNeonStyle.Render("\n" + m.getLogo())
 	m.model.Messages = append(m.model.Messages,
 		styledLogo,
 		styles.SystemStyle.Render("Motoko online. /provider add opens the configuration form; /models lists or selects models."),

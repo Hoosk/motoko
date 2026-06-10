@@ -5,6 +5,7 @@ import (
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/updater"
 )
 
 type TachikomaStatusMsg struct {
@@ -84,4 +85,8 @@ type SessionLoadedMsg struct {
 
 type ModelChangedMsg struct {
 	Model string
+}
+
+type UpdateAvailableMsg struct {
+	Info *updater.VersionInfo
 }

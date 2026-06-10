@@ -72,7 +72,31 @@ if [[ -n "$TAG" ]]; then
         
         # If it's a tarball, extract it. If it's a raw binary, just move it.
         if [[ "$DOWNLOAD_URL" == *.tar.gz ]]; then
-            tar -xzf "$TEMP_FILE" -C "$INSTALL_DIR" "$BINARY_NAME"
+            EXTRACT_DIR=$(mktemp -d)
+            tar -xzf "$TEMP_FILE" -C "$EXTRACT_DIR"
+            
+            # Find the binary in the extracted archive
+            if [[ -f "$EXTRACT_DIR/$BINARY_NAME" ]]; then
+                mv "$EXTRACT_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+            elif [[ -f "$EXTRACT_DIR/motoko_${OS}_${ARCH}" ]]; then
+                mv "$EXTRACT_DIR/motoko_${OS}_${ARCH}" "$INSTALL_DIR/$BINARY_NAME"
+            else
+                # Fallback: search for any file containing the binary name, or any file that isn't doc/license
+                FOUND_BIN=$(find "$EXTRACT_DIR" -type f -name "*motoko*" | head -n 1)
+                if [[ -z "$FOUND_BIN" ]]; then
+                    FOUND_BIN=$(find "$EXTRACT_DIR" -type f ! -name "*.md" ! -name "LICENSE*" ! -name "COPYING*" | head -n 1)
+                fi
+                
+                if [[ -n "$FOUND_BIN" ]]; then
+                    mv "$FOUND_BIN" "$INSTALL_DIR/$BINARY_NAME"
+                else
+                    echo -e "${RED}Error: Extract failed, could not locate binary in archive.${NC}"
+                    rm -rf "$EXTRACT_DIR"
+                    exit 1
+                fi
+            fi
+            chmod +x "$INSTALL_DIR/$BINARY_NAME"
+            rm -rf "$EXTRACT_DIR"
         else
             mv "$TEMP_FILE" "$INSTALL_DIR/$BINARY_NAME"
             chmod +x "$INSTALL_DIR/$BINARY_NAME"

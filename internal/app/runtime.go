@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
+	"github.com/Hoosk/motoko/internal/updater"
 )
 
 type Mode string
@@ -125,10 +127,16 @@ type Runtime struct {
 	subagentsMu       sync.Mutex
 	wasResumed        bool
 	debug             bool
+
+	updateInfo *updater.VersionInfo
+	updateErr  error
+	updateDone chan struct{}
+	version    string
 }
 
 type RuntimeOptions struct {
-	Resume bool
+	Resume  bool
+	Version string
 }
 
 type AgentStreamEvent struct {
@@ -172,6 +180,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		availableSkills:   sList,
 		activeSubagents:   make(map[string]*SubagentInfo),
 		tasks:             NewTaskManager(),
+		updateDone:        make(chan struct{}),
+		version:           runtimeOpts.Version,
 	}
 
 	// Setup default tachikomas
@@ -526,6 +536,39 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(ctx)
 	}
+
+	// Start update check in background
+	go func() {
+		defer close(r.updateDone)
+		if r.version == "dev" || r.version == "" {
+			return
+		}
+		upd := updater.NewUpdater(updater.Config{
+			CurrentVersion: r.version,
+			GOOS:           runtime.GOOS,
+			GOARCH:         runtime.GOARCH,
+		})
+		info, err := upd.CheckVersion(ctx)
+		if err != nil {
+			r.updateErr = err
+			return
+		}
+		r.updateInfo = info
+	}()
+}
+
+// WaitForUpdate blocks until background update check is complete and returns the result.
+func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {
+	if r.backgroundCtx != nil {
+		select {
+		case <-r.updateDone:
+			return r.updateInfo, r.updateErr
+		case <-r.backgroundCtx.Done():
+			return nil, r.backgroundCtx.Err()
+		}
+	}
+	<-r.updateDone
+	return r.updateInfo, r.updateErr
 }
 
 // Tachikomas returns the background worker manager.
@@ -559,4 +602,8 @@ func (r *Runtime) providerClient(cfg config.ProviderConfig) (provider.Client, er
 
 func (r *Runtime) GetBrain() *brain.Brain {
 	return r.brain
+}
+
+func (r *Runtime) Version() string {
+	return r.version
 }

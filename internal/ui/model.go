@@ -69,6 +69,8 @@ func NewModel(runtime *app.Runtime) Model {
 		showSidebar: true,
 	}
 
+	m.timeline.version = runtime.Version()
+
 	// Load startup entries (e.g. resumed session history)
 	for _, entry := range runtime.StartupEntries() {
 		m.timeline.appendEntry(entry)
@@ -85,6 +87,7 @@ func (m Model) Init() tea.Cmd {
 		m.footer.Init(),
 		m.sidebar.Init(),
 		m.waitTaskEvent(),
+		m.checkForUpdatesCmd(),
 	)
 }
 
@@ -140,6 +143,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case NotificationMsg:
 		m.notificationShow = true
 		m.notificationText = msg.Text
+		m.notificationTime = time.Now()
+		cmds = append(cmds, m.hideNotification())
+
+	case UpdateAvailableMsg:
+		m.notificationShow = true
+		m.notificationText = "⬆ " + msg.Info.NewVersion + " available — motoko --update"
 		m.notificationTime = time.Now()
 		cmds = append(cmds, m.hideNotification())
 
