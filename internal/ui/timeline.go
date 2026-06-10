@@ -15,14 +15,10 @@ type TimelineModel struct {
 	version string
 }
 
-func NewTimelineModel(version ...string) TimelineModel {
-	v := "dev"
-	if len(version) > 0 {
-		v = version[0]
-	}
+func NewTimelineModel() TimelineModel {
 	m := TimelineModel{
 		model:   timeline.New(80, 20),
-		version: v,
+		version: "dev",
 	}
 	m.resetMessages()
 	return m

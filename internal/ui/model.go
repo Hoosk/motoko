@@ -62,12 +62,14 @@ type Model struct {
 func NewModel(runtime *app.Runtime) Model {
 	m := Model{
 		runtime:     runtime,
-		timeline:    NewTimelineModel(runtime.Version()),
+		timeline:    NewTimelineModel(),
 		composer:    NewComposerModel(runtime),
 		footer:      NewFooterModel(runtime),
 		sidebar:     NewSidebarModel(runtime),
 		showSidebar: true,
 	}
+
+	m.timeline.version = runtime.Version()
 
 	// Load startup entries (e.g. resumed session history)
 	for _, entry := range runtime.StartupEntries() {
