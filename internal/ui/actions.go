@@ -137,3 +137,16 @@ func (m Model) waitTaskEvent() tea.Cmd {
 		return TaskEventMsg{Event: res.Event}
 	}
 }
+
+func (m Model) checkForUpdatesCmd() tea.Cmd {
+	return func() tea.Msg {
+		info, err := m.runtime.WaitForUpdate()
+		if err != nil {
+			return nil
+		}
+		if info != nil && info.IsNewer {
+			return UpdateAvailableMsg{Info: info}
+		}
+		return nil
+	}
+}

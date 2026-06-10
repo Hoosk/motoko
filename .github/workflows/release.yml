@@ -40,11 +40,11 @@ jobs:
 
       - name: Build binary
         run: |
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o motoko_${{ matrix.os }}_${{ matrix.arch }} ./cmd/motoko
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -ldflags "-X main.Version=${{ github.ref_name }}" -o motoko ./cmd/motoko
 
       - name: Package binary
         run: |
-          tar -cvzf motoko_${{ matrix.os }}_${{ matrix.arch }}.tar.gz motoko_${{ matrix.os }}_${{ matrix.arch }}
+          tar -cvzf motoko_${{ matrix.os }}_${{ matrix.arch }}.tar.gz motoko
 
       - name: Release
         uses: softprops/action-gh-release@v2

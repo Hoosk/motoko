@@ -62,7 +62,7 @@ type Model struct {
 func NewModel(runtime *app.Runtime) Model {
 	m := Model{
 		runtime:     runtime,
-		timeline:    NewTimelineModel(),
+		timeline:    NewTimelineModel(runtime.Version()),
 		composer:    NewComposerModel(runtime),
 		footer:      NewFooterModel(runtime),
 		sidebar:     NewSidebarModel(runtime),
@@ -85,6 +85,7 @@ func (m Model) Init() tea.Cmd {
 		m.footer.Init(),
 		m.sidebar.Init(),
 		m.waitTaskEvent(),
+		m.checkForUpdatesCmd(),
 	)
 }
 
@@ -140,6 +141,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case NotificationMsg:
 		m.notificationShow = true
 		m.notificationText = msg.Text
+		m.notificationTime = time.Now()
+		cmds = append(cmds, m.hideNotification())
+
+	case UpdateAvailableMsg:
+		m.notificationShow = true
+		m.notificationText = "⬆ " + msg.Info.NewVersion + " available — motoko --update"
 		m.notificationTime = time.Now()
 		cmds = append(cmds, m.hideNotification())
 
