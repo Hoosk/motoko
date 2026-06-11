@@ -30,8 +30,8 @@ func TestMessageSerializationHelpers(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected gemini client, got %T", gemini)
 	}
-	if !strings.Contains(geminiClient.baseURL, "v1beta") {
-		t.Fatalf("expected gemini base url to contain v1beta, got %q", geminiClient.baseURL)
+	if geminiClient.baseURL != "" {
+		t.Fatalf("expected empty gemini base url (SDK uses API key only), got %q", geminiClient.baseURL)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
 
 func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
-	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}), false)
+	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
 	if len(messages) != 1 {
 		t.Fatalf("expected one chat message, got %#v", messages)
 	}
@@ -140,6 +140,65 @@ func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	}
 	if toolCalls[0]["thought_signature"] != "sig" {
 		t.Fatalf("expected raw thought signature preserved, got %#v", toolCalls[0])
+	}
+}
+
+func TestToChatMessagesStructuredFlow(t *testing.T) {
+	// Test standard user message
+	messages := toChatMessages([]ConversationItem{UserText("hello")})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if messages[0]["role"] != RoleUser || messages[0]["content"] != "hello" {
+		t.Fatalf("unexpected serialized message: %#v", messages[0])
+	}
+
+	// Test assistant tool call without raw payload
+	callItems := assistantToolCallItems([]ToolInvocation{
+		{Kind: InvokeCustomTool, Name: "grep", Arguments: json.RawMessage(`{"pattern": "func"}`), CallID: "call_abc"},
+	})
+	messages = toChatMessages(callItems)
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg := messages[0]
+	if msg["role"] != RoleAssistant {
+		t.Fatalf("expected role assistant, got %v", msg["role"])
+	}
+	if msg["content"] != "" {
+		t.Fatalf("expected empty content, got %q", msg["content"])
+	}
+	toolCalls, ok := msg["tool_calls"].([]map[string]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("expected tool_calls slice of length 1, got %#v", msg["tool_calls"])
+	}
+	call := toolCalls[0]
+	if call["id"] != "call_abc" || call["type"] != "function" {
+		t.Fatalf("unexpected tool call values: %#v", call)
+	}
+	fn, ok := call["function"].(map[string]any)
+	if !ok || fn["name"] != "grep" || fn["arguments"] != `{"pattern": "func"}` {
+		t.Fatalf("unexpected function values: %#v", call["function"])
+	}
+
+	// Test tool result message (should NOT degrade to text or RoleUser)
+	resultItem := ToolResultForInvocation(ToolInvocation{Name: "grep", CallID: "call_abc"}, "found 3 matches")
+	messages = toChatMessages([]ConversationItem{resultItem})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg = messages[0]
+	if msg["role"] != RoleTool {
+		t.Fatalf("expected role tool, got %v", msg["role"])
+	}
+	if msg["content"] != "found 3 matches" {
+		t.Fatalf("unexpected content, got %q", msg["content"])
+	}
+	if msg["tool_call_id"] != "call_abc" {
+		t.Fatalf("expected tool_call_id call_abc, got %v", msg["tool_call_id"])
+	}
+	if msg["name"] != "grep" {
+		t.Fatalf("expected name grep, got %v", msg["name"])
 	}
 }
 
@@ -168,8 +227,43 @@ func TestOpenAIClientUseChatCompletions(t *testing.T) {
 		BaseURL: "http://localhost:11434/v1",
 		APIKey:  "key",
 		Model:   "llama",
+		UseSDK:  true,
 	})
 	if !clientComp.(*openAIClient).useChatCompletions {
 		t.Fatal("expected useChatCompletions true for OpenAICompatible preset")
+	}
+	if !clientComp.(*openAIClient).useSDK {
+		t.Fatal("expected useSDK true when UseSDK is true in configuration")
+	}
+}
+
+func TestToSDKChatMessagesAndTools(t *testing.T) {
+	// Test toSDKChatMessages with user message
+	sdkMsgs := toSDKChatMessages([]ConversationItem{UserText("hi")})
+	if len(sdkMsgs) != 1 {
+		t.Fatalf("expected 1 sdk message, got %d", len(sdkMsgs))
+	}
+	if sdkMsgs[0].OfUser == nil || sdkMsgs[0].OfUser.Content.OfString.Value != "hi" {
+		t.Fatalf("unexpected user message mapping: %#v", sdkMsgs[0])
+	}
+
+	// Test toSDKChatMessages with tool result
+	resultItem := ToolResultForInvocation(ToolInvocation{Name: "ls", CallID: "call_999"}, "file.go")
+	sdkMsgs = toSDKChatMessages([]ConversationItem{resultItem})
+	if len(sdkMsgs) != 1 {
+		t.Fatalf("expected 1 sdk message, got %d", len(sdkMsgs))
+	}
+	if sdkMsgs[0].OfTool == nil || sdkMsgs[0].OfTool.Content.OfString.Value != "file.go" || sdkMsgs[0].OfTool.ToolCallID != "call_999" {
+		t.Fatalf("unexpected tool message mapping: %#v", sdkMsgs[0])
+	}
+
+	// Test toSDKChatTools
+	tools := ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run command", InputHint: "command"}}}
+	sdkTools := toSDKChatTools(tools)
+	if len(sdkTools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(sdkTools))
+	}
+	if sdkTools[0].OfFunction == nil || sdkTools[0].OfFunction.Function.Name != "bash" {
+		t.Fatalf("unexpected tool mapping: %#v", sdkTools[0])
 	}
 }

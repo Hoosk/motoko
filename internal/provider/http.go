@@ -70,15 +70,14 @@ func decodeJSONResponse(resp *http.Response, out any) error {
 	return json.Unmarshal(body, out)
 }
 
-func isGoogleEndpoint(baseURL string) bool {
-	lower := strings.ToLower(baseURL)
-	return strings.Contains(lower, "generativelanguage.googleapis.com") || strings.Contains(lower, "google")
+func isGoogleCompatEndpoint(baseURL string) bool {
+	return strings.Contains(strings.ToLower(baseURL), "generativelanguage.googleapis.com")
 }
 
-func geminiAuthHeaders(baseURL, apiKey string) map[string]string {
+func buildAuthHeaders(baseURL, apiKey string) map[string]string {
 	headers := map[string]string{}
 	headers["Authorization"] = "Bearer " + apiKey
-	if isGoogleEndpoint(baseURL) {
+	if isGoogleCompatEndpoint(baseURL) {
 		headers["x-goog-api-key"] = apiKey
 	}
 	return headers

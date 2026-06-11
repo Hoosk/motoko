@@ -117,17 +117,17 @@ Motoko supports multiple LLM providers through a unified interface.
 ### Supported Providers
 - **OpenAI** native integration supporting both Chat Completions and Responses APIs
 - **Anthropic** native integration with Claude models, including extended thinking
-- **Gemini** via OpenAI-compatible endpoint (`generativelanguage.googleapis.com/v1beta/openai`)
+- **Gemini** via Google GenAI Go SDK with support for Google Search grounding, Code Execution and configuration of thinking levels
 - **OpenAi Compatible providers**
 
 ### Capabilities
 - Streaming via SSE (Server-Sent Events) for all providers
-- Reasoning/thinking support with configurable token budget (off, 1k, 8k, 24k, 64k)
+- Reasoning/thinking support with configurable token budget per provider (OpenAI: reasoning_effort, Anthropic: extended thinking, Gemini: thinkingBudget/thinkingLevel)
 - Model listing from provider APIs
 - Unified tool/function call handling across provider formats
 
 ### Configuration
-Providers are configured interactively via `/provider add` or in the TOML config file at `~/.config/motoko/config.toml`. Each provider stores: name, kind/preset, base URL, API key, model, thinking budget, context window, and cached model list.
+Providers are configured interactively via `/provider add` or in the JSON config file at `~/.config/motoko/config.json`. Each provider stores: name, kind/preset, base URL, API key, model, thinking budget, context window, and model list. Gemini providers additionally support `enable_google_search` and `enable_code_execution` options.
 
 ## 6. Tachikoma System (`internal/tachikoma`)
 Tachikomas are deterministic background workers that keep local context fresh without requiring the agent to scan everything every time.

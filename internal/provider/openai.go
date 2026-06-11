@@ -19,9 +19,10 @@ import (
 
 type openAIClient struct {
 	baseClient
-	sdkClient      openai.Client
-	thinkingBudget int
+	sdkClient          openai.Client
+	thinkingBudget     int
 	useChatCompletions bool
+	useSDK             bool
 }
 
 func newOpenAIClient(cfg config.ProviderConfig) Client {
@@ -36,6 +37,7 @@ func newOpenAIClient(cfg config.ProviderConfig) Client {
 		thinkingBudget:     cfg.ThinkingBudget,
 		sdkClient:          sdkClient,
 		useChatCompletions: cfg.Preset != config.ProviderPresetOpenAI,
+		useSDK:             cfg.UseSDK,
 	}
 }
 
@@ -44,9 +46,10 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 		return Response{}, err
 	}
 
-	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
-	// We fall back to Chat Completions if we detect Gemini in the URL or if useChatCompletions is set.
-	if c.useChatCompletions || strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
+	if c.useChatCompletions {
+		if c.useSDK {
+			return c.completeChatSDK(ctx, systemPrompt, messages, tools)
+		}
 		return c.completeChat(ctx, systemPrompt, messages, tools)
 	}
 
@@ -65,7 +68,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		"model": c.model,
 		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
-		}, toChatMessages(messages, isGoogleEndpoint(c.baseURL))...),
+		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
@@ -74,7 +77,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		payload["parallel_tool_calls"] = false
 	}
 
-	headers := geminiAuthHeaders(c.baseURL, c.apiKey)
+	headers := buildAuthHeaders(c.baseURL, c.apiKey)
 
 	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
 		return Response{}, err
@@ -84,6 +87,38 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		return Response{}, fmt.Errorf("no hay respuesta del modelo")
 	}
 	return responseFromChatCompletion(decoded), nil
+}
+
+func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
+	sdkMessages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+	}
+	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+
+	params := openai.ChatCompletionNewParams{
+		Model:       openai.ChatModel(c.model),
+		Messages:    sdkMessages,
+		Temperature: param.NewOpt(0.2),
+	}
+	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
+		params.Tools = sdkTools
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+			OfAuto: param.NewOpt("auto"),
+		}
+		params.ParallelToolCalls = param.NewOpt(false)
+	}
+
+	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	reqOpts := make([]option.RequestOption, 0, len(headers))
+	for k, v := range headers {
+		reqOpts = append(reqOpts, option.WithHeader(k, v))
+	}
+
+	comp, err := c.sdkClient.Chat.Completions.New(ctx, params, reqOpts...)
+	if err != nil {
+		return Response{}, err
+	}
+	return responseFromSDKChatCompletion(comp), nil
 }
 
 func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
@@ -97,7 +132,7 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		} `json:"data"`
 	}
 
-	listHeaders := geminiAuthHeaders(c.baseURL, c.apiKey)
+	listHeaders := buildAuthHeaders(c.baseURL, c.apiKey)
 
 	if err := getJSON(ctx, c.httpClient, c.baseURL+"/models", listHeaders, &decoded); err != nil {
 		return nil, err

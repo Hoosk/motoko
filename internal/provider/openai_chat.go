@@ -2,12 +2,13 @@ package provider
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 
+	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 type chatCompletionResponse struct {
@@ -143,45 +144,20 @@ func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []ToolInv
 	return result
 }
 
-func toChatMessages(messages []ConversationItem, isGoogle bool) []map[string]any {
+func toChatMessages(messages []ConversationItem) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
-			hasThoughtSignature := false
 			if len(call.Raw) > 0 {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
-					if _, found := rawToolCall["thought_signature"]; found {
-						hasThoughtSignature = true
-					}
-					if !hasThoughtSignature {
-						if extra, ok := rawToolCall["extra_content"].(map[string]any); ok {
-							if google, ok := extra["google"].(map[string]any); ok {
-								if _, found := google["signature"]; found {
-									hasThoughtSignature = true
-								}
-							}
-						}
-					}
-
-					if !isGoogle || hasThoughtSignature {
-						result = append(result, map[string]any{
-							"role":       RoleAssistant,
-							"content":    "",
-							"tool_calls": []map[string]any{rawToolCall},
-						})
-						continue
-					}
+					result = append(result, map[string]any{
+						"role":       RoleAssistant,
+						"content":    "",
+						"tool_calls": []map[string]any{rawToolCall},
+					})
+					continue
 				}
-			}
-
-			if isGoogle && !hasThoughtSignature {
-				// Convert to standard assistant text message to prevent 400 bad request error
-				result = append(result, map[string]any{
-					"role":    RoleAssistant,
-					"content": fmt.Sprintf("[Ejecutando herramienta: %s con argumentos: %s]", call.Name, call.Input),
-				})
-				continue
 			}
 
 			result = append(result, map[string]any{
@@ -200,34 +176,6 @@ func toChatMessages(messages []ConversationItem, isGoogle bool) []map[string]any
 		}
 		if msg.Role == RoleTool {
 			call, output := parseToolResultContent(msg.Content)
-			hasThoughtSignature := false
-			if len(call.Raw) > 0 {
-				var rawToolCall map[string]any
-				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
-					if _, found := rawToolCall["thought_signature"]; found {
-						hasThoughtSignature = true
-					}
-					if !hasThoughtSignature {
-						if extra, ok := rawToolCall["extra_content"].(map[string]any); ok {
-							if google, ok := extra["google"].(map[string]any); ok {
-								if _, found := google["signature"]; found {
-									hasThoughtSignature = true
-								}
-							}
-						}
-					}
-				}
-			}
-
-			if isGoogle && !hasThoughtSignature {
-				// Convert to standard user text message to prevent 400 bad request error
-				result = append(result, map[string]any{
-					"role":    RoleUser,
-					"content": fmt.Sprintf("[Resultado de %s: %s]", call.Name, output),
-				})
-				continue
-			}
-
 			item := map[string]any{
 				"role":    RoleTool,
 				"content": output,
@@ -429,6 +377,176 @@ func sortedChatToolCalls(acc map[int]*chatCompletionToolCall) []chatCompletionTo
 			}
 			result = append(result, *call)
 		}
+	}
+	return result
+}
+
+func toSDKChatMessages(messages []ConversationItem) []openai.ChatCompletionMessageParamUnion {
+	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, msg := range messages {
+		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
+			var sdkToolCalls []openai.ChatCompletionMessageToolCallUnionParam
+			if len(call.Raw) > 0 {
+				var rawToolCall map[string]any
+				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+					var sdkCall openai.ChatCompletionMessageToolCallUnionParam
+					if rawBytes, err := json.Marshal(rawToolCall); err == nil {
+						if err := json.Unmarshal(rawBytes, &sdkCall); err == nil {
+							sdkToolCalls = append(sdkToolCalls, sdkCall)
+						}
+					}
+				}
+			}
+
+			if len(sdkToolCalls) == 0 {
+				sdkToolCalls = append(sdkToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+						ID:   call.CallID,
+						Type: "function",
+						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+							Name:      call.Name,
+							Arguments: assistantToolCallArguments(call),
+						},
+					},
+				})
+			}
+
+			result = append(result, openai.ChatCompletionMessageParamUnion{
+				OfAssistant: &openai.ChatCompletionAssistantMessageParam{
+					Role:      "assistant",
+					ToolCalls: sdkToolCalls,
+				},
+			})
+			continue
+		}
+		if msg.Role == RoleTool {
+			call, output := parseToolResultContent(msg.Content)
+			result = append(result, openai.ToolMessage(output, call.CallID))
+			continue
+		}
+
+		role := normalizeConversationRole(msg.Role)
+		switch role {
+		case RoleUser:
+			result = append(result, openai.UserMessage(msg.Content))
+		case RoleAssistant:
+			result = append(result, openai.AssistantMessage(msg.Content))
+		default:
+			result = append(result, openai.UserMessage(msg.Content))
+		}
+	}
+	return result
+}
+
+func toSDKChatTools(tools ToolSet) []openai.ChatCompletionToolUnionParam {
+	if len(tools.Local) == 0 {
+		return nil
+	}
+	result := make([]openai.ChatCompletionToolUnionParam, 0, len(tools.Local))
+	for _, tool := range tools.Local {
+		parameters := map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{
+					"type":        "string",
+					"description": toolInputDescription(tool),
+				},
+			},
+			"required":             []string{"input"},
+			"additionalProperties": false,
+		}
+
+		result = append(result, openai.ChatCompletionToolUnionParam{
+			OfFunction: &openai.ChatCompletionFunctionToolParam{
+				Type: "function",
+				Function: shared.FunctionDefinitionParam{
+					Name:        tool.Name,
+					Description: param.NewOpt(strings.TrimSpace(tool.Description)),
+					Parameters:  shared.FunctionParameters(parameters),
+					Strict:      param.NewOpt(true),
+				},
+			},
+		})
+	}
+	return result
+}
+
+func responseFromSDKChatCompletion(comp *openai.ChatCompletion) Response {
+	if len(comp.Choices) == 0 {
+		return Response{}
+	}
+	message := comp.Choices[0].Message
+	text := strings.TrimSpace(message.Content)
+
+	input := int(comp.Usage.PromptTokens)
+	output := int(comp.Usage.CompletionTokens)
+	total := int(comp.Usage.TotalTokens)
+
+	result := Response{
+		FinalText: text,
+		Usage: Usage{
+			InputTokens:  input,
+			OutputTokens: output,
+			TotalTokens:  total,
+		},
+	}
+	if text != "" {
+		result.OutputItems = []ConversationItem{AssistantText(text)}
+	}
+	result.PendingCalls = pendingCallsFromSDKToolCalls(message.ToolCalls)
+	if len(result.PendingCalls) > 0 {
+		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
+		result.FinalText = ""
+	}
+	return result
+}
+
+func pendingCallsFromSDKToolCalls(toolCalls []openai.ChatCompletionMessageToolCallUnion) []ToolInvocation {
+	result := make([]ToolInvocation, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		if strings.TrimSpace(call.Function.Name) == "" {
+			continue
+		}
+		var raw []byte
+		if rawJSON := call.RawJSON(); rawJSON != "" {
+			raw = []byte(rawJSON)
+		}
+		arguments := strings.TrimSpace(call.Function.Arguments)
+		invocation := ToolInvocation{
+			Kind:   InvokeCustomTool,
+			Name:   strings.TrimSpace(call.Function.Name),
+			CallID: strings.TrimSpace(call.ID),
+			Raw:    raw,
+		}
+		if arguments != "" {
+			invocation.Arguments = json.RawMessage(arguments)
+			invocation.Input = openAIInvocationInput(invocation.Arguments)
+			if invocation.Input == "" {
+				invocation.Input = arguments
+			}
+		}
+		result = append(result, invocation)
+	}
+	return result
+}
+
+func toInternalToolCallDeltas(sdkDeltas []openai.ChatCompletionChunkChoiceDeltaToolCall) []chatCompletionToolCallDelta {
+	result := make([]chatCompletionToolCallDelta, 0, len(sdkDeltas))
+	for _, sdk := range sdkDeltas {
+		var raw []byte
+		if rawJSON := sdk.RawJSON(); rawJSON != "" {
+			raw = []byte(rawJSON)
+		}
+		result = append(result, chatCompletionToolCallDelta{
+			ID:    sdk.ID,
+			Type:  sdk.Type,
+			Index: int(sdk.Index),
+			Raw:   raw,
+			Function: chatCompletionToolFunction{
+				Name:      sdk.Function.Name,
+				Arguments: sdk.Function.Arguments,
+			},
+		})
 	}
 	return result
 }

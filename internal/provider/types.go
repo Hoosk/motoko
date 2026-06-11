@@ -21,12 +21,6 @@ const (
 	InvokeCustomTool = "custom"
 )
 
-type ToolDefinition struct {
-	Name        string
-	Description string
-	InputHint   string
-}
-
 type LocalToolDefinition struct {
 	Name        string
 	Description string
