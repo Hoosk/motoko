@@ -90,3 +90,12 @@ type ModelChangedMsg struct {
 type UpdateAvailableMsg struct {
 	Info *updater.VersionInfo
 }
+
+type ModelSelectedMsg struct {
+	Model provider.ModelInfo
+}
+
+type ThinkingBudgetSelectedMsg struct {
+	Model  provider.ModelInfo
+	Budget int
+}

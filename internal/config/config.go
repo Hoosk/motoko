@@ -37,6 +37,7 @@ type ProviderConfig struct {
 	UseSDK              bool           `json:"use_sdk,omitempty"`
 	EnableGoogleSearch  bool           `json:"enable_google_search,omitempty"`
 	EnableCodeExecution bool           `json:"enable_code_execution,omitempty"`
+	SupportsThinking    bool           `json:"supports_thinking,omitempty"`
 }
 
 type SearchConfig struct {

@@ -116,9 +116,11 @@ func TestToGenAIContentToolCallsAndResponses(t *testing.T) {
 
 func TestBuildGenerateContentConfigTools(t *testing.T) {
 	client := &geminiClient{
+		baseClient:          newBaseClient("gemini", "", "", "gemini-2.5-flash"),
 		thinkingBudget:      1024,
 		enableGoogleSearch:  true,
 		enableCodeExecution: true,
+		supportsThinking:    true,
 	}
 
 	tools := ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run command"}}}
@@ -128,8 +130,14 @@ func TestBuildGenerateContentConfigTools(t *testing.T) {
 		t.Fatalf("unexpected system instruction: %#v", genaiConfig.SystemInstruction)
 	}
 
-	if genaiConfig.ThinkingConfig == nil || *genaiConfig.ThinkingConfig.ThinkingBudget != 1024 {
-		t.Fatalf("unexpected thinking config: %#v", genaiConfig.ThinkingConfig)
+	if genaiConfig.ThinkingConfig == nil {
+		t.Fatalf("expected ThinkingConfig to be set")
+	}
+	if genaiConfig.ThinkingConfig.ThinkingBudget == nil || *genaiConfig.ThinkingConfig.ThinkingBudget != 1024 {
+		t.Fatalf("expected ThinkingBudget to be 1024, got: %v", genaiConfig.ThinkingConfig.ThinkingBudget)
+	}
+	if genaiConfig.ThinkingConfig.ThinkingLevel != "" {
+		t.Fatalf("expected ThinkingLevel to be empty, got: %q", genaiConfig.ThinkingConfig.ThinkingLevel)
 	}
 
 	// Should have 3 tools: GoogleSearch, CodeExecution, and the function declarations tool
@@ -179,8 +187,9 @@ func TestNewGeminiClientInitializesFields(t *testing.T) {
 
 func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 	client := &geminiClient{
-		baseClient:     newBaseClient("gemini", "", "", "gemini-3.5-flash"),
-		thinkingBudget: 8192,
+		baseClient:       newBaseClient("gemini", "", "", "gemini-3.5-flash"),
+		thinkingBudget:   8192,
+		supportsThinking: true,
 	}
 
 	genaiConfig := client.buildGenerateContentConfig("instruction", ToolSet{})
@@ -192,11 +201,12 @@ func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 		t.Errorf("expected IncludeThoughts to be true")
 	}
 
-	if genaiConfig.ThinkingConfig.ThinkingBudget == nil || *genaiConfig.ThinkingConfig.ThinkingBudget != 8192 {
-		t.Errorf("expected ThinkingBudget to be 8192, got: %v", genaiConfig.ThinkingConfig.ThinkingBudget)
+	if genaiConfig.ThinkingConfig.ThinkingBudget != nil {
+		t.Errorf("expected ThinkingBudget to be nil for Gemini 3.5+, got: %v", *genaiConfig.ThinkingConfig.ThinkingBudget)
 	}
 
 	if genaiConfig.ThinkingConfig.ThinkingLevel != "medium" {
 		t.Errorf("expected ThinkingLevel to be 'medium', got: %q", genaiConfig.ThinkingConfig.ThinkingLevel)
 	}
 }
+

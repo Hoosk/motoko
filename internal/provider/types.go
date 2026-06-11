@@ -94,8 +94,9 @@ type Delta struct {
 }
 
 type ModelInfo struct {
-	ID            string
-	ContextWindow int
+	ID               string
+	ContextWindow    int
+	SupportsThinking bool
 }
 
 type BatchRequestItem struct {
@@ -126,4 +127,5 @@ type Client interface {
 	StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error)
 	Summary() string
 	ListModels(ctx context.Context) ([]ModelInfo, error)
+	GetModel(ctx context.Context, model string) (ModelInfo, error)
 }

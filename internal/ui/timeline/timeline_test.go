@@ -32,8 +32,8 @@ func TestWrapText(t *testing.T) {
 	tests := []struct {
 		name     string
 		text     string
-		width    int
 		expected string
+		width    int
 	}{
 		{
 			name:     "no wrap needed",
@@ -59,10 +59,11 @@ func TestWrapText(t *testing.T) {
 			width:    0,
 			expected: "hello world",
 		},
-		{"negative width returns original",
-			"hello world",
-			-5,
-			"hello world",
+		{
+			name:     "negative width returns original",
+			text:     "hello world",
+			width:    -5,
+			expected: "hello world",
 		},
 	}
 

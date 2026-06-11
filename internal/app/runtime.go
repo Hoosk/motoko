@@ -105,21 +105,25 @@ type SubagentInfo struct {
 type Runtime struct {
 	brainInitErr      error
 	backgroundCtx     context.Context
-	currentSession    *session.Session
-	brain             *brain.Brain
+	updateErr         error
+	semantic          *semantic.Index
 	agent             *agent.Agent
 	newProviderClient func(config.ProviderConfig) (provider.Client, error)
 	config            *config.AppConfig
 	tasks             *TaskManager
-	semantic          *semantic.Index
+	updateInfo        *updater.VersionInfo
 	tachikomas        *tachikoma.Manager
 	activeSubagents   map[string]*SubagentInfo
 	pending           *pendingShell
 	tools             *tools.Registry
-	mode              Mode
+	updateDone        chan struct{}
+	brain             *brain.Brain
+	currentSession    *session.Session
 	workspaceID       string
-	inputMode         InputMode
 	currentAgentName  string
+	inputMode         InputMode
+	mode              Mode
+	version           string
 	availableAgents   []agent.AgentDef
 	mentionedFiles    []string
 	availableSkills   []skills.Skill
@@ -127,16 +131,11 @@ type Runtime struct {
 	subagentsMu       sync.Mutex
 	wasResumed        bool
 	debug             bool
-
-	updateInfo *updater.VersionInfo
-	updateErr  error
-	updateDone chan struct{}
-	version    string
 }
 
 type RuntimeOptions struct {
-	Resume  bool
 	Version string
+	Resume  bool
 }
 
 type AgentStreamEvent struct {
@@ -364,12 +363,26 @@ func (r *Runtime) SetActiveModelInfo(model provider.ModelInfo) error {
 	active.Model = model.ID
 	active.Models = config.UniqueSortedKeep(active.Models, model.ID)
 	active.ContextWindow = model.ContextWindow
+	active.SupportsThinking = model.SupportsThinking
 	r.config.UpsertProvider(active)
 	if err := r.config.Save(); err != nil {
 		return err
 	}
 	r.refreshAgent()
 	return nil
+}
+
+// GetModelInfoForActiveProvider queries the active provider client for detailed model info (like SupportsThinking).
+func (r *Runtime) GetModelInfoForActiveProvider(ctx context.Context, modelID string) (provider.ModelInfo, error) {
+	active, ok := r.config.Active()
+	if !ok {
+		return provider.ModelInfo{}, fmt.Errorf("no hay provider activo")
+	}
+	client, err := r.providerClient(active)
+	if err != nil {
+		return provider.ModelInfo{}, err
+	}
+	return client.GetModel(ctx, modelID)
 }
 
 // SetThinkingBudget updates the thinking budget for the active provider.

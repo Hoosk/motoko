@@ -43,6 +43,26 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
+		case "response.reasoning_summary_text.delta":
+			delta := event.AsResponseReasoningSummaryTextDelta().Delta
+			if delta == "" {
+				continue
+			}
+			if onDelta != nil {
+				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
+					return Response{}, err
+				}
+			}
+		case "response.reasoning_text.delta":
+			delta := event.AsResponseReasoningTextDelta().Delta
+			if delta == "" {
+				continue
+			}
+			if onDelta != nil {
+				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
+					return Response{}, err
+				}
+			}
 		case "response.output_text.delta":
 			delta := event.Delta
 			if delta == "" {
@@ -231,6 +251,9 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	}
 
 	if c.thinkingBudget > 0 {
+		params.OutputConfig = anthropic.OutputConfigParam{
+			Effort: BudgetToAnthropicEffort(c.thinkingBudget),
+		}
 		if c.checkAdaptiveThinking(ctx) {
 			params.Thinking = anthropic.ThinkingConfigParamUnion{
 				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{

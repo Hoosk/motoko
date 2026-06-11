@@ -45,7 +45,7 @@ func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
 	}
 	c.mu.Unlock()
 
-	fallback := isAnthropicAdaptiveThinkingModel(c.model)
+	fallback := true
 	if !c.listReady() {
 		return fallback
 	}
@@ -92,6 +92,9 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	}
 
 	if c.thinkingBudget > 0 {
+		params.OutputConfig = anthropic.OutputConfigParam{
+			Effort: BudgetToAnthropicEffort(c.thinkingBudget),
+		}
 		if c.checkAdaptiveThinking(ctx) {
 			params.Thinking = anthropic.ThinkingConfigParamUnion{
 				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
@@ -124,13 +127,32 @@ func (c *anthropicClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		if id == "" {
 			continue
 		}
-		result = append(result, ModelInfo{ID: id, ContextWindow: int(modelInfo.MaxInputTokens)})
+		result = append(result, ModelInfo{
+			ID:               id,
+			ContextWindow:    int(modelInfo.MaxInputTokens),
+			SupportsThinking: modelInfo.Capabilities.Thinking.Supported,
+		})
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+func (c *anthropicClient) GetModel(ctx context.Context, model string) (ModelInfo, error) {
+	if err := c.ConfigurationError(); err != nil {
+		return ModelInfo{}, err
+	}
+	modelInfo, err := c.sdkClient.Models.Get(ctx, model, anthropic.ModelGetParams{})
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	return ModelInfo{
+		ID:               modelInfo.ID,
+		ContextWindow:    int(modelInfo.MaxInputTokens),
+		SupportsThinking: modelInfo.Capabilities.Thinking.Supported,
+	}, nil
 }
 
 // CreateBatch implements BatchClient

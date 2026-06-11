@@ -10,24 +10,24 @@ import (
 
 func TestParseVersion(t *testing.T) {
 	tests := []struct {
-		name          string
-		version       string
-		wantMajor     int
-		wantMinor     int
-		wantPatch     int
-		wantPre       string
-		wantErr       bool
+		name      string
+		version   string
+		wantPre   string
+		wantMajor int
+		wantMinor int
+		wantPatch int
+		wantErr   bool
 	}{
-		{"simple version", "1.2.3", 1, 2, 3, "", false},
-		{"version with leading v", "v1.2.3", 1, 2, 3, "", false},
-		{"version with leading V", "V1.2.3", 1, 2, 3, "", false},
-		{"version with alpha pre-release", "v1.2.3-alpha", 1, 2, 3, "alpha", false},
-		{"version with complex pre-release", "v0.1.8-alpha.2", 0, 1, 8, "alpha.2", false},
-		{"only major and minor", "1.2", 1, 2, 0, "", false},
-		{"only major", "1", 1, 0, 0, "", false},
-		{"empty version", "", 0, 0, 0, "", true},
-		{"non-numeric version", "dev", 0, 0, 0, "", true},
-		{"invalid format", "abc.def.ghi", 0, 0, 0, "", true},
+		{name: "simple version", version: "1.2.3", wantMajor: 1, wantMinor: 2, wantPatch: 3, wantPre: "", wantErr: false},
+		{name: "version with leading v", version: "v1.2.3", wantMajor: 1, wantMinor: 2, wantPatch: 3, wantPre: "", wantErr: false},
+		{name: "version with leading V", version: "V1.2.3", wantMajor: 1, wantMinor: 2, wantPatch: 3, wantPre: "", wantErr: false},
+		{name: "version with alpha pre-release", version: "v1.2.3-alpha", wantMajor: 1, wantMinor: 2, wantPatch: 3, wantPre: "alpha", wantErr: false},
+		{name: "version with complex pre-release", version: "v0.1.8-alpha.2", wantMajor: 0, wantMinor: 1, wantPatch: 8, wantPre: "alpha.2", wantErr: false},
+		{name: "only major and minor", version: "1.2", wantMajor: 1, wantMinor: 2, wantPatch: 0, wantPre: "", wantErr: false},
+		{name: "only major", version: "1", wantMajor: 1, wantMinor: 0, wantPatch: 0, wantPre: "", wantErr: false},
+		{name: "empty version", version: "", wantMajor: 0, wantMinor: 0, wantPatch: 0, wantPre: "", wantErr: true},
+		{name: "non-numeric version", version: "dev", wantMajor: 0, wantMinor: 0, wantPatch: 0, wantPre: "", wantErr: true},
+		{name: "invalid format", version: "abc.def.ghi", wantMajor: 0, wantMinor: 0, wantPatch: 0, wantPre: "", wantErr: true},
 	}
 
 	for _, tt := range tests {

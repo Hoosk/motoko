@@ -36,7 +36,7 @@ func TestMessageSerializationHelpers(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", []ConversationItem{UserText("hola")}, ToolSet{}, 8192)
+	params := buildResponseParams("gpt-4.1-mini", "system", []ConversationItem{UserText("hola")}, ToolSet{}, 0)
 	if params.Temperature.Value != 0.2 {
 		t.Fatalf("expected temperature for non-reasoning model, got %#v", params.Temperature)
 	}
@@ -52,7 +52,7 @@ func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-5.4", "system", []ConversationItem{AssistantText("hola")}, ToolSet{}, 24576)
+	params := buildResponseParams("o1-preview", "system", []ConversationItem{AssistantText("hola")}, ToolSet{}, 24576)
 	if params.Reasoning.Effort != "high" {
 		t.Fatalf("expected high reasoning effort, got %#v", params.Reasoning)
 	}

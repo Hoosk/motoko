@@ -7,16 +7,19 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/tracelog"
 	"google.golang.org/genai"
 )
 
 type geminiClient struct {
+	initErr     error
+	genaiClient *genai.Client
 	baseClient
 	thinkingBudget      int
 	enableGoogleSearch  bool
 	enableCodeExecution bool
-	genaiClient         *genai.Client
-	initErr             error
+
+	supportsThinking bool
 }
 
 func newGeminiClient(cfg config.ProviderConfig) Client {
@@ -29,6 +32,7 @@ func newGeminiClient(cfg config.ProviderConfig) Client {
 		thinkingBudget:      cfg.ThinkingBudget,
 		enableGoogleSearch:  cfg.EnableGoogleSearch,
 		enableCodeExecution: cfg.EnableCodeExecution,
+		supportsThinking:    cfg.SupportsThinking,
 		genaiClient:         client,
 		initErr:             err,
 	}
@@ -72,19 +76,21 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		finalResponse = resp
 
 		text := resp.Text()
-		if text != "" {
-			raw.WriteString(text)
-			if onDelta != nil {
-				// Search for thought reasoning parts in the candidate
-				var thought string
-				if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-					for _, part := range resp.Candidates[0].Content.Parts {
-						if part.Thought && part.Text != "" {
-							thought = part.Text
-							break
-						}
-					}
+		var thoughts []string
+		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if part.Thought && part.Text != "" {
+					thoughts = append(thoughts, part.Text)
 				}
+			}
+		}
+		thought := strings.Join(thoughts, "")
+
+		if text != "" || thought != "" {
+			if text != "" {
+				raw.WriteString(text)
+			}
+			if onDelta != nil {
 				if err := onDelta(Delta{
 					Content:          text,
 					ReasoningContent: thought,
@@ -146,33 +152,53 @@ func (c *geminiClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		}
 		id := item.Name
 		id = strings.TrimPrefix(id, "models/")
+		tracelog.Logf("gemini client ListModels: model ID %q, thinking capability (from API)=%t, input token limit=%d", id, item.Thinking, item.InputTokenLimit)
 		result = append(result, ModelInfo{
-			ID:            id,
-			ContextWindow: int(item.InputTokenLimit),
+			ID:               id,
+			ContextWindow:    int(item.InputTokenLimit),
+			SupportsThinking: item.Thinking,
 		})
 	}
 	return result, nil
 }
 
+func (c *geminiClient) GetModel(ctx context.Context, model string) (ModelInfo, error) {
+	if c.initErr != nil {
+		return ModelInfo{}, c.initErr
+	}
+	item, err := c.genaiClient.Models.Get(ctx, model, nil)
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	tracelog.Logf("gemini client GetModel: model %q, thinking capability (from API)=%t, input token limit=%d", item.Name, item.Thinking, item.InputTokenLimit)
+	return ModelInfo{
+		ID:               strings.TrimPrefix(item.Name, "models/"),
+		ContextWindow:    int(item.InputTokenLimit),
+		SupportsThinking: item.Thinking,
+	}, nil
+}
+
 func (c *geminiClient) buildGenerateContentConfig(systemPrompt string, tools ToolSet) *genai.GenerateContentConfig {
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
-			Role:  "user",
+			Role:  RoleUser,
 			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
 		},
 		Temperature: float32Ptr(0.2),
 	}
 
-	cfg.ThinkingConfig = &genai.ThinkingConfig{
-		IncludeThoughts: true,
-	}
-	if c.thinkingBudget > 0 {
-		cfg.ThinkingConfig.ThinkingBudget = int32Ptr(int32(c.thinkingBudget))
-		if isGemini3Model(c.model) {
+	if c.supportsThinking && c.thinkingBudget != 0 {
+		cfg.ThinkingConfig = &genai.ThinkingConfig{
+			IncludeThoughts: true,
+		}
+		if strings.Contains(c.model, "2.5") {
+			// Gemini 2.5 models expect thinkingBudget (integer token count)
+			budget32 := int32(c.thinkingBudget)
+			cfg.ThinkingConfig.ThinkingBudget = &budget32
+		} else {
+			// Gemini 3.x and later models expect thinkingLevel (enum: low, medium, high)
 			cfg.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(budgetToGeminiThinkingLevel(c.thinkingBudget))
 		}
-	} else if c.thinkingBudget == -1 {
-		cfg.ThinkingConfig.ThinkingBudget = int32Ptr(-1)
 	}
 
 	var sdkTools []*genai.Tool
@@ -396,3 +422,4 @@ func float32Ptr(v float32) *float32 {
 func int32Ptr(v int32) *int32 {
 	return &v
 }
+

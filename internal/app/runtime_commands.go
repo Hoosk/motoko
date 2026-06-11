@@ -314,9 +314,25 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 	}
 
 	model := strings.TrimSpace(strings.Join(args, " "))
+	ctx := context.Background()
+	var supportsThinking bool
+	var contextWindow int
+	if client, err := r.providerClient(active); err == nil {
+		if info, err := client.GetModel(ctx, model); err == nil {
+			supportsThinking = info.SupportsThinking
+			contextWindow = info.ContextWindow
+			tracelog.Logf("runtime handleModelsCommand: model %q resolved: supportsThinking=%t contextWindow=%d", model, supportsThinking, contextWindow)
+		} else {
+			tracelog.Logf("runtime handleModelsCommand: failed to resolve model %q: %v", model, err)
+		}
+	} else {
+		tracelog.Logf("runtime handleModelsCommand: failed to load provider client: %v", err)
+	}
+
 	active.Model = model
 	active.Models = config.UniqueSortedKeep(active.Models, model)
-	active.ContextWindow = 0
+	active.ContextWindow = contextWindow
+	active.SupportsThinking = supportsThinking
 	r.config.UpsertProvider(active)
 	if err := r.config.Save(); err != nil {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}

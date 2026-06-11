@@ -148,10 +148,22 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		result = append(result, ModelInfo{ID: id, ContextWindow: item.ContextLength})
+		result = append(result, ModelInfo{
+			ID:               id,
+			ContextWindow:    item.ContextLength,
+			SupportsThinking: true,
+		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+func (c *openAIClient) GetModel(ctx context.Context, model string) (ModelInfo, error) {
+	return ModelInfo{
+		ID:               model,
+		ContextWindow:    131072, // standard fallback
+		SupportsThinking: true,
+	}, nil
 }
 
 // buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
@@ -175,12 +187,10 @@ func buildResponseParams(model, systemPrompt string, messages []ConversationItem
 		p.MaxToolCalls = param.NewOpt(int64(1))
 		p.ParallelToolCalls = param.NewOpt(false)
 	}
-	if isOpenAIReasoningModel(model) {
-		// Reasoning models (o-series, gpt-5.x) don't support temperature.
-		if thinkingBudget > 0 {
-			p.Reasoning = shared.ReasoningParam{
-				Effort: shared.ReasoningEffort(budgetToReasoningEffort(thinkingBudget)),
-			}
+	if thinkingBudget > 0 {
+		p.Reasoning = shared.ReasoningParam{
+			Effort:  shared.ReasoningEffort(budgetToReasoningEffort(thinkingBudget)),
+			Summary: shared.ReasoningSummaryAuto,
 		}
 	} else {
 		p.Temperature = param.NewOpt(0.2)

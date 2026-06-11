@@ -19,6 +19,9 @@ func (f *fakeLoopProvider) Summary() string  { return "fake:loop" }
 func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "loop"}}, nil
 }
+func (f *fakeLoopProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{ID: model}, nil
+}
 func (f *fakeLoopProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)
 }
@@ -45,6 +48,9 @@ func (f *fakeMultiProvider) Configured() bool { return true }
 func (f *fakeMultiProvider) Summary() string  { return "fake:multi" }
 func (f *fakeMultiProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "multi"}}, nil
+}
+func (f *fakeMultiProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{ID: model}, nil
 }
 func (f *fakeMultiProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)

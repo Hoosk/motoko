@@ -158,19 +158,49 @@ func TestDecodeJSONResponseDecodesSuccessBody(t *testing.T) {
 }
 
 func TestThinkingHelpersMapThresholds(t *testing.T) {
-	if !isOpenAIReasoningModel("gpt-5.5") || isOpenAIReasoningModel("gpt-4.1") {
-		t.Fatal("unexpected openai reasoning model classification")
-	}
 	if got := budgetToReasoningEffort(65536); got != "xhigh" {
 		t.Fatalf("unexpected reasoning effort %q", got)
-	}
-	if !isAnthropicAdaptiveThinkingModel("claude-opus-4-7") || !isAnthropicAdaptiveThinkingModel("claude-opus-4-8") || isAnthropicAdaptiveThinkingModel("claude-sonnet-4") {
-		t.Fatal("unexpected anthropic adaptive classification")
-	}
-	if !isGemini3Model("gemini-3-pro") || isGemini3Model("gemini-2.5-pro") {
-		t.Fatal("unexpected gemini 3 classification")
 	}
 	if got := budgetToGeminiThinkingLevel(8192); got != "medium" {
 		t.Fatalf("unexpected gemini thinking level %q", got)
 	}
 }
+
+func TestGetThinkingLabels(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected []string
+	}{
+		{
+			model:    "o1-mini",
+			expected: []string{"off", "low", "medium", "high", "xhigh"},
+		},
+		{
+			model:    "gemini-2.5-flash",
+			expected: []string{"off", "low", "medium", "high", "xhigh"},
+		},
+		{
+			model:    "gemini-3.5-flash",
+			expected: []string{"off", "low", "medium", "high", "xhigh"},
+		},
+		{
+			model:    "claude-3-7-sonnet-20250219",
+			expected: []string{"off", "low", "medium", "high", "xhigh"},
+		},
+	}
+
+
+
+	for _, tc := range tests {
+		got := GetThinkingLabels(tc.model)
+		if len(got) != len(tc.expected) {
+			t.Fatalf("for model %s: expected %d labels, got %d", tc.model, len(tc.expected), len(got))
+		}
+		for i, label := range got {
+			if label != tc.expected[i] {
+				t.Errorf("for model %s, index %d: expected %q, got %q", tc.model, i, tc.expected[i], label)
+			}
+		}
+	}
+}
+

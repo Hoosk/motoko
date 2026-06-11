@@ -68,6 +68,15 @@ func (f fakeProviderClient) ListModels(ctx context.Context) ([]provider.ModelInf
 	return append([]provider.ModelInfo(nil), f.models...), nil
 }
 
+func (f fakeProviderClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	for _, m := range f.models {
+		if m.ID == model {
+			return m, nil
+		}
+	}
+	return provider.ModelInfo{ID: model}, nil
+}
+
 func withSessionBaseDir(t *testing.T) {
 	t.Helper()
 	prev := session.SessionsBaseDir
