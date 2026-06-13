@@ -124,16 +124,17 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		currentHistory := make([]provider.ConversationItem, len(history))
 		copy(currentHistory, history)
 
-		if i == 0 {
+		userMsgIdx := len(priorHistory)
+		if userMsgIdx < len(currentHistory) {
 			if strings.EqualFold(info.ActiveMode, "plan") {
 				frag := system.LoadFragment("plan_active")
-				if frag != "" && len(currentHistory) > 0 {
-					currentHistory[len(currentHistory)-1].Content += "\n\n" + frag
+				if frag != "" {
+					currentHistory[userMsgIdx].Content += "\n\n" + frag
 				}
 			} else if strings.EqualFold(info.ActiveMode, "build") {
 				frag := system.LoadFragment("build_switch")
-				if frag != "" && len(currentHistory) > 0 {
-					currentHistory[len(currentHistory)-1].Content += "\n\n" + frag
+				if frag != "" {
+					currentHistory[userMsgIdx].Content += "\n\n" + frag
 				}
 			}
 		}
