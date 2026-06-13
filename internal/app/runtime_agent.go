@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
@@ -76,17 +77,22 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 }
 
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
-	if r.brain != nil {
+	br := tools.GetBrain(ctx)
+	if br == nil {
+		br = r.brain
+	}
+
+	if br != nil {
 		var sb strings.Builder
-		sb.WriteString(r.brain.Summary())
-		if r.brain.Exists("plan") {
-			if plan := r.brain.PlanSummary(); plan != "" {
+		sb.WriteString(br.Summary())
+		if br.Exists("plan") {
+			if plan := br.PlanSummary(); plan != "" {
 				sb.WriteString("\n\n[plan.md]:\n")
 				sb.WriteString(plan)
 			}
 		}
-		if r.brain.Exists("tasks") {
-			if tasks := r.brain.TasksSummary(); tasks != "" {
+		if br.Exists("tasks") {
+			if tasks := br.TasksSummary(); tasks != "" {
 				sb.WriteString("\n\n[tasks.md]:\n")
 				sb.WriteString(tasks)
 			}
@@ -185,7 +191,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 	return info
 }
 
-func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
+func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
 	active, ok := r.config.Active()
 	if !ok {
 		return nil, fmt.Errorf("no hay provider activo configurado")
@@ -206,6 +212,17 @@ func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
 
 	override, hasOverride := r.config.Agents[aDef.Name]
 	
+	hasOverride = true
+	if len(cfg.ToolFilter) > 0 {
+		override.ToolFilter = append(override.ToolFilter, cfg.ToolFilter...)
+	}
+	if !cfg.AllowDelegate {
+		override.ExcludeTools = append(override.ExcludeTools, "delegate")
+	}
+	if cfg.MaxIterations > 0 {
+		override.MaxIterations = &cfg.MaxIterations
+	}
+
 	// AppConfig provider override
 	if hasOverride && override.Provider != "" {
 		if p, ok := r.config.Provider(override.Provider); ok {
@@ -221,15 +238,29 @@ func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
 	return r.buildAgentFromDef(client, aDef, override, hasOverride), nil
 }
 
-func (r *Runtime) RunSubagent(ctx context.Context, name, prompt string) (string, error) {
+type subagentDepthKey struct{}
+
+func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
+	currentDepth := 0
+	if v, ok := ctx.Value(subagentDepthKey{}).(int); ok {
+		currentDepth = v
+	}
+	maxDepth := cfg.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 2 // default max depth
+	}
+	if currentDepth >= maxDepth {
+		return "", fmt.Errorf("se alcanzó la profundidad máxima de delegación (%d)", maxDepth)
+	}
+
 	r.subagentsMu.Lock()
 	if r.activeSubagents == nil {
 		r.activeSubagents = make(map[string]*SubagentInfo)
 	}
-	id := fmt.Sprintf("%s-%d", name, len(r.activeSubagents)+1)
+	id := fmt.Sprintf("%s-%d", cfg.Mode, len(r.activeSubagents)+1)
 	r.activeSubagents[id] = &SubagentInfo{
-		Name:      name,
-		Prompt:    prompt,
+		Name:      cfg.Mode,
+		Prompt:    cfg.Task,
 		StartedAt: time.Now(),
 	}
 	r.subagentsMu.Unlock()
@@ -240,19 +271,51 @@ func (r *Runtime) RunSubagent(ctx context.Context, name, prompt string) (string,
 		r.subagentsMu.Unlock()
 	}()
 
-	sub, err := r.createSubagent(name)
+	subSessionID := fmt.Sprintf("%s-%s", r.currentSession.ID, id)
+	subBrain, err := brain.New(r.workspaceID, subSessionID)
 	if err != nil {
 		return "", err
 	}
 
+	if cfg.InheritBrain && r.brain != nil {
+		if err := r.brain.CopyTo(subBrain); err != nil {
+			return "", err
+		}
+	}
+
+	sub, err := r.createSubagent(cfg.Mode, cfg)
+	if err != nil {
+		return "", err
+	}
+
+	subCtx := tools.WithBrain(ctx, subBrain)
+	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
+	
 	info := r.GetContextInfo()
-	info = r.enrichContext(ctx, info, prompt)
+	info = r.enrichContext(subCtx, info, cfg.Task)
 
-	res, err := sub.Run(ctx, info, prompt, nil)
+	res, err := sub.RunStream(subCtx, info, cfg.Task, nil, func(event agent.StreamEvent) error {
+		if event.Kind == "tool_start" || event.Kind == "content" {
+			r.subagentsMu.Lock()
+			if subInfo, ok := r.activeSubagents[id]; ok {
+				if event.Title != "" {
+					subInfo.Progress = event.Title
+				}
+			}
+			r.subagentsMu.Unlock()
+			if cfg.ProgressChan != nil && event.Title != "" {
+				select {
+				case cfg.ProgressChan <- fmt.Sprintf("[%s] %s", cfg.Mode, event.Title):
+				default:
+				}
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
 
-	tracelog.Logf("subagent %s finished usage_in=%d usage_out=%d total=%d", name, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens)
+	tracelog.Logf("subagent %s finished usage_in=%d usage_out=%d total=%d", cfg.Mode, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens)
 	return res.Assistant, nil
 }

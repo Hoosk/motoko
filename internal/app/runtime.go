@@ -100,6 +100,7 @@ type SubagentInfo struct {
 	StartedAt time.Time
 	Name      string
 	Prompt    string
+	Progress  string
 }
 
 type Runtime struct {
@@ -658,13 +659,16 @@ func (r *Runtime) buildAgentFromDef(client provider.Client, aDef agent.AgentDef,
 }
 
 
-// ActiveSubagents returns a sorted list of currently active subagent labels.
 func (r *Runtime) ActiveSubagents() []string {
 	r.subagentsMu.Lock()
 	defer r.subagentsMu.Unlock()
 	var list []string
-	for id := range r.activeSubagents {
-		list = append(list, id)
+	for id, info := range r.activeSubagents {
+		if info.Progress != "" {
+			list = append(list, fmt.Sprintf("%s: %s", id, info.Progress))
+		} else {
+			list = append(list, id)
+		}
 	}
 	sort.Strings(list)
 	return list
