@@ -114,10 +114,6 @@ Motoko reads its configuration from `~/.config/motoko/config.toml`. You can conf
 /provider use <name>   # Switch active provider
 /models                # Select models for the active provider
 ```
-
-#### Thinking/Reasoning Budget
-Adjust the reasoning budget of supported models (e.g. Claude 3.7 Sonnet) via the model selector (`Ctrl+M` or `/models`). Select between: `off`, `low` (1k tokens), `medium` (8k tokens), `high` (24k tokens), and `xhigh` (64k tokens).
-
 ---
 
 *"If we all reacted the same way, we'd be predictable, and there's always more than one way to view a situation."* — Motoko Kusanagi

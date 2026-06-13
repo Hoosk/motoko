@@ -46,10 +46,23 @@ type SearchConfig struct {
 	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
 }
 
+type AgentOverride struct {
+	Model          string   `json:"model,omitempty"`
+	Provider       string   `json:"provider,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	ThinkingBudget *int     `json:"thinking_budget,omitempty"`
+	MaxIterations  *int     `json:"max_iterations,omitempty"`
+	SystemPrompt   string   `json:"system_prompt,omitempty"`
+	ToolFilter     []string `json:"tool_filter,omitempty"`
+	ExcludeTools   []string `json:"exclude_tools,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty"`
+}
+
 type AppConfig struct {
-	ActiveProvider string           `json:"active_provider"`
-	Providers      []ProviderConfig `json:"providers"`
-	Search         SearchConfig     `json:"search,omitempty"`
+	ActiveProvider string                   `json:"active_provider"`
+	Providers      []ProviderConfig         `json:"providers"`
+	Search         SearchConfig             `json:"search,omitempty"`
+	Agents         map[string]AgentOverride `json:"agents,omitempty"`
 }
 
 func Load() (*AppConfig, error) {
@@ -118,6 +131,7 @@ func (c *AppConfig) Save() error {
 	var encryptedCfg AppConfig
 	encryptedCfg.ActiveProvider = c.ActiveProvider
 	encryptedCfg.Search = c.Search
+	encryptedCfg.Agents = c.Agents
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p

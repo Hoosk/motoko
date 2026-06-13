@@ -30,6 +30,8 @@ type ContextInfo struct {
 	Staged           int
 	GitDirty         bool
 	HasGit           bool
+	Guidelines       string
+	DesignSpec       string
 }
 
 func GetContextInfo() ContextInfo {

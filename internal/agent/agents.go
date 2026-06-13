@@ -1,22 +1,18 @@
 package agent
 
-import (
-	"bufio"
-	"os"
-	"path/filepath"
-	"strings"
-)
 
-// AgentDef defines a named agent with a mode-specific system prompt.
+
 type AgentDef struct {
-	Name   string
-	System string
+	Name        string
+	System      string
+	Permissions AgentPermissions
 }
 
 // BuiltinAgents are the compiled-in agents that ship with Motoko.
 var BuiltinAgents = []AgentDef{
 	{
 		Name: "plan",
+		Permissions: DefaultPlanPermissions(),
 		System: `Plan mode: You are an analytical agent. Read and analyze code, provide plans and diagnostics.
 DO NOT write or modify source code files without explicit user approval.
 
@@ -50,6 +46,7 @@ BRAIN USAGE — PLAN MODE:
 	},
 	{
 		Name: "build",
+		Permissions: DefaultBuildPermissions(),
 		System: `Build mode: Implement code changes directly and precisely.
 Always verify current state before writing. Prefer incremental and verifiable changes.
 
@@ -85,6 +82,7 @@ BRAIN USAGE — BUILD MODE:
 	},
 	{
 		Name: "search",
+		Permissions: DefaultSearchPermissions(),
 		System: `Search mode: Explore and locate files, classes, methods, variables, and code patterns within the codebase.
 Formulate precise search strategy using grep, glob, inspect, and read tools.
 Report the exact location and usage of symbols clearly.
@@ -97,90 +95,33 @@ BRAIN USAGE — SEARCH MODE:
 	},
 }
 
-// LoadAgentsFile reads a .agents INI file from path.
-// Returns nil error and empty slice if the file does not exist.
-func LoadAgentsFile(path string) ([]AgentDef, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
+// LoadWorkspaceAgents loads custom agents from the workspace.
+// It looks for markdown agents in .agents/modes/.
+func LoadWorkspaceAgents(workspace string) ([]AgentDef, error) {
+	var allCustom []AgentDef
 
-	if info.IsDir() {
-		// Fallback: look for 'agents', 'agents.ini', or 'config' inside the directory
-		candidates := []string{
-			filepath.Join(path, "agents"),
-			filepath.Join(path, "agents.ini"),
-			filepath.Join(path, "config"),
-		}
-		foundFile := false
-		for _, cand := range candidates {
-			if candInfo, candErr := os.Stat(cand); candErr == nil && !candInfo.IsDir() {
-				path = cand
-				foundFile = true
-				break
+	customDefs, err := LoadCustomAgents(workspace)
+	if err == nil {
+		for _, c := range customDefs {
+			// Convert CustomAgentDef to AgentDef and map permissions
+			perms := DefaultBuildPermissions() // Start with base
+			if c.Frontmatter.ReadOnly {
+				perms = DefaultPlanPermissions()
 			}
-		}
-		if !foundFile {
-			// It is a directory, but no agents config file was found.
-			return nil, nil
+			if len(c.Frontmatter.ToolFilter) > 0 {
+				perms.AllowedTools = c.Frontmatter.ToolFilter
+			}
+			if len(c.Frontmatter.ExcludeTools) > 0 {
+				perms.DeniedTools = c.Frontmatter.ExcludeTools
+			}
+			
+			allCustom = append(allCustom, AgentDef{
+				Name:        c.Name,
+				System:      c.System,
+				Permissions: perms,
+			})
 		}
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return ParseAgentsFile(string(data)), nil
-}
-
-// ParseAgentsFile parses a .agents INI file content.
-// Format:
-//
-//	[agent-name]
-//	system = one-line system prompt
-//	system = continuation line (appended with newline)
-func ParseAgentsFile(content string) []AgentDef {
-	var agents []AgentDef
-	var current *AgentDef
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			if current != nil && strings.TrimSpace(current.Name) != "" {
-				agents = append(agents, *current)
-			}
-			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
-			current = &AgentDef{Name: name}
-			continue
-		}
-		if current == nil {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "system") {
-			rest := strings.TrimPrefix(trimmed, "system")
-			rest = strings.TrimSpace(rest)
-			if strings.HasPrefix(rest, "=") {
-				rest = strings.TrimSpace(strings.TrimPrefix(rest, "="))
-				if current.System == "" {
-					current.System = rest
-				} else {
-					current.System += "\n" + rest
-				}
-			}
-		}
-	}
-	if current != nil && strings.TrimSpace(current.Name) != "" {
-		agents = append(agents, *current)
-	}
-	return agents
+	return allCustom, nil
 }

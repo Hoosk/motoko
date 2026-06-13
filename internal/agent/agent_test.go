@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,23 +26,13 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 }
 
 func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write mock AGENTS.md
 	agentsContent := "Rule 1: Be fast.\nRule 2: Be precise."
-	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(agentsContent), 0644); err != nil {
-		t.Fatalf("failed to write mock AGENTS.md: %v", err)
-	}
-
-	// Write mock DESIGN.md
 	designContent := "Primary color: #00FF00\nBorder radius: 4px"
-	if err := os.WriteFile(filepath.Join(tmpDir, "DESIGN.md"), []byte(designContent), 0644); err != nil {
-		t.Fatalf("failed to write mock DESIGN.md: %v", err)
-	}
 
 	info := system.ContextInfo{
-		Workspace: "motoko",
-		Path:      tmpDir,
+		Workspace:  "motoko",
+		Guidelines: agentsContent,
+		DesignSpec: designContent,
 	}
 
 	prompt := buildSystemPrompt(info, nil, "")

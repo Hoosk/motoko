@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,7 +12,6 @@ import (
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
-	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
@@ -157,6 +158,19 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		}
 	}
 	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets))
+	
+	if info.Path != "" {
+		agentsPath := filepath.Join(info.Path, "AGENTS.md")
+		if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
+			info.Guidelines = string(data)
+		}
+
+		designPath := filepath.Join(info.Path, "DESIGN.md")
+		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
+			info.DesignSpec = string(data)
+		}
+	}
+	
 	return info
 }
 
@@ -165,28 +179,12 @@ func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
 	if !ok {
 		return nil, fmt.Errorf("no hay provider activo configurado")
 	}
-	client, err := r.providerClient(active)
-	if err != nil {
-		return nil, err
-	}
 
-	var toolsRegistry *tools.Registry
-	if strings.EqualFold(name, "build") {
-		toolsRegistry = r.tools
-	} else {
-		// Filter out write tools for plan, search, and other subagents
-		toolsRegistry = r.tools.Filter(func(t tools.Tool) bool {
-			return !tools.IsWriteTool(t.Spec().Name)
-		})
-	}
-
-	sub := agent.New(client, toolsRegistry)
-	sub.SetDebug(r.debug)
-
+	var aDef agent.AgentDef
 	found := false
 	for _, a := range r.availableAgents {
 		if strings.EqualFold(a.Name, name) {
-			sub.SetAgentOverride(a.System)
+			aDef = a
 			found = true
 			break
 		}
@@ -195,7 +193,21 @@ func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
 		return nil, fmt.Errorf("agente desconocido: %s", name)
 	}
 
-	return sub, nil
+	override, hasOverride := r.config.Agents[aDef.Name]
+	
+	// AppConfig provider override
+	if hasOverride && override.Provider != "" {
+		if p, ok := r.config.Provider(override.Provider); ok {
+			active = p
+		}
+	}
+
+	client, err := r.providerClient(active)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildAgentFromDef(client, aDef, override, hasOverride), nil
 }
 
 func (r *Runtime) RunSubagent(ctx context.Context, name, prompt string) (string, error) {

@@ -159,7 +159,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	workspaceID := session.WorkspaceIDFor(workspacePath)
 
 	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
-	if customAgents, err := agent.LoadAgentsFile(".agents"); err == nil && len(customAgents) > 0 {
+	if customAgents, err := agent.LoadWorkspaceAgents(workspacePath); err == nil && len(customAgents) > 0 {
 		allAgents = append(allAgents, customAgents...)
 	}
 
@@ -504,6 +504,35 @@ func (r *Runtime) refreshAgent() {
 		r.contextWindow = 0
 		return
 	}
+	
+	var aDef agent.AgentDef
+	found := false
+	for _, a := range r.availableAgents {
+		if strings.EqualFold(a.Name, r.currentAgentName) {
+			aDef = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Should not happen, fallback to build
+		for _, a := range r.availableAgents {
+			if strings.EqualFold(a.Name, "build") {
+				aDef = a
+				break
+			}
+		}
+	}
+
+	override, hasOverride := r.config.Agents[aDef.Name]
+	
+	// AppConfig provider override
+	if hasOverride && override.Provider != "" {
+		if p, ok := r.config.Provider(override.Provider); ok {
+			active = p
+		}
+	}
+
 	client, err := r.providerClient(active)
 	if err != nil {
 		r.agent = nil
@@ -512,25 +541,88 @@ func (r *Runtime) refreshAgent() {
 	}
 	r.contextWindow = active.ContextWindow
 
-	var toolsRegistry *tools.Registry
-	if strings.EqualFold(r.currentAgentName, "plan") || strings.EqualFold(r.currentAgentName, "search") {
-		toolsRegistry = r.tools.Filter(func(t tools.Tool) bool {
-			return !tools.IsWriteTool(t.Spec().Name)
-		})
-	} else {
-		toolsRegistry = r.tools
+	r.agent = r.buildAgentFromDef(client, aDef, override, hasOverride)
+}
+
+func (r *Runtime) buildAgentFromDef(client provider.Client, aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) *agent.Agent {
+	// Apply overrides
+	sysPrompt := aDef.System
+	if hasOverride && override.SystemPrompt != "" {
+		sysPrompt = override.SystemPrompt
+	}
+	
+	allowedTools := aDef.Permissions.AllowedTools
+	if hasOverride && len(override.ToolFilter) > 0 {
+		allowedTools = override.ToolFilter
+	}
+	
+	deniedTools := aDef.Permissions.DeniedTools
+	if hasOverride && len(override.ExcludeTools) > 0 {
+		deniedTools = override.ExcludeTools
 	}
 
-	r.agent = agent.New(client, toolsRegistry)
-	r.agent.SetDebug(r.debug)
-	// Re-apply the current agent mode system prompt.
-	for _, a := range r.availableAgents {
-		if strings.EqualFold(a.Name, r.currentAgentName) {
-			r.agent.SetAgentOverride(a.System)
-			break
+	toolsRegistry := r.tools.Filter(func(t tools.Tool) bool {
+		name := t.Spec().Name
+		
+		// 1. Check explicit allow list
+		if len(allowedTools) > 0 {
+			allowed := false
+			for _, allowedName := range allowedTools {
+				if strings.EqualFold(name, allowedName) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return false
+			}
 		}
-	}
+		
+		// 2. Check explicit deny list
+		if len(deniedTools) > 0 {
+			for _, deniedName := range deniedTools {
+				if strings.EqualFold(name, deniedName) {
+					return false
+				}
+			}
+		}
+		
+		// 3. Fallback to boolean permissions
+		if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
+			return false
+		}
+		
+		if name == "delegate" && !aDef.Permissions.AllowDelegate {
+			return false
+		}
+		
+		if name == "task" && !aDef.Permissions.AllowTask {
+			return false
+		}
+		
+		if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
+			// Actually brain_read and brain_list should be allowed even if AllowBrainWrite is false
+			if name == "brain_write" {
+				return false
+			}
+		}
+		
+		if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
+			return false
+		}
+		
+		return true
+	})
+
+	newAgent := agent.New(client, toolsRegistry)
+	newAgent.SetDebug(r.debug)
+	newAgent.SetAgentOverride(sysPrompt)
+	
+	// We can also apply Temperature, ThinkingBudget, and MaxIterations if added to agent
+	// For now we just create the agent
+	return newAgent
 }
+
 
 // ActiveSubagents returns a sorted list of currently active subagent labels.
 func (r *Runtime) ActiveSubagents() []string {
