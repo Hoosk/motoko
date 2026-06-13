@@ -16,7 +16,7 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 		RelevantFiles:    []string{"internal/app/runtime.go [go] | symbols: RunAgent"},
 		RelevantSnippets: []string{"FILE internal/app/runtime.go\nLINES 10-20\nREASON symbol match: RunAgent\nfunc RunAgent() error {\n\treturn nil\n}"},
 	}
-	prompt := buildSystemPrompt(info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
+	prompt := buildSystemPrompt("default", info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
 	if !strings.Contains(prompt, "[Pre-extracted Relevant Snippets]:") {
 		t.Fatalf("prompt missing snippets section: %s", prompt)
 	}
@@ -35,7 +35,7 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 		DesignSpec: designContent,
 	}
 
-	prompt := buildSystemPrompt(info, nil, "")
+	prompt := buildSystemPrompt("default", info, nil, "Modo test: solo pruebas.")
 
 	if !strings.Contains(prompt, "AGENTS & DESIGN RULES") {
 		t.Errorf("prompt missing the operating rule alignment instruction")

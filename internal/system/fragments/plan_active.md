@@ -1,0 +1,1 @@
+[SYSTEM INJECTION: You are currently in PLAN MODE. You cannot modify code. You must analyze the request and write a detailed implementation plan into `plan.md` in your brain. Once the plan is clear and `tasks.md` is initialized, present it to the user and wait for their approval to switch to BUILD MODE.]

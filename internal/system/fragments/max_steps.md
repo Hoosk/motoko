@@ -1,0 +1,1 @@
+[SYSTEM WARNING: You are approaching the maximum number of iterations allowed for this session. You must summarize your progress immediately. Update your `tasks.md` and `notes.md` in the brain so that your progress is not lost, and explain what is missing to the user.]

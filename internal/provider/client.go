@@ -67,6 +67,10 @@ func (c baseClient) listReady() bool {
 	return c.baseURL != "" && c.apiKey != ""
 }
 
+func (c baseClient) ProviderKind() string {
+	return c.providerName
+}
+
 func (c baseClient) Summary() string {
 	return fmt.Sprintf("%s:%s", c.providerName, c.model)
 }

@@ -32,6 +32,7 @@ type ContextInfo struct {
 	HasGit           bool
 	Guidelines       string
 	DesignSpec       string
+	ActiveMode       string
 }
 
 func GetContextInfo() ContextInfo {

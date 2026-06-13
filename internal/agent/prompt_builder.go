@@ -2,7 +2,9 @@ package agent
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
@@ -10,10 +12,16 @@ import (
 
 // buildSystemPrompt assembles the complete system prompt for the given context,
 // available tools, and active agent mode.
-func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
+func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
+	
+	// --- STATIC PART ---
+	
+	header := system.LoadProviderHeader(providerKind)
+	lines = append(lines, header)
+	lines = append(lines, "")
+
 	lines = append(lines,
-		"You are Motoko, a senior coding agent working directly in the user's terminal and repository.",
 		"When answering the user, write plain text directly so it can stream cleanly to the terminal.",
 		"When you need a tool, use the provider's native tool/function call mechanism instead of printing JSON that describes a tool call.",
 		"",
@@ -73,6 +81,50 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		)
 	}
 	
+	if info.Guidelines != "" {
+		lines = append(lines,
+			"--- AGENTS GUIDELINES (AGENTS.md) ---",
+			info.Guidelines,
+			"",
+		)
+	}
+
+	if info.DesignSpec != "" {
+		lines = append(lines,
+			"--- DESIGN SPECIFICATION (DESIGN.md) ---",
+			info.DesignSpec,
+			"",
+		)
+	}
+
+	lines = append(lines,
+		"--- AVAILABLE TOOLS ---",
+	)
+	for _, spec := range specs {
+		lines = append(lines, fmt.Sprintf("- %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
+	}
+	lines = append(lines,
+		"",
+		"- task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step. For those, use the 'bash' tool instead. Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task.",
+		"",
+	)
+
+	// Inject split token
+	lines = append(lines, "--- DYNAMIC ---", "")
+
+	// --- DYNAMIC PART ---
+
+	lines = append(lines,
+		"--- ENVIRONMENT ---",
+		fmt.Sprintf("OS: %s", runtime.GOOS),
+		fmt.Sprintf("Arch: %s", runtime.GOARCH),
+		fmt.Sprintf("Current Time: %s", time.Now().Format(time.RFC3339)),
+		fmt.Sprintf("Workspace: %s", info.Workspace),
+		fmt.Sprintf("Working Directory: %s", info.Path),
+		fmt.Sprintf("Provider: %s", providerKind),
+		"",
+	)
+
 	lines = append(lines,
 		"--- CONTEXT ---",
 		"The following context was prepared automatically. Use it before doing blind searches.",
@@ -102,31 +154,5 @@ func buildSystemPrompt(info system.ContextInfo, specs []tools.Spec, agentSystem 
 		)
 	}
 
-	if info.Guidelines != "" {
-		lines = append(lines,
-			"--- AGENTS GUIDELINES (AGENTS.md) ---",
-			info.Guidelines,
-			"",
-		)
-	}
-
-	if info.DesignSpec != "" {
-		lines = append(lines,
-			"--- DESIGN SPECIFICATION (DESIGN.md) ---",
-			info.DesignSpec,
-			"",
-		)
-	}
-
-	lines = append(lines,
-		"--- AVAILABLE TOOLS ---",
-	)
-	for _, spec := range specs {
-		lines = append(lines, fmt.Sprintf("- %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
-	}
-	lines = append(lines,
-		"",
-		"- task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step. For those, use the 'bash' tool instead. Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task.",
-	)
 	return strings.Join(lines, "\n")
 }

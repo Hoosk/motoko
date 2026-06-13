@@ -76,7 +76,7 @@ func (a *Agent) SystemPrompt(info system.ContextInfo) string {
 	if a == nil {
 		return ""
 	}
-	return buildSystemPrompt(info, a.tools.Specs(), a.agentSystem)
+	return buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(), a.agentSystem)
 }
 
 func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem) (Result, error) {
@@ -105,9 +105,34 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		RelevantSnippets: info.RelevantSnippetsSummary(),
 	}
 
-	for i := 0; i < maxToolIterations(); i++ {
+	for i := 0; i < defaultMaxToolIterations; i++ {
 		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(history), a.provider.Summary())
-		resp, err := a.complete(ctx, info, history, onEvent)
+
+		currentHistory := make([]provider.ConversationItem, len(history))
+		copy(currentHistory, history)
+
+		if i == 0 {
+			if strings.EqualFold(info.ActiveMode, "plan") {
+				frag := system.LoadFragment("plan_active")
+				if frag != "" && len(currentHistory) > 0 {
+					currentHistory[len(currentHistory)-1].Content += "\n\n" + frag
+				}
+			} else if strings.EqualFold(info.ActiveMode, "build") {
+				frag := system.LoadFragment("build_switch")
+				if frag != "" && len(currentHistory) > 0 {
+					currentHistory[len(currentHistory)-1].Content += "\n\n" + frag
+				}
+			}
+		}
+
+		if i >= defaultMaxToolIterations-2 {
+			frag := system.LoadFragment("max_steps")
+			if frag != "" {
+				currentHistory = append(currentHistory, provider.AssistantText(frag))
+			}
+		}
+
+		resp, err := a.complete(ctx, info, currentHistory, onEvent)
 		if err != nil {
 			tracelog.Logf("agent completion error=%v", err)
 			return Result{}, err
@@ -246,7 +271,7 @@ func maxToolIterations() int {
 
 func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error) (provider.Response, error) {
 	toolSet := toolSet(a.tools.Specs())
-	systemPrompt := buildSystemPrompt(info, a.tools.Specs(), a.agentSystem)
+	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(), a.agentSystem)
 	if onEvent == nil {
 		return a.provider.Complete(ctx, systemPrompt, messages, toolSet)
 	}

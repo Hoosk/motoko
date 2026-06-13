@@ -62,6 +62,47 @@ func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
 	}
 	return c.isAdaptive
 }
+func buildAnthropicSystemBlocks(systemPrompt string) []anthropic.TextBlockParam {
+	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
+	if len(parts) == 2 {
+		return []anthropic.TextBlockParam{
+			{
+				Text:         strings.TrimSpace(parts[0]),
+				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			},
+			{
+				Text:         strings.TrimSpace(parts[1]),
+			},
+		}
+	}
+	return []anthropic.TextBlockParam{
+		{
+			Text:         systemPrompt,
+			CacheControl: anthropic.NewCacheControlEphemeralParam(),
+		},
+	}
+}
+
+func buildAnthropicBetaSystemBlocks(systemPrompt string) []anthropic.BetaTextBlockParam {
+	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
+	if len(parts) == 2 {
+		return []anthropic.BetaTextBlockParam{
+			{
+				Text:         strings.TrimSpace(parts[0]),
+				CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
+			},
+			{
+				Text:         strings.TrimSpace(parts[1]),
+			},
+		}
+	}
+	return []anthropic.BetaTextBlockParam{
+		{
+			Text:         systemPrompt,
+			CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
+		},
+	}
+}
 
 func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
 	if err := c.ConfigurationError(); err != nil {
@@ -78,13 +119,8 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.model),
 		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text:         systemPrompt,
-				CacheControl: anthropic.NewCacheControlEphemeralParam(),
-			},
-		},
-		Messages: toSDKMessages(messages),
+		System:    buildAnthropicSystemBlocks(systemPrompt),
+		Messages:  toSDKMessages(messages),
 	}
 
 	if sdkTools := toSDKTools(tools); len(sdkTools) > 0 {
@@ -162,12 +198,7 @@ func (c *anthropicClient) CreateBatch(ctx context.Context, requests []BatchReque
 		params := anthropic.BetaMessageBatchNewParamsRequestParams{
 			Model:     anthropic.Model(c.model),
 			MaxTokens: 4096,
-			System: []anthropic.BetaTextBlockParam{
-				{
-					Text:         req.SystemPrompt,
-					CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
-				},
-			},
+			System: buildAnthropicBetaSystemBlocks(req.SystemPrompt),
 			Messages: toSDKBetaMessages(req.Messages),
 		}
 

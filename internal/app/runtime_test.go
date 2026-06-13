@@ -41,6 +41,10 @@ func (f fakeProviderClient) Configured() bool {
 	return true
 }
 
+func (f fakeProviderClient) ProviderKind() string {
+	return "fake"
+}
+
 func (f fakeProviderClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
 	if f.complete == nil {
 		return provider.Response{}, nil

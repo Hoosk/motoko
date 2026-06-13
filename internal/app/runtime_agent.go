@@ -169,6 +169,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
 			info.DesignSpec = string(data)
 		}
+		info.ActiveMode = r.currentAgentName
 	}
 	
 	return info

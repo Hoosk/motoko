@@ -238,12 +238,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.model),
 		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text:         systemPrompt,
-				CacheControl: anthropic.NewCacheControlEphemeralParam(),
-			},
-		},
+		System: buildAnthropicSystemBlocks(systemPrompt),
 		Messages: toSDKMessages(messages),
 	}
 

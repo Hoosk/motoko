@@ -123,6 +123,7 @@ type BatchClient interface {
 
 type Client interface {
 	Configured() bool
+	ProviderKind() string
 	Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error)
 	StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error)
 	Summary() string

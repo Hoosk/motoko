@@ -48,6 +48,10 @@ func (c *geminiClient) Configured() bool {
 	return c.apiKey != "" && c.model != ""
 }
 
+func (c *geminiClient) ProviderKind() string {
+	return c.providerName
+}
+
 func (c *geminiClient) Summary() string {
 	return fmt.Sprintf("%s:%s", c.providerName, c.model)
 }
