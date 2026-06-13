@@ -14,6 +14,9 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	openai "github.com/openai/openai-go/v3"
+	openaioption "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -24,9 +27,11 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		return Response{}, err
 	}
 
-	// Gemini and some other OpenAI-compatible providers don't support the Responses API yet.
-	// We fall back to Chat Completions if we detect Gemini in the URL or if useChatCompletions is set.
-	if c.useChatCompletions || strings.Contains(c.baseURL, "generativelanguage.googleapis.com") {
+	// We fall back to Chat Completions if useChatCompletions is set.
+	if c.useChatCompletions {
+		if c.useSDK {
+			return c.streamChatSDK(ctx, systemPrompt, messages, tools, onDelta)
+		}
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
@@ -38,6 +43,26 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
+		case "response.reasoning_summary_text.delta":
+			delta := event.AsResponseReasoningSummaryTextDelta().Delta
+			if delta == "" {
+				continue
+			}
+			if onDelta != nil {
+				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
+					return Response{}, err
+				}
+			}
+		case "response.reasoning_text.delta":
+			delta := event.AsResponseReasoningTextDelta().Delta
+			if delta == "" {
+				continue
+			}
+			if onDelta != nil {
+				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
+					return Response{}, err
+				}
+			}
 		case "response.output_text.delta":
 			delta := event.Delta
 			if delta == "" {
@@ -72,7 +97,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		"model": c.model,
 		"messages": append([]map[string]any{
 			{"role": "system", "content": systemPrompt},
-		}, toChatMessages(messages, isGoogleEndpoint(c.baseURL))...),
+		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 		"stream":      true,
 	}
@@ -82,7 +107,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		payload["parallel_tool_calls"] = false
 	}
 
-	headers := geminiAuthHeaders(c.baseURL, c.apiKey)
+	headers := buildAuthHeaders(c.baseURL, c.apiKey)
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
@@ -125,6 +150,80 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	}), nil
 }
 
+func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+	sdkMessages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+	}
+	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+
+	params := openai.ChatCompletionNewParams{
+		Model:       openai.ChatModel(c.model),
+		Messages:    sdkMessages,
+		Temperature: param.NewOpt(0.2),
+	}
+	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
+		params.Tools = sdkTools
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+			OfAuto: param.NewOpt("auto"),
+		}
+		params.ParallelToolCalls = param.NewOpt(false)
+	}
+
+	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
+	for k, v := range headers {
+		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
+	}
+
+	stream := c.sdkClient.Chat.Completions.NewStreaming(ctx, params, reqOpts...)
+	defer func() { _ = stream.Close() }()
+
+	var raw strings.Builder
+	usage := Usage{}
+	toolCalls := make(map[int]*chatCompletionToolCall)
+	mappedIndexes := make(map[int]int)
+
+	for stream.Next() {
+		chunk := stream.Current()
+		if len(chunk.Choices) > 0 {
+			choice := chunk.Choices[0]
+			delta := choice.Delta
+			text := delta.Content
+			if text == "" {
+				text = delta.Refusal
+			}
+			if text != "" {
+				raw.WriteString(text)
+				if onDelta != nil {
+					if err := onDelta(Delta{Content: text}); err != nil {
+						return Response{}, err
+					}
+				}
+			}
+			if len(delta.ToolCalls) > 0 {
+				mergeChatToolCallDeltas(toolCalls, toInternalToolCallDeltas(delta.ToolCalls), mappedIndexes)
+			}
+		}
+		if chunk.Usage.TotalTokens > 0 {
+			usage.InputTokens = int(chunk.Usage.PromptTokens)
+			usage.OutputTokens = int(chunk.Usage.CompletionTokens)
+			usage.TotalTokens = int(chunk.Usage.TotalTokens)
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return Response{}, err
+	}
+
+	return responseFromChatCompletion(chatCompletionResponse{
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Usage: chatCompletionUsage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+		},
+	}), nil
+}
+
 func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
 	if err := c.ConfigurationError(); err != nil {
 		return Response{}, err
@@ -153,6 +252,9 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	}
 
 	if c.thinkingBudget > 0 {
+		params.OutputConfig = anthropic.OutputConfigParam{
+			Effort: BudgetToAnthropicEffort(c.thinkingBudget),
+		}
 		if c.checkAdaptiveThinking(ctx) {
 			params.Thinking = anthropic.ThinkingConfigParamUnion{
 				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{

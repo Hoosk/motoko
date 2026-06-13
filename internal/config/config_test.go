@@ -52,8 +52,8 @@ func TestNormalizeProviderSupportsGeminiPresetWithCompatibleBaseURL(t *testing.T
 	if got.Kind != ProviderKindGemini {
 		t.Fatalf("expected gemini kind, got %q", got.Kind)
 	}
-	if got.BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai/" {
-		t.Fatalf("expected gemini base url, got %q", got.BaseURL)
+	if got.BaseURL != "" {
+		t.Fatalf("expected empty gemini base url (SDK uses API key only), got %q", got.BaseURL)
 	}
 	if got.Name != "gemini" {
 		t.Fatalf("expected gemini default name, got %q", got.Name)

@@ -32,8 +32,12 @@ type ProviderConfig struct {
 	APIKey         string         `json:"api_key"`
 	Model          string         `json:"model"`
 	Models         []string       `json:"models,omitempty"`
-	ContextWindow  int            `json:"context_window,omitempty"`
-	ThinkingBudget int            `json:"thinking_budget,omitempty"`
+	ContextWindow       int            `json:"context_window,omitempty"`
+	ThinkingBudget      int            `json:"thinking_budget,omitempty"`
+	UseSDK              bool           `json:"use_sdk,omitempty"`
+	EnableGoogleSearch  bool           `json:"enable_google_search,omitempty"`
+	EnableCodeExecution bool           `json:"enable_code_execution,omitempty"`
+	SupportsThinking    bool           `json:"supports_thinking,omitempty"`
 }
 
 type SearchConfig struct {
@@ -194,6 +198,18 @@ func NormalizeProvider(provider ProviderConfig) ProviderConfig {
 	provider.APIKey = strings.TrimSpace(provider.APIKey)
 	provider.Model = strings.TrimSpace(provider.Model)
 	provider.Models = uniqueSorted(provider.Models)
+
+	// If the preset or base URL targets Google's Gemini API endpoints, we force it to the native Gemini provider preset and kind.
+	// Gemini is officially supported by Google GenAI Go SDK and should always run natively.
+	isGemini := provider.Preset == ProviderPresetGemini ||
+		strings.Contains(strings.ToLower(provider.BaseURL), "generativelanguage.googleapis.com") ||
+		strings.Contains(strings.ToLower(provider.BaseURL), "googleapis.com")
+
+	if isGemini {
+		provider.Preset = ProviderPresetGemini
+		provider.Kind = ProviderKindGemini
+	}
+
 	if provider.Name == "" {
 		provider.Name = DefaultProviderName(provider.Preset)
 		if provider.Name == "" {
@@ -215,7 +231,7 @@ func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
 	case ProviderPresetAnthropic:
 		return "https://api.anthropic.com"
 	case ProviderPresetGemini:
-		return "https://generativelanguage.googleapis.com/v1beta/openai/"
+		return ""
 	case ProviderPresetOpenAICompatible:
 		return "http://localhost:11434/v1"
 	default:

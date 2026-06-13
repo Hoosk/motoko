@@ -22,12 +22,13 @@ func main() {
 
 	resume := false
 	for _, arg := range os.Args[1:] {
-		if arg == "--resume" {
+		switch arg {
+		case "--resume":
 			resume = true
-		} else if arg == "--version" || arg == "-v" {
+		case "--version", "-v":
 			fmt.Println(Version)
 			os.Exit(0)
-		} else if arg == "--update" {
+		case "--update":
 			upd := updater.NewUpdater(updater.Config{
 				CurrentVersion: Version,
 				GOOS:           runtime.GOOS,
@@ -45,7 +46,7 @@ func main() {
 			}
 			fmt.Println("Motoko has been updated successfully!")
 			os.Exit(0)
-		} else if arg == "--check-update" {
+		case "--check-update":
 			upd := updater.NewUpdater(updater.Config{
 				CurrentVersion: Version,
 				GOOS:           runtime.GOOS,

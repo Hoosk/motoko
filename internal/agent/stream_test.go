@@ -17,6 +17,9 @@ func (f *fakeStreamingProvider) Summary() string  { return "fake:test" }
 func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
 }
+func (f *fakeStreamingProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{ID: model}, nil
+}
 func (f *fakeStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	return provider.Response{FinalText: "hola", OutputItems: []provider.ConversationItem{provider.AssistantText("hola")}}, nil
 }
@@ -50,6 +53,9 @@ func (f *fakePlainStreamingProvider) Configured() bool { return true }
 func (f *fakePlainStreamingProvider) Summary() string  { return "fake:plain" }
 func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
+}
+func (f *fakePlainStreamingProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{ID: model}, nil
 }
 func (f *fakePlainStreamingProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	return provider.Response{FinalText: "hola mundo", OutputItems: []provider.ConversationItem{provider.AssistantText("hola mundo")}}, nil
@@ -87,6 +93,9 @@ func (f *fakeToolStreamingProvider) Configured() bool { return true }
 func (f *fakeToolStreamingProvider) Summary() string  { return "fake:tool-stream" }
 func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
+}
+func (f *fakeToolStreamingProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{ID: model}, nil
 }
 func (f *fakeToolStreamingProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	return f.Complete(ctx, systemPrompt, messages, tools)

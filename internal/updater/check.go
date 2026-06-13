@@ -9,13 +9,13 @@ import (
 )
 
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	HTMLURL    string `json:"html_url"`
-	Assets     []struct {
+	TagName string `json:"tag_name"`
+	HTMLURL string `json:"html_url"`
+	Assets  []struct {
 		Name               string `json:"name"`
 		BrowserDownloadURL string `json:"browser_download_url"`
 	} `json:"assets"`
+	Prerelease bool `json:"prerelease"`
 }
 
 // CheckVersion queries the GitHub Releases API to check if a new version is available.

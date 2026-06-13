@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -10,78 +9,54 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const (
-	modelPickerStepModel    = 0
-	modelPickerStepThinking = 1
-)
-
 type modelPickerState struct {
-	models          []provider.ModelInfo
-	thinkingBudgets []int
-	step            int
-	index           int
-	thinkingIndex   int
-	active          bool
+	models []provider.ModelInfo
+	index  int
+	active bool
 }
 
 func (p *modelPickerState) Open(models []provider.ModelInfo) {
 	p.models = models
 	p.active = true
-	p.step = modelPickerStepModel
 	p.index = 0
-	p.thinkingBudgets = app.ThinkingBudgetLevels
-	p.thinkingIndex = 0
 }
 
-func (p *modelPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
+func (p *modelPickerState) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if !p.active {
+			return nil
+		}
 		switch msg.String() {
 		case "esc":
-			if p.step == modelPickerStepThinking {
-				p.step = modelPickerStepModel
-				return nil
-			}
 			p.active = false
 			return nil
 
-		case "up":
-			if p.step == modelPickerStepThinking {
-				if len(p.thinkingBudgets) > 0 {
-					p.thinkingIndex = (p.thinkingIndex - 1 + len(p.thinkingBudgets)) % len(p.thinkingBudgets)
-				}
-			} else {
-				if len(p.models) > 0 {
-					p.index = (p.index - 1 + len(p.models)) % len(p.models)
+		case "up", "ctrl+p":
+			if len(p.models) > 0 {
+				p.index--
+				if p.index < 0 {
+					p.index = len(p.models) - 1
 				}
 			}
+			return nil
 
-		case "down":
-			if p.step == modelPickerStepThinking {
-				if len(p.thinkingBudgets) > 0 {
-					p.thinkingIndex = (p.thinkingIndex + 1) % len(p.thinkingBudgets)
-				}
-			} else {
-				if len(p.models) > 0 {
-					p.index = (p.index + 1) % len(p.models)
-				}
+		case "down", "ctrl+n", "tab":
+			if len(p.models) > 0 {
+				p.index = (p.index + 1) % len(p.models)
 			}
+			return nil
 
 		case "enter":
-			if p.step == modelPickerStepModel {
-				if len(p.models) > 0 {
-					p.step = modelPickerStepThinking
-				}
+			if len(p.models) == 0 {
+				p.active = false
 				return nil
 			}
-
-			if len(p.models) > 0 {
-				model := p.models[p.index]
-				budget := app.ThinkingBudgetLevels[p.thinkingIndex]
-				p.active = false
-				return selectModelAndBudget(runtime, model, budget)
-			}
+			chosen := p.models[p.index]
 			p.active = false
+			return func() tea.Msg {
+				return ModelSelectedMsg{Model: chosen}
+			}
 		}
 	}
 	return nil
@@ -92,15 +67,6 @@ func (p modelPickerState) View() string {
 		return ""
 	}
 
-	switch p.step {
-	case modelPickerStepThinking:
-		return p.renderThinkingPicker()
-	default:
-		return p.renderModelPickerStep()
-	}
-}
-
-func (p modelPickerState) renderModelPickerStep() string {
 	titleStyle := styles.BoldNeonStyle
 	hintStyle := styles.GrayStyle
 
@@ -110,62 +76,132 @@ func (p modelPickerState) renderModelPickerStep() string {
 		"",
 	}
 
-	for i, mod := range p.models {
+	maxItems := 10
+	start := 0
+	end := len(p.models)
+
+	if end > maxItems {
+		start = p.index - maxItems/2
+		if start < 0 {
+			start = 0
+		}
+		end = start + maxItems
+		if end > len(p.models) {
+			end = len(p.models)
+			start = end - maxItems
+		}
+	}
+
+	if start > 0 {
+		rows = append(rows, hintStyle.Render("   ▲ ... more models above ..."))
+	}
+
+	for i := start; i < end; i++ {
+		mod := p.models[i]
 		cursor := "  "
 		style := styles.PopupFieldValueStyle
 		if i == p.index {
 			cursor = styles.BoldNeonStyle.Render("> ")
 			style = styles.PopupSelectionStyle
 		}
-		rows = append(rows, cursor+style.Render(mod.ID))
+		indicator := " (0)"
+		if mod.SupportsThinking {
+			indicator = " (1)"
+		}
+		rows = append(rows, cursor+style.Render(mod.ID+indicator))
+	}
+
+	if end < len(p.models) {
+		rows = append(rows, hintStyle.Render("   ▼ ... more models below ..."))
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-func (p modelPickerState) renderThinkingPicker() string {
+type thinkingPickerState struct {
+	model           provider.ModelInfo
+	thinkingBudgets []int
+	thinkingIndex   int
+	active          bool
+}
+
+func (p *thinkingPickerState) Open(model provider.ModelInfo) {
+	p.model = model
+	p.thinkingBudgets = app.ThinkingBudgetLevels
+	p.thinkingIndex = 0
+	p.active = true
+}
+
+func (p *thinkingPickerState) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if !p.active {
+			return nil
+		}
+		switch msg.String() {
+		case "esc":
+			p.active = false
+			return nil
+
+		case "up", "ctrl+p":
+			if len(p.thinkingBudgets) > 0 {
+				p.thinkingIndex--
+				if p.thinkingIndex < 0 {
+					p.thinkingIndex = len(p.thinkingBudgets) - 1
+				}
+			}
+			return nil
+
+		case "down", "ctrl+n", "tab":
+			if len(p.thinkingBudgets) > 0 {
+				p.thinkingIndex = (p.thinkingIndex + 1) % len(p.thinkingBudgets)
+			}
+			return nil
+
+		case "enter":
+			budget := p.thinkingBudgets[p.thinkingIndex]
+			p.active = false
+			return func() tea.Msg {
+				return ThinkingBudgetSelectedMsg{Model: p.model, Budget: budget}
+			}
+		}
+	}
+	return nil
+}
+
+func (p thinkingPickerState) View() string {
+	if !p.active {
+		return ""
+	}
+
 	titleStyle := styles.BoldNeonStyle
 	hintStyle := styles.GrayStyle
 	accentStyle := styles.BlueStyle
 
-	chosen := ""
-	if len(p.models) > 0 {
-		chosen = p.models[p.index].ID
-	}
-
 	rows := []string{
 		titleStyle.Render("Thinking Budget"),
-		accentStyle.Render("Model: " + chosen),
-		hintStyle.Render("↑↓ navigate  Enter select  Esc back"),
+		accentStyle.Render("Model: " + p.model.ID),
+		hintStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
 
-	for i, budget := range p.thinkingBudgets {
+	labels := provider.GetThinkingLabels(p.model.ID)
+	for i := range p.thinkingBudgets {
 		cursor := "  "
 		style := styles.PopupFieldValueStyle
 		if i == p.thinkingIndex {
 			cursor = styles.BoldNeonStyle.Render("> ")
 			style = styles.PopupSelectionStyle
 		}
-		label := app.ThinkingBudgetLabels[i]
-		if budget > 0 {
-			rows = append(rows, fmt.Sprintf("%s%s (%d tokens)", cursor, style.Render(label), budget))
+		var label string
+		if i < len(labels) {
+			label = labels[i]
 		} else {
-			rows = append(rows, cursor+style.Render(label))
+			label = "unknown"
 		}
+		rows = append(rows, cursor+style.Render(label))
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-func selectModelAndBudget(runtime *app.Runtime, model provider.ModelInfo, budget int) tea.Cmd {
-	return func() tea.Msg {
-		if err := runtime.SetActiveModelInfo(model); err != nil {
-			return ErrorMsg{Err: err}
-		}
-		if err := runtime.SetThinkingBudget(budget); err != nil {
-			return ErrorMsg{Err: err}
-		}
-		return NotificationMsg{Text: "Model updated: " + model.ID}
-	}
-}

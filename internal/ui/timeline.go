@@ -11,8 +11,8 @@ import (
 )
 
 type TimelineModel struct {
-	model   timeline.Model
 	version string
+	model   timeline.Model
 }
 
 func NewTimelineModel() TimelineModel {

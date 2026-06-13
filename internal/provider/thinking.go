@@ -1,17 +1,8 @@
 package provider
 
-import "strings"
-
-// isOpenAIReasoningModel reports whether the model name is a reasoning model
-// that supports reasoning_effort. This includes the legacy o-series (o1, o3, o4)
-// and the current gpt-5.x reasoning models (gpt-5.5, gpt-5.4, gpt-5.5-pro, etc.).
-func isOpenAIReasoningModel(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "o1") ||
-		strings.HasPrefix(lower, "o3") ||
-		strings.HasPrefix(lower, "o4") ||
-		strings.HasPrefix(lower, "gpt-5")
-}
+import (
+	"github.com/anthropics/anthropic-sdk-go"
+)
 
 // budgetToReasoningEffort maps a token budget to an OpenAI reasoning_effort string.
 // Thresholds align with ThinkingBudgetLevels: low=1024, medium=8192, high=24576, xhigh=65536.
@@ -28,21 +19,6 @@ func budgetToReasoningEffort(budget int) string {
 	}
 }
 
-// isAnthropicAdaptiveThinkingModel reports whether the model uses the newer
-// adaptive thinking API ({type:"adaptive"}) instead of the manual budget API.
-// claude-opus-4-7 and newer generation models require adaptive thinking.
-func isAnthropicAdaptiveThinkingModel(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.Contains(lower, "opus-4-7") || strings.Contains(lower, "opus-4-8") || strings.Contains(lower, "opus-4-9")
-}
-
-// isGemini3Model reports whether the model belongs to the Gemini 3.x series,
-// which uses thinkingLevel instead of thinkingBudget.
-func isGemini3Model(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "gemini-3")
-}
-
 // budgetToGeminiThinkingLevel maps a token budget to a Gemini 3 thinkingLevel string.
 func budgetToGeminiThinkingLevel(budget int) string {
 	switch {
@@ -52,5 +28,24 @@ func budgetToGeminiThinkingLevel(budget int) string {
 		return "medium"
 	default:
 		return "low"
+	}
+}
+
+// GetThinkingLabels returns the list of thinking configuration labels for a model.
+func GetThinkingLabels(modelID string) []string {
+	return []string{"off", "low", "medium", "high", "xhigh"}
+}
+
+// BudgetToAnthropicEffort maps a token budget to an Anthropic effort level.
+func BudgetToAnthropicEffort(budget int) anthropic.OutputConfigEffort {
+	switch {
+	case budget >= 65536:
+		return anthropic.OutputConfigEffortXhigh
+	case budget >= 24576:
+		return anthropic.OutputConfigEffortHigh
+	case budget >= 8192:
+		return anthropic.OutputConfigEffortMedium
+	default:
+		return anthropic.OutputConfigEffortLow
 	}
 }

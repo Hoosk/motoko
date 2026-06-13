@@ -7,6 +7,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -41,14 +42,15 @@ type Model struct {
 	runtime          *app.Runtime
 	agentBuffer      *agentStreamBuffer
 	agentStream      chan app.AgentStreamEvent
-	composer         ComposerModel
-	providerForm     providerForm
 	taskStatus       string
 	notificationText string
-	modelPicker      modelPickerState
+	sidebar          SidebarModel
+	providerForm     providerForm
 	modePopup        modePopupState
 	sessionPicker    sessionPickerState
-	sidebar          SidebarModel
+	modelPicker      modelPickerState
+	thinkingPicker   thinkingPickerState
+	composer         ComposerModel
 	footer           FooterModel
 	timeline         TimelineModel
 	width            int
@@ -108,7 +110,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 	if m.modelPicker.active {
-		cmds = append(cmds, m.modelPicker.Update(msg, m.runtime))
+		cmds = append(cmds, m.modelPicker.Update(msg))
+		return m, tea.Batch(cmds...)
+	}
+	if m.thinkingPicker.active {
+		cmds = append(cmds, m.thinkingPicker.Update(msg))
 		return m, tea.Batch(cmds...)
 	}
 	if m.sessionPicker.active {
@@ -298,6 +304,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.modelPicker.Open(msg.Models)
 		}
+
+	case ModelSelectedMsg:
+		if msg.Model.SupportsThinking {
+			m.thinkingPicker.Open(msg.Model)
+		} else {
+			cmds = append(cmds, selectModelAndBudget(m.runtime, msg.Model, 0))
+		}
+
+	case ThinkingBudgetSelectedMsg:
+		cmds = append(cmds, selectModelAndBudget(m.runtime, msg.Model, msg.Budget))
 
 	case SessionsMsg:
 		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
@@ -496,6 +512,9 @@ func (m Model) View() string {
 	} else if m.modelPicker.active {
 		popup := popupStyle.Render(m.modelPicker.View())
 		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.thinkingPicker.active {
+		popup := popupStyle.Render(m.thinkingPicker.View())
+		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.sessionPicker.active {
 		popup := popupStyle.Render(m.sessionPicker.View())
 		base = overlayCenter(base, popup, m.width, m.height)
@@ -561,3 +580,15 @@ func (m *Model) SyncLayout() {
 }
 
 type hideNotificationMsg struct{}
+
+func selectModelAndBudget(runtime *app.Runtime, model provider.ModelInfo, budget int) tea.Cmd {
+	return func() tea.Msg {
+		if err := runtime.SetActiveModelInfo(model); err != nil {
+			return ErrorMsg{Err: err}
+		}
+		if err := runtime.SetThinkingBudget(budget); err != nil {
+			return ErrorMsg{Err: err}
+		}
+		return NotificationMsg{Text: "Model updated: " + model.ID}
+	}
+}
