@@ -188,13 +188,14 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		if len(chunk.Choices) > 0 {
 			choice := chunk.Choices[0]
 			delta := choice.Delta
-			if delta.Content != "" || delta.Refusal != "" {
-				raw.WriteString(delta.Content)
+			text := delta.Content
+			if text == "" {
+				text = delta.Refusal
+			}
+			if text != "" {
+				raw.WriteString(text)
 				if onDelta != nil {
-					if err := onDelta(Delta{
-						Content:          delta.Content,
-						ReasoningContent: delta.Refusal,
-					}); err != nil {
+					if err := onDelta(Delta{Content: text}); err != nil {
 						return Response{}, err
 					}
 				}
