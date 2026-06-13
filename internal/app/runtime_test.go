@@ -627,7 +627,7 @@ func TestRuntimeSkillsIntegration(t *testing.T) {
 		t.Errorf("expected skill name 'test-skill', got %q", r.availableSkills[0].Name)
 	}
 
-	spec, found := r.tools.Spec("activate_skill")
+	spec, found := r.tools.Spec(tools.ToolContext{AvailableSkills: []string{"test-skill"}}, "activate_skill")
 	if !found {
 		t.Fatal("expected activate_skill tool to be registered")
 	}

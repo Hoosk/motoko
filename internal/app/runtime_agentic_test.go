@@ -98,7 +98,7 @@ func TestTools_FilteringRegistry(t *testing.T) {
 		return !tools.IsWriteTool(tool.Spec().Name)
 	})
 
-	for _, spec := range filtered.Specs() {
+	for _, spec := range filtered.Specs(tools.ToolContext{}) {
 		if tools.IsWriteTool(spec.Name) {
 			t.Errorf("filtered registry contains write tool %s", spec.Name)
 		}

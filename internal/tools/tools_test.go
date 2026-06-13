@@ -57,12 +57,12 @@ func TestRegistrySuggestionsAndRun(t *testing.T) {
 	r.Register(fakeTool{name: "zeta"})
 	r.Register(fakeTool{name: "alpha"})
 
-	specs := r.Specs()
+	specs := r.Specs(ToolContext{})
 	if len(specs) != 2 || specs[0].Name != "alpha" {
 		t.Fatalf("expected sorted specs, got %#v", specs)
 	}
-	if len(r.Suggestions("al")) != 1 {
-		t.Fatalf("expected prefix suggestion, got %#v", r.Suggestions("al"))
+	if len(r.Suggestions(ToolContext{}, "al")) != 1 {
+		t.Fatalf("expected prefix suggestion, got %#v", r.Suggestions(ToolContext{}, "al"))
 	}
 	result, err := r.Run(context.Background(), "alpha", "hola")
 	if err != nil {
@@ -81,11 +81,11 @@ func TestRegistryRunTruncatesLargeToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(result.Output, truncatedToolOutputSuffix) {
-		t.Fatalf("expected truncated suffix, got %q", result.Output)
+	if !strings.Contains(result.Output, "Full output saved to") {
+		t.Fatalf("expected truncated suffix with temp file, got %q", result.Output)
 	}
-	if len(result.Output) != maxToolOutputBytes+len(truncatedToolOutputSuffix) {
-		t.Fatalf("unexpected truncated length %d", len(result.Output))
+	if !strings.HasPrefix(result.Output, strings.Repeat("a", maxToolOutputBytes)) {
+		t.Fatalf("unexpected truncated output prefix")
 	}
 }
 

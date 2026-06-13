@@ -25,6 +25,7 @@ type ContextInfo struct {
 	ModifiedFiles    []string
 	RelevantFiles    []string
 	AvailableSkills  []SkillDef
+	AvailableAgents  []string
 	Untracked        int
 	Unstaged         int
 	Staged           int

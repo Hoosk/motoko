@@ -26,6 +26,14 @@ func (t *DelegateTool) Spec() Spec {
 	}
 }
 
+func (t *DelegateTool) DynamicSpec(ctx ToolContext) Spec {
+	spec := t.Spec()
+	if len(ctx.AvailableAgents) > 0 {
+		spec.Summary = fmt.Sprintf("Delegar una sub-tarea a otro agente en segundo plano. Agentes disponibles: %s", strings.Join(ctx.AvailableAgents, ", "))
+	}
+	return spec
+}
+
 func (t *DelegateTool) Run(ctx context.Context, args string) (Result, error) {
 	if t.runner == nil {
 		return Result{}, fmt.Errorf("agent runner no inicializado")

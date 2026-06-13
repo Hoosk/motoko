@@ -145,7 +145,7 @@ func (r *Runtime) Completions(input string) []string {
 		if len(parts) > 1 {
 			prefix = parts[1]
 		}
-		matches := r.tools.Suggestions(prefix)
+		matches := r.ToolSuggestions(prefix)
 		result := make([]string, 0, len(matches))
 		for _, spec := range matches {
 			result = append(result, "/tool "+spec.Usage)

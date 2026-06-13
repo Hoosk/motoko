@@ -18,21 +18,26 @@ func NewActivateSkillTool(available []skills.Skill) *ActivateSkillTool {
 }
 
 func (t *ActivateSkillTool) Spec() Spec {
-	var skillNames []string
-	for _, s := range t.availableSkills {
-		skillNames = append(skillNames, s.Name)
-	}
-
-	usageStr := "activate_skill <nombre>"
-	if len(skillNames) > 0 {
-		usageStr = fmt.Sprintf("activate_skill %s", strings.Join(skillNames, "|"))
-	}
-
 	return Spec{
 		Name:    "activate_skill",
 		Summary: "Activa y carga las instrucciones detalladas de una habilidad (skill) del catalogo.",
-		Usage:   usageStr,
+		Usage:   "activate_skill <nombre>",
 	}
+}
+
+func (t *ActivateSkillTool) DynamicSpec(ctx ToolContext) Spec {
+	spec := t.Spec()
+	if len(ctx.AvailableSkills) > 0 {
+		var xmlBuilder strings.Builder
+		xmlBuilder.WriteString("Activa y carga las instrucciones de un skill. Skills disponibles:\n<available-skills>\n")
+		for _, s := range ctx.AvailableSkills {
+			xmlBuilder.WriteString(fmt.Sprintf("  <skill name=\"%s\" />\n", s))
+		}
+		xmlBuilder.WriteString("</available-skills>")
+		spec.Summary = xmlBuilder.String()
+		spec.Usage = fmt.Sprintf("activate_skill %s", strings.Join(ctx.AvailableSkills, "|"))
+	}
+	return spec
 }
 
 func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error) {

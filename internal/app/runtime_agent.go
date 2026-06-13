@@ -12,6 +12,7 @@ import (
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
@@ -27,6 +28,7 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
 	}
+	ctx = tools.WithBrain(ctx, r.brain)
 	result, err := r.agent.Run(ctx, info, input, priorHistory)
 	if err != nil {
 		return result, err
@@ -48,6 +50,7 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
 	}
+	ctx = tools.WithBrain(ctx, r.brain)
 	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
 			return nil
@@ -98,6 +101,13 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 				Name:        s.Name,
 				Description: s.Description,
 			}
+		}
+	}
+
+	if len(r.availableAgents) > 0 {
+		info.AvailableAgents = make([]string, len(r.availableAgents))
+		for i, a := range r.availableAgents {
+			info.AvailableAgents[i] = a.Name
 		}
 	}
 

@@ -110,7 +110,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "sessions":
 		return Response{Signal: "open-sessions-popup"}
 	case "tools":
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.tools.Specs())}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.ToolSpecs())}}}
 	case "tool":
 		if len(parts) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
@@ -125,7 +125,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return r.handleShell(toolArgs)
 		}
 
-		result, err := r.tools.Run(context.Background(), toolName, toolArgs)
+		result, err := r.tools.Run(tools.WithBrain(context.Background(), r.brain), toolName, toolArgs)
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}

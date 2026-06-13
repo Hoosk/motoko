@@ -84,6 +84,23 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("got %q, want %q", res.Output, "This is the implementation plan.")
 	}
 
+	// 4b. Write multiline file and test paginated read
+	_, err = writeTool.Run(ctx, "multi.md line1\nline2\nline3\nline4")
+	if err != nil {
+		t.Fatalf("write multiline failed: %v", err)
+	}
+	res, err = readTool.Run(ctx, "multi.md 2 2")
+	if err != nil {
+		t.Fatalf("paginated read failed: %v", err)
+	}
+	expectedOutput := "2: line2\n3: line3"
+	if res.Output != expectedOutput {
+		t.Errorf("got %q, want %q", res.Output, expectedOutput)
+	}
+	if !strings.Contains(res.Summary, "leido desde linea 2") {
+		t.Errorf("unexpected summary: %s", res.Summary)
+	}
+
 	// 5. List files
 	res, err = listTool.Run(ctx, "")
 	if err != nil {

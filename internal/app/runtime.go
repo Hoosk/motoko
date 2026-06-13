@@ -272,7 +272,41 @@ func (r *Runtime) PendingApproval() string {
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
-	return r.tools.Specs()
+	tCtx := tools.ToolContext{
+		Workspace:       r.workspaceID,
+		ActiveMode:      string(r.mode),
+		MaxOutputSize:   12000,
+	}
+	if len(r.availableAgents) > 0 {
+		for _, a := range r.availableAgents {
+			tCtx.AvailableAgents = append(tCtx.AvailableAgents, a.Name)
+		}
+	}
+	if len(r.availableSkills) > 0 {
+		for _, s := range r.availableSkills {
+			tCtx.AvailableSkills = append(tCtx.AvailableSkills, s.Name)
+		}
+	}
+	return r.tools.Specs(tCtx)
+}
+
+func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
+	tCtx := tools.ToolContext{
+		Workspace:       r.workspaceID,
+		ActiveMode:      string(r.mode),
+		MaxOutputSize:   12000,
+	}
+	if len(r.availableAgents) > 0 {
+		for _, a := range r.availableAgents {
+			tCtx.AvailableAgents = append(tCtx.AvailableAgents, a.Name)
+		}
+	}
+	if len(r.availableSkills) > 0 {
+		for _, s := range r.availableSkills {
+			tCtx.AvailableSkills = append(tCtx.AvailableSkills, s.Name)
+		}
+	}
+	return r.tools.Suggestions(tCtx, prefix)
 }
 
 func (r *Runtime) StartTask(ctx context.Context, command string) (string, error) {

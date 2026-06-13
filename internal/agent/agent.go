@@ -71,12 +71,25 @@ func (a *Agent) Configured() bool {
 	return a != nil && a.provider != nil && a.provider.Configured() && a.tools != nil
 }
 
+func buildToolContext(info system.ContextInfo) tools.ToolContext {
+	ctx := tools.ToolContext{
+		Workspace:       info.Workspace,
+		ActiveMode:      info.ActiveMode,
+		AvailableAgents: info.AvailableAgents,
+		MaxOutputSize:   12000,
+	}
+	for _, s := range info.AvailableSkills {
+		ctx.AvailableSkills = append(ctx.AvailableSkills, s.Name)
+	}
+	return ctx
+}
+
 // SystemPrompt returns the current system prompt that would be sent to the provider.
 func (a *Agent) SystemPrompt(info system.ContextInfo) string {
 	if a == nil {
 		return ""
 	}
-	return buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(), a.agentSystem)
+	return buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
 }
 
 func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem) (Result, error) {
@@ -175,6 +188,18 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 
 		for idx, call := range pending {
 			toolName := strings.TrimSpace(call.Name)
+
+			var availableTools []string
+			for _, s := range a.tools.Specs(buildToolContext(info)) {
+				availableTools = append(availableTools, s.Name)
+			}
+			if repairedName := tools.RepairToolName(toolName, availableTools); repairedName != "" {
+				if repairedName != toolName {
+					tracelog.Logf("agent tool repair from=%s to=%s", toolName, repairedName)
+					toolName = repairedName
+				}
+			}
+
 			toolInput := strings.TrimSpace(call.Input)
 			if toolInput == "" && len(call.Arguments) > 0 {
 				toolInput = strings.TrimSpace(string(call.Arguments))
@@ -270,8 +295,9 @@ func maxToolIterations() int {
 }
 
 func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error) (provider.Response, error) {
-	toolSet := toolSet(a.tools.Specs())
-	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(), a.agentSystem)
+	tCtx := buildToolContext(info)
+	toolSet := toolSet(a.tools.Specs(tCtx))
+	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(tCtx), a.agentSystem)
 	if onEvent == nil {
 		return a.provider.Complete(ctx, systemPrompt, messages, toolSet)
 	}

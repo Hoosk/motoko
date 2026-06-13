@@ -12,10 +12,14 @@ import (
 
 const defaultReadLimit = 200
 
-type ReadTool struct{}
+type ReadTool struct {
+	injectedInstructions map[string]bool
+}
 
 func NewReadTool() *ReadTool {
-	return &ReadTool{}
+	return &ReadTool{
+		injectedInstructions: make(map[string]bool),
+	}
 }
 
 func (t *ReadTool) Spec() Spec {
@@ -60,6 +64,8 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
+	injected := t.getInjectedInstructions(absPath)
+
 	if info.IsDir() {
 		entries, readErr := os.ReadDir(absPath)
 		if readErr != nil {
@@ -78,7 +84,7 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{
 			Spec:    t.Spec(),
 			Summary: fmt.Sprintf("Directorio %s con %d entradas.", relPath, len(lines)),
-			Output:  strings.Join(lines, "\n"),
+			Output:  strings.Join(lines, "\n") + injected,
 		}, nil
 	}
 
@@ -108,12 +114,48 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	if len(lines) == 0 {
-		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin contenido visible en %s desde la linea %d.", relPath, offset), Output: ""}, nil
+		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin contenido visible en %s desde la linea %d.", relPath, offset), Output: injected}, nil
 	}
 
 	return Result{
 		Spec:    t.Spec(),
 		Summary: fmt.Sprintf("Archivo %s leido desde linea %d (%d lineas).", filepath.ToSlash(relPath), offset, len(lines)),
-		Output:  strings.Join(lines, "\n"),
+		Output:  strings.Join(lines, "\n") + injected,
 	}, nil
+}
+
+func (t *ReadTool) getInjectedInstructions(absPath string) string {
+	workspaceRoot, _, err := resolveWorkspacePath("")
+	if err != nil {
+		return ""
+	}
+
+	var injected string
+	dir := absPath
+	info, err := os.Stat(absPath)
+	if err == nil && !info.IsDir() {
+		dir = filepath.Dir(absPath)
+	}
+
+	for {
+		for _, name := range []string{"AGENTS.md", ".agents.md"} {
+			agentFile := filepath.Join(dir, name)
+			if t.injectedInstructions[agentFile] {
+				continue
+			}
+			if b, err := os.ReadFile(agentFile); err == nil {
+				t.injectedInstructions[agentFile] = true
+				injected += fmt.Sprintf("\n\n<system-reminder>\nFound %s:\n%s\n</system-reminder>", name, string(b))
+			}
+		}
+		if dir == workspaceRoot {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // root of filesystem reached
+			break
+		}
+		dir = parent
+	}
+	return injected
 }
