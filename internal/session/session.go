@@ -41,7 +41,7 @@ func New(workspaceID, workspacePath string) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		ID:          newSessionID(now),
-		Title:       "Nueva sesion",
+		Title:       "New session",
 		WorkspaceID: strings.TrimSpace(workspaceID),
 		Workspace:   strings.TrimSpace(workspacePath),
 		CreatedAt:   now,
@@ -57,7 +57,7 @@ func (s *Session) Save() error {
 		s.ID = newSessionID(time.Now().UTC())
 	}
 	if strings.TrimSpace(s.Title) == "" {
-		s.Title = "Nueva sesion"
+		s.Title = "New session"
 	}
 	if strings.TrimSpace(s.WorkspaceID) == "" {
 		return fmt.Errorf("workspace_id vacio")
