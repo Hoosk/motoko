@@ -21,18 +21,6 @@ func TestMessageSerializationHelpers(t *testing.T) {
 	if items[1].OfMessage == nil || items[1].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
 		t.Fatalf("expected assistant role on second item, got %#v", items[1])
 	}
-
-	gemini, err := NewClient(config.ProviderConfig{Preset: config.ProviderPresetGemini, APIKey: "k", Model: "gemini-3.5-flash"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	geminiClient, ok := gemini.(*geminiClient)
-	if !ok {
-		t.Fatalf("expected gemini client, got %T", gemini)
-	}
-	if geminiClient.baseURL != "" {
-		t.Fatalf("expected empty gemini base url (SDK uses API key only), got %q", geminiClient.baseURL)
-	}
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {

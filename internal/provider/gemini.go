@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/config"
@@ -14,12 +15,15 @@ import (
 type geminiClient struct {
 	initErr     error
 	genaiClient *genai.Client
-	baseClient
+
+	providerName string
+	apiKey       string
+	model        string
+
 	thinkingBudget      int
 	enableGoogleSearch  bool
 	enableCodeExecution bool
-
-	supportsThinking bool
+	supportsThinking    bool
 }
 
 func newGeminiClient(cfg config.ProviderConfig) Client {
@@ -28,7 +32,9 @@ func newGeminiClient(cfg config.ProviderConfig) Client {
 		APIKey: cfg.APIKey,
 	})
 	return &geminiClient{
-		baseClient:          newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model),
+		providerName:        cfg.Name,
+		apiKey:              cfg.APIKey,
+		model:               cfg.Model,
 		thinkingBudget:      cfg.ThinkingBudget,
 		enableGoogleSearch:  cfg.EnableGoogleSearch,
 		enableCodeExecution: cfg.EnableCodeExecution,
@@ -36,6 +42,14 @@ func newGeminiClient(cfg config.ProviderConfig) Client {
 		genaiClient:         client,
 		initErr:             err,
 	}
+}
+
+func (c *geminiClient) Configured() bool {
+	return c.apiKey != "" && c.model != ""
+}
+
+func (c *geminiClient) Summary() string {
+	return fmt.Sprintf("%s:%s", c.providerName, c.model)
 }
 
 func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {

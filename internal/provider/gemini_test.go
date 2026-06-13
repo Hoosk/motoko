@@ -116,7 +116,7 @@ func TestToGenAIContentToolCallsAndResponses(t *testing.T) {
 
 func TestBuildGenerateContentConfigTools(t *testing.T) {
 	client := &geminiClient{
-		baseClient:          newBaseClient("gemini", "", "", "gemini-2.5-flash"),
+		model:               "gemini-2.5-flash",
 		thinkingBudget:      1024,
 		enableGoogleSearch:  true,
 		enableCodeExecution: true,
@@ -187,7 +187,7 @@ func TestNewGeminiClientInitializesFields(t *testing.T) {
 
 func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 	client := &geminiClient{
-		baseClient:       newBaseClient("gemini", "", "", "gemini-3.5-flash"),
+		model:            "gemini-3.5-flash",
 		thinkingBudget:   8192,
 		supportsThinking: true,
 	}
@@ -210,3 +210,19 @@ func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 	}
 }
 
+func TestGeminiClientConfiguredWithoutBaseURL(t *testing.T) {
+	client, err := NewClient(config.ProviderConfig{Preset: config.ProviderPresetGemini, APIKey: "k", Model: "gemini-3.5-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc, ok := client.(*geminiClient)
+	if !ok {
+		t.Fatalf("expected *geminiClient, got %T", client)
+	}
+	if !gc.Configured() {
+		t.Fatal("gemini client with API key + model should be Configured()")
+	}
+	if gc.Summary() != "gemini:gemini-3.5-flash" {
+		t.Fatalf("unexpected summary %q", gc.Summary())
+	}
+}
