@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
@@ -87,6 +88,31 @@ func main() {
 	if question != "" {
 		runtimeObj.Start(ctx)
 
+		// Wait up to 2 seconds for Tachikomas to complete their first run
+		startT := time.Now()
+		for time.Since(startT) < 2*time.Second {
+			_, gitDone := runtimeObj.Tachikomas().Query("GitTachikoma")
+			_, codeDone := runtimeObj.Tachikomas().Query("CodeTachikoma")
+			if gitDone && codeDone {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		// Detect and configure agent mode prefix if present (e.g. @search)
+		trimmedQ := strings.TrimSpace(question)
+		fields := strings.Fields(trimmedQ)
+		if len(fields) > 0 && strings.HasPrefix(fields[0], "@") {
+			agentName := strings.TrimPrefix(fields[0], "@")
+			for _, name := range runtimeObj.AgentNames() {
+				if strings.EqualFold(name, agentName) {
+					runtimeObj.SetAgentMode(name)
+					question = strings.TrimSpace(strings.TrimPrefix(trimmedQ, fields[0]))
+					break
+				}
+			}
+		}
+
 		var lastWasReasoning bool
 		onEvent := func(ev app.AgentStreamEvent) error {
 			switch ev.Kind {
@@ -107,58 +133,7 @@ func main() {
 					fmt.Println()
 					lastWasReasoning = false
 				}
-				fmt.Printf("\n⚙️  Running tool: %s\n", styles.CommandStyle.Render(ev.Title))
-				if strings.TrimSpace(ev.Content) != "" {
-					args := strings.TrimSpace(ev.Content)
-					if strings.Contains(args, "\n") {
-						for _, line := range strings.Split(args, "\n") {
-							fmt.Printf("   %s\n", styles.SystemStyle.Render(line))
-						}
-					} else {
-						fmt.Printf("   %s\n", styles.SystemStyle.Render(args))
-					}
-				}
-			case "error":
-				if lastWasReasoning {
-					fmt.Println()
-					lastWasReasoning = false
-				}
-				fmt.Printf("❌ %s\n", styles.ErrorStyle.Render(ev.Content))
-			case "output":
-				if lastWasReasoning {
-					fmt.Println()
-					lastWasReasoning = false
-				}
-				if ev.Title == "web_search" || ev.Title == "web_fetch" {
-					fmt.Printf("✓ Tool finished: %s (%d characters)\n", styles.CommandStyle.Render(ev.Title), len(ev.Content))
-				} else {
-					lines := strings.Split(strings.TrimSpace(ev.Content), "\n")
-					if len(lines) > 5 {
-						fmt.Printf("✓ Tool finished: %s (%d lines, %d bytes)\n", styles.CommandStyle.Render(ev.Title), len(lines), len(ev.Content))
-					} else {
-						fmt.Printf("✓ Tool finished: %s\n", styles.CommandStyle.Render(ev.Title))
-						for _, line := range lines {
-							if line != "" {
-								fmt.Printf("   %s\n", styles.SystemStyle.Render(line))
-							}
-						}
-					}
-				}
-			case "task_started":
-				if lastWasReasoning {
-					fmt.Println()
-					lastWasReasoning = false
-				}
-				fmt.Printf("\n⚙️  Starting task: %s\n", styles.CommandStyle.Render(ev.Title))
-			case "task_finished":
-				if lastWasReasoning {
-					fmt.Println()
-					lastWasReasoning = false
-				}
-				fmt.Printf("✓ Task finished: %s\n", styles.CommandStyle.Render(ev.Title))
-				if strings.TrimSpace(ev.Content) != "" {
-					fmt.Printf("   %s\n", styles.SystemStyle.Render(ev.Content))
-				}
+				fmt.Printf("\n⚙️  Running tool: %s...\n", ev.Title)
 			}
 			return nil
 		}
@@ -167,11 +142,10 @@ func main() {
 		_, err := runtimeObj.RunAgentStream(ctx, info, question, onEvent)
 		if err != nil {
 			if err.Error() == "agente no configurado" {
-				fmt.Fprintln(os.Stderr, "Error: Motoko agent is not configured.")
-				fmt.Fprintln(os.Stderr, "Please run 'motoko' without flags first to configure your provider and model.")
+				fmt.Fprintln(os.Stderr, "Error: Motoko agent is not configured. Run interactively first.")
 				os.Exit(1)
 			}
-			fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		if lastWasReasoning {

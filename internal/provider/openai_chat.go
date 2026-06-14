@@ -290,7 +290,12 @@ func chatCompletionTools(tools ToolSet) []map[string]any {
 }
 
 func toolInputDescription(tool LocalToolDefinition) string {
-	if hint := strings.TrimSpace(tool.InputHint); hint != "" {
+	hint := strings.TrimSpace(tool.InputHint)
+	if hint != "" {
+		prefix := tool.Name + " "
+		if strings.HasPrefix(strings.ToLower(hint), strings.ToLower(prefix)) {
+			hint = strings.TrimSpace(hint[len(prefix):])
+		}
 		return hint
 	}
 	if desc := strings.TrimSpace(tool.Description); desc != "" {

@@ -121,7 +121,13 @@ func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
 		return Result{}, fmt.Errorf("tool desconocida: %s", name)
 	}
 
-	result, err := tool.Run(ctx, args)
+	cleaned := strings.TrimSpace(args)
+	prefix := name + " "
+	if strings.HasPrefix(strings.ToLower(cleaned), strings.ToLower(prefix)) {
+		cleaned = strings.TrimSpace(cleaned[len(prefix):])
+	}
+
+	result, err := tool.Run(ctx, cleaned)
 	if err != nil {
 		return Result{}, err
 	}
