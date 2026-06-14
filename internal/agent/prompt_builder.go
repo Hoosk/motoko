@@ -103,11 +103,25 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 	for _, spec := range specs {
 		lines = append(lines, fmt.Sprintf("- %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
 	}
-	lines = append(lines,
-		"",
-		"- task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step. For those, use the 'bash' tool instead. Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task.",
-		"",
-	)
+	hasTask := false
+	hasBash := false
+	for _, spec := range specs {
+		if spec.Name == "task" {
+			hasTask = true
+		}
+		if spec.Name == "bash" {
+			hasBash = true
+		}
+	}
+
+	if hasTask {
+		note := "- task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step."
+		if hasBash {
+			note += " For those, use the 'bash' tool instead."
+		}
+		note += " Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task."
+		lines = append(lines, "", note, "")
+	}
 
 	// Inject split token
 	lines = append(lines, "--- DYNAMIC ---", "")

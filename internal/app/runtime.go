@@ -252,9 +252,7 @@ func (r *Runtime) SetAgentMode(name string) {
 			} else {
 				r.mode = ModePlan
 			}
-			if r.agent != nil {
-				r.agent.SetAgentOverride(a.System)
-			}
+			r.refreshAgent()
 			return
 		}
 	}
