@@ -54,7 +54,15 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 	}
 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
-	resp, err := c.sdkClient.Responses.New(ctx, params)
+	sessionID, requestID := GetTelemetry(ctx)
+	reqOpts := make([]option.RequestOption, 0)
+	if sessionID != "" {
+		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
+		if requestID != "" {
+			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
+		}
+	}
+	resp, err := c.sdkClient.Responses.New(ctx, params, reqOpts...)
 	if err != nil {
 		return Response{}, err
 	}
@@ -78,6 +86,13 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	}
 
 	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 
 	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
 		return Response{}, err
@@ -109,6 +124,13 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 	}
 
 	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 	reqOpts := make([]option.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))

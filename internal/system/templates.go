@@ -22,6 +22,10 @@ func LoadProviderHeader(providerKind string) string {
 		matched = "openai"
 	} else if strings.Contains(providerKind, "gemini") {
 		matched = "gemini"
+	} else if strings.Contains(providerKind, "kimi") {
+		matched = "kimi"
+	} else if strings.Contains(providerKind, "trinity") {
+		matched = "trinity"
 	} else {
 		matched = "default"
 	}

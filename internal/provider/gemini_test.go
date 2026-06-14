@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -124,7 +125,7 @@ func TestBuildGenerateContentConfigTools(t *testing.T) {
 	}
 
 	tools := ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run command"}}}
-	genaiConfig := client.buildGenerateContentConfig("system instruction", tools)
+	genaiConfig := client.buildGenerateContentConfig(context.Background(), "system instruction", tools)
 
 	if genaiConfig.SystemInstruction == nil || genaiConfig.SystemInstruction.Parts[0].Text != "system instruction" {
 		t.Fatalf("unexpected system instruction: %#v", genaiConfig.SystemInstruction)
@@ -192,7 +193,7 @@ func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 		supportsThinking: true,
 	}
 
-	genaiConfig := client.buildGenerateContentConfig("instruction", ToolSet{})
+	genaiConfig := client.buildGenerateContentConfig(context.Background(), "instruction", ToolSet{})
 	if genaiConfig.ThinkingConfig == nil {
 		t.Fatalf("expected ThinkingConfig to be set")
 	}

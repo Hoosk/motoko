@@ -15,9 +15,11 @@ func responseFromOpenAI(resp *responses.Response) Response {
 		FinalText:   strings.TrimSpace(resp.OutputText()),
 		OutputItems: outputItemsFromOpenAI(resp.Output),
 		Usage: Usage{
-			InputTokens:  int(resp.Usage.InputTokens),
-			OutputTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:  int(resp.Usage.TotalTokens),
+			InputTokens:           int(resp.Usage.InputTokens),
+			OutputTokens:          int(resp.Usage.OutputTokens),
+			TotalTokens:           int(resp.Usage.TotalTokens),
+			CacheReadInputTokens:  int(resp.Usage.InputTokensDetails.CachedTokens),
+			ReasoningTokens:       int(resp.Usage.OutputTokensDetails.ReasoningTokens),
 		},
 	}
 	result.PendingCalls = pendingCallsFromOpenAI(resp.Output)

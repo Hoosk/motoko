@@ -36,7 +36,15 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	}
 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
-	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
+	sessionID, requestID := GetTelemetry(ctx)
+	reqOpts := make([]openaioption.RequestOption, 0)
+	if sessionID != "" {
+		reqOpts = append(reqOpts, openaioption.WithHeader("X-Session-ID", sessionID))
+		if requestID != "" {
+			reqOpts = append(reqOpts, openaioption.WithHeader("X-Request-ID", requestID))
+		}
+	}
+	stream := c.sdkClient.Responses.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
 
 	var completed *responses.Response
@@ -108,6 +116,13 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	}
 
 	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
@@ -170,6 +185,13 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	}
 
 	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
@@ -208,6 +230,8 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 			usage.InputTokens = int(chunk.Usage.PromptTokens)
 			usage.OutputTokens = int(chunk.Usage.CompletionTokens)
 			usage.TotalTokens = int(chunk.Usage.TotalTokens)
+			usage.CacheReadInputTokens = int(chunk.Usage.PromptTokensDetails.CachedTokens)
+			usage.ReasoningTokens = int(chunk.Usage.CompletionTokensDetails.ReasoningTokens)
 		}
 	}
 	if err := stream.Err(); err != nil {
@@ -261,7 +285,17 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		}
 	}
 
-	stream := c.sdkClient.Messages.NewStreaming(ctx, params, option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"))
+	reqOpts := []option.RequestOption{
+		option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
+	}
+	if sessionID, requestID := GetTelemetry(ctx); sessionID != "" {
+		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
+		if requestID != "" {
+			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
+		}
+	}
+
+	stream := c.sdkClient.Messages.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
 
 	var raw strings.Builder
@@ -280,6 +314,8 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		case "message_start":
 			msgEvent := event.AsMessageStart()
 			usage.InputTokens = int(msgEvent.Message.Usage.InputTokens)
+			usage.CacheReadInputTokens = int(msgEvent.Message.Usage.CacheReadInputTokens)
+			usage.CacheWriteInputTokens = int(msgEvent.Message.Usage.CacheCreationInputTokens)
 
 		case "content_block_start":
 			blockEvent := event.AsContentBlockStart()
@@ -320,6 +356,9 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 			msgDelta := event.AsMessageDelta()
 			if msgDelta.Usage.OutputTokens > 0 {
 				usage.OutputTokens = int(msgDelta.Usage.OutputTokens)
+				usage.ReasoningTokens = int(msgDelta.Usage.OutputTokensDetails.ThinkingTokens)
+				usage.CacheReadInputTokens = int(msgDelta.Usage.CacheReadInputTokens)
+				usage.CacheWriteInputTokens = int(msgDelta.Usage.CacheCreationInputTokens)
 				usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 			}
 		}

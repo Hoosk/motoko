@@ -441,6 +441,19 @@ func TestHandleInputToolRunsRegisteredTool(t *testing.T) {
 	}
 }
 
+func TestHandleInputToolPreservesNewlines(t *testing.T) {
+	r := NewRuntime()
+	r.tools.Register(fakeRuntimeTool{name: "fake"})
+
+	resp := r.HandleInput("/tool fake line1\nline2\n  line3", system.ContextInfo{})
+	if len(resp.Entries) != 3 {
+		t.Fatalf("expected command, summary and output entries, got %#v", resp)
+	}
+	if resp.Entries[2] != (Entry{Kind: EntryOutput, Text: "line1\nline2\n  line3"}) {
+		t.Fatalf("expected multiline output with preserved formatting, got %q", resp.Entries[2].Text)
+	}
+}
+
 func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *testing.T) {
 	r := NewRuntime()
 	r.config = &config.AppConfig{}
@@ -571,6 +584,67 @@ func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 	}
 	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen automatico") {
 		t.Fatalf("expected auto-compact summary in history, got %q", got)
+	}
+}
+
+func TestCompactSessionPruningPreservesToolMetadata(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	r.config = &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "gpt-4.1",
+		}},
+	}
+	r.currentSession = session.New("ws", "/workspace")
+
+	call := provider.ToolInvocation{Name: "my_custom_tool", CallID: "call_123"}
+	longOutput := strings.Repeat("A", 3000)
+	toolMsg := provider.ToolResultForInvocation(call, longOutput)
+
+	r.currentSession.History = []provider.ConversationItem{
+		provider.UserText("hello"),
+		toolMsg,
+		provider.AssistantText("done"),
+		provider.UserText(strings.Repeat("B", 200000)),
+	}
+	r.currentSession.LastInputTokens = 1000
+
+	var capturedMessages []provider.ConversationItem
+	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
+		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+			capturedMessages = messages
+			return provider.Response{FinalText: "resumen breve"}, nil
+		}}, nil
+	}
+
+	resp := r.CompactSession(context.Background())
+	if len(resp.Entries) != 1 || resp.Entries[0].Text != "Session compacted." {
+		t.Fatalf("unexpected compact response %#v", resp)
+	}
+
+	foundTool := false
+	for _, msg := range capturedMessages {
+		if msg.Role == provider.RoleTool {
+			foundTool = true
+			parsedCall, parsedOutput := provider.ParseToolResultContent(msg.Content)
+			if parsedCall.Name != "my_custom_tool" {
+				t.Errorf("expected tool name 'my_custom_tool', got %q", parsedCall.Name)
+			}
+			if parsedCall.CallID != "call_123" {
+				t.Errorf("expected call ID 'call_123', got %q", parsedCall.CallID)
+			}
+			if !strings.Contains(parsedOutput, "Tool output was large and has been pruned") {
+				t.Errorf("expected pruned message in output, got %q", parsedOutput)
+			}
+		}
+	}
+	if !foundTool {
+		t.Fatal("expected tool message to be passed to the provider client for summarization")
 	}
 }
 

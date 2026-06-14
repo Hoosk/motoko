@@ -69,6 +69,14 @@ func (r *Runtime) persistTurn(result agent.Result) {
 	}
 	r.currentSession.History = append([]provider.ConversationItem(nil), result.History...)
 	r.currentSession.LastInputTokens = result.Usage.InputTokens
+
+	r.currentSession.TotalInputTokens += result.Usage.InputTokens
+	r.currentSession.TotalOutputTokens += result.Usage.OutputTokens
+	r.currentSession.TotalTokens += result.Usage.TotalTokens
+	r.currentSession.TotalReasoningTokens += result.Usage.ReasoningTokens
+	r.currentSession.TotalCacheReadTokens += result.Usage.CacheReadInputTokens
+	r.currentSession.TotalCacheWriteTokens += result.Usage.CacheWriteInputTokens
+
 	_ = r.currentSession.Save()
 }
 

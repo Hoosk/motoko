@@ -155,6 +155,9 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		totalUsage.InputTokens += resp.Usage.InputTokens
 		totalUsage.OutputTokens += resp.Usage.OutputTokens
 		totalUsage.TotalTokens += resp.Usage.TotalTokens
+		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
+		totalUsage.CacheReadInputTokens += resp.Usage.CacheReadInputTokens
+		totalUsage.CacheWriteInputTokens += resp.Usage.CacheWriteInputTokens
 		if a.debug {
 			steps = append(steps, Step{Kind: "debug", Title: "provider", Content: fmt.Sprintf("completion %d tokens in:%d out:%d total:%d", i+1, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)})
 		}

@@ -26,8 +26,11 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "help":
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Available commands:",
+			"  /task     Interact with background tasks",
+			"  /brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
+			"  /metrics  Show cumulative token usage metrics for this session",
+			"  /approve  Approve pending tool command execution",
 			"/help     Show this help message",
-			"/brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
 			"/clear    Clear the timeline history",
 			"/compact  Manually compact the active session",
 			"/mode     Open the agent mode selector",
@@ -118,9 +121,27 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 
 		toolName := parts[1]
 		toolArgs := ""
-		if len(parts) > 2 {
-			toolArgs = strings.Join(parts[2:], " ")
+		rawTrimmed := strings.TrimPrefix(input, "/")
+		idx := 0
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
 		}
+		for idx < len(rawTrimmed) && !(rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		for idx < len(rawTrimmed) && !(rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		if idx < len(rawTrimmed) {
+			toolArgs = rawTrimmed[idx:]
+		}
+
 		if strings.EqualFold(toolName, "bash") {
 			return r.handleShell(toolArgs)
 		}
@@ -210,6 +231,32 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}
 	case "brain":
 		return r.handleBrainCommand(parts[1:])
+	case "metrics":
+		if r.currentSession == nil {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay una sesión activa."}}}
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Métricas de la sesión actual (%s):\n", r.currentSession.ID))
+		sb.WriteString(fmt.Sprintf("- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("- Mensajes en historial: %d\n", len(r.currentSession.History)))
+		sb.WriteString("\nUso de Tokens Acumulado:\n")
+		sb.WriteString(fmt.Sprintf("- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens))
+		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
+			sb.WriteString(fmt.Sprintf("  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
+				r.currentSession.TotalCacheReadTokens, 
+				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100))
+		}
+		if r.currentSession.TotalCacheWriteTokens > 0 {
+			sb.WriteString(fmt.Sprintf("  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens))
+		}
+		sb.WriteString(fmt.Sprintf("- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens))
+		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
+			sb.WriteString(fmt.Sprintf("  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
+				r.currentSession.TotalReasoningTokens, 
+				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100))
+		}
+		sb.WriteString(fmt.Sprintf("- Tokens Totales:    %d\n", r.currentSession.TotalTokens))
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}

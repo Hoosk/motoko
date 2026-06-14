@@ -52,6 +52,10 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
+
+	ReasoningTokens       int
+	CacheReadInputTokens  int
+	CacheWriteInputTokens int
 }
 
 type Message struct {
@@ -129,4 +133,27 @@ type Client interface {
 	Summary() string
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 	GetModel(ctx context.Context, model string) (ModelInfo, error)
+}
+
+type telemetryKey string
+
+const (
+	sessionIDKey telemetryKey = "session_id"
+	requestIDKey telemetryKey = "request_id"
+)
+
+func WithTelemetry(ctx context.Context, sessionID, requestID string) context.Context {
+	if sessionID != "" {
+		ctx = context.WithValue(ctx, sessionIDKey, sessionID)
+	}
+	if requestID != "" {
+		ctx = context.WithValue(ctx, requestIDKey, requestID)
+	}
+	return ctx
+}
+
+func GetTelemetry(ctx context.Context) (string, string) {
+	sessionID, _ := ctx.Value(sessionIDKey).(string)
+	requestID, _ := ctx.Value(requestIDKey).(string)
+	return sessionID, requestID
 }

@@ -56,9 +56,10 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 	for _, msg := range oldHistory {
 		if msg.Role == "tool" {
 			// Extract tool output and truncate it if it's too large
-			_, output := provider.ParseToolResultContent(msg.Content)
+			call, output := provider.ParseToolResultContent(msg.Content)
 			if len(output) > 2000 {
-				msg.Content = fmt.Sprintf("Tool output was large and has been pruned. Size: %d bytes. Summary: %s...", len(output), output[:500])
+				prunedText := fmt.Sprintf("Tool output was large and has been pruned. Size: %d bytes. Summary: %s...", len(output), output[:500])
+				msg = provider.ToolResultForInvocation(call, prunedText)
 			}
 		}
 		prunedOldHistory = append(prunedOldHistory, msg)

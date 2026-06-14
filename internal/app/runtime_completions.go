@@ -204,7 +204,7 @@ func (r *Runtime) cacheProviderModels(providerName string, models []string) {
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "agent", "shell", "chat", "status", "debug", "trace", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny"}
+	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "agent", "shell", "chat", "status", "debug", "trace", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny", "metrics"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {

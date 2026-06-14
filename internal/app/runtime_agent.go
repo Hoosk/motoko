@@ -28,6 +28,8 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 	priorHistory := []provider.ConversationItem(nil)
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
+		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
 	ctx = tools.WithBrain(ctx, r.brain)
 	result, err := r.agent.Run(ctx, info, input, priorHistory)
@@ -50,6 +52,8 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	firstTurn := r.currentSession == nil || len(r.currentSession.History) == 0
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
+		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
 	ctx = tools.WithBrain(ctx, r.brain)
 	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
@@ -290,6 +294,8 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 
 	subCtx := tools.WithBrain(ctx, subBrain)
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
+	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
+	subCtx = provider.WithTelemetry(subCtx, subSessionID, reqID)
 	
 	info := r.GetContextInfo()
 	info = r.enrichContext(subCtx, info, cfg.Task)

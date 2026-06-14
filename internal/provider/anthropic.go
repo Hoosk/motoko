@@ -142,7 +142,17 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 		}
 	}
 
-	resp, err := c.sdkClient.Messages.New(ctx, params, option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"))
+	reqOpts := []option.RequestOption{
+		option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
+	}
+	if sessionID, requestID := GetTelemetry(ctx); sessionID != "" {
+		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
+		if requestID != "" {
+			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
+		}
+	}
+
+	resp, err := c.sdkClient.Messages.New(ctx, params, reqOpts...)
 	if err != nil {
 		return Response{}, err
 	}
@@ -521,9 +531,12 @@ func responseFromSDK(decoded *anthropic.Message) Response {
 
 	finalText := strings.TrimSpace(strings.Join(textParts, "\n"))
 	usage := Usage{
-		InputTokens:  int(decoded.Usage.InputTokens),
-		OutputTokens: int(decoded.Usage.OutputTokens),
-		TotalTokens:  int(decoded.Usage.InputTokens + decoded.Usage.OutputTokens),
+		InputTokens:           int(decoded.Usage.InputTokens),
+		OutputTokens:          int(decoded.Usage.OutputTokens),
+		TotalTokens:           int(decoded.Usage.InputTokens + decoded.Usage.OutputTokens),
+		ReasoningTokens:       int(decoded.Usage.OutputTokensDetails.ThinkingTokens),
+		CacheReadInputTokens:  int(decoded.Usage.CacheReadInputTokens),
+		CacheWriteInputTokens: int(decoded.Usage.CacheCreationInputTokens),
 	}
 
 	result := Response{FinalText: finalText, Usage: usage}

@@ -22,6 +22,13 @@ type chatCompletionUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 	InputTokens      int `json:"input_tokens"`
 	OutputTokens     int `json:"output_tokens"`
+
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details,omitempty"`
 }
 
 func (u chatCompletionUsage) providerUsage() Usage {
@@ -37,7 +44,14 @@ func (u chatCompletionUsage) providerUsage() Usage {
 	if total == 0 {
 		total = input + output
 	}
-	return Usage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	usage := Usage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	if u.PromptTokensDetails != nil {
+		usage.CacheReadInputTokens = u.PromptTokensDetails.CachedTokens
+	}
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	return usage
 }
 
 type chatCompletionChoice struct {
@@ -481,13 +495,17 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) Response {
 	input := int(comp.Usage.PromptTokens)
 	output := int(comp.Usage.CompletionTokens)
 	total := int(comp.Usage.TotalTokens)
+	cacheRead := int(comp.Usage.PromptTokensDetails.CachedTokens)
+	reasoning := int(comp.Usage.CompletionTokensDetails.ReasoningTokens)
 
 	result := Response{
 		FinalText: text,
 		Usage: Usage{
-			InputTokens:  input,
-			OutputTokens: output,
-			TotalTokens:  total,
+			InputTokens:           input,
+			OutputTokens:          output,
+			TotalTokens:           total,
+			CacheReadInputTokens:  cacheRead,
+			ReasoningTokens:       reasoning,
 		},
 	}
 	if text != "" {

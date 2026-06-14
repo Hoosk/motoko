@@ -204,3 +204,32 @@ func TestGetThinkingLabels(t *testing.T) {
 	}
 }
 
+func TestTelemetryContext(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithTelemetry(ctx, "session-123", "req-456")
+
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "session-123" {
+		t.Errorf("expected session-123, got %q", sessionID)
+	}
+	if requestID != "req-456" {
+		t.Errorf("expected req-456, got %q", requestID)
+	}
+}
+
+func TestUsageFields(t *testing.T) {
+	u := Usage{
+		InputTokens:           10,
+		OutputTokens:          20,
+		TotalTokens:           30,
+		ReasoningTokens:       5,
+		CacheReadInputTokens:  2,
+		CacheWriteInputTokens: 1,
+	}
+
+	if u.InputTokens != 10 || u.OutputTokens != 20 || u.TotalTokens != 30 ||
+		u.ReasoningTokens != 5 || u.CacheReadInputTokens != 2 || u.CacheWriteInputTokens != 1 {
+		t.Errorf("unexpected usage field values: %+v", u)
+	}
+}
+

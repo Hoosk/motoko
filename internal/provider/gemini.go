@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/config"
@@ -62,7 +63,7 @@ func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messag
 	}
 
 	contents := toGenAIContent(messages)
-	genaiConfig := c.buildGenerateContentConfig(systemPrompt, tools)
+	genaiConfig := c.buildGenerateContentConfig(ctx, systemPrompt, tools)
 
 	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, genaiConfig)
 	if err != nil {
@@ -78,7 +79,7 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	}
 
 	contents := toGenAIContent(messages)
-	genaiConfig := c.buildGenerateContentConfig(systemPrompt, tools)
+	genaiConfig := c.buildGenerateContentConfig(ctx, systemPrompt, tools)
 
 	iter := c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, genaiConfig)
 
@@ -93,7 +94,7 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		}
 		finalResponse = resp
 
-		text := resp.Text()
+		text := extractText(resp)
 		var thoughts []string
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 			for _, part := range resp.Candidates[0].Content.Parts {
@@ -125,6 +126,8 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 			usage.InputTokens = int(resp.UsageMetadata.PromptTokenCount)
 			usage.OutputTokens = int(resp.UsageMetadata.CandidatesTokenCount)
 			usage.TotalTokens = int(resp.UsageMetadata.TotalTokenCount)
+			usage.CacheReadInputTokens = int(resp.UsageMetadata.CachedContentTokenCount)
+			usage.ReasoningTokens = int(resp.UsageMetadata.ThoughtsTokenCount)
 		}
 	}
 
@@ -196,13 +199,24 @@ func (c *geminiClient) GetModel(ctx context.Context, model string) (ModelInfo, e
 	}, nil
 }
 
-func (c *geminiClient) buildGenerateContentConfig(systemPrompt string, tools ToolSet) *genai.GenerateContentConfig {
+func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPrompt string, tools ToolSet) *genai.GenerateContentConfig {
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
 			Role:  RoleUser,
 			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
 		},
 		Temperature: float32Ptr(0.2),
+	}
+
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "" {
+		cfg.HTTPOptions = &genai.HTTPOptions{
+			Headers: make(http.Header),
+		}
+		cfg.HTTPOptions.Headers.Set("X-Session-ID", sessionID)
+		if requestID != "" {
+			cfg.HTTPOptions.Headers.Set("X-Request-ID", requestID)
+		}
 	}
 
 	if c.supportsThinking && c.thinkingBudget != 0 {
@@ -394,7 +408,7 @@ func toolInvocationsFromGenAI(resp *genai.GenerateContentResponse) []ToolInvocat
 }
 
 func responseFromGenAIResponse(resp *genai.GenerateContentResponse) Response {
-	text := strings.TrimSpace(resp.Text())
+	text := strings.TrimSpace(extractText(resp))
 
 	if execResult := resp.CodeExecutionResult(); execResult != "" {
 		if text != "" {
@@ -406,18 +420,24 @@ func responseFromGenAIResponse(resp *genai.GenerateContentResponse) Response {
 	input := 0
 	output := 0
 	total := 0
+	cacheRead := 0
+	reasoning := 0
 	if resp.UsageMetadata != nil {
 		input = int(resp.UsageMetadata.PromptTokenCount)
 		output = int(resp.UsageMetadata.CandidatesTokenCount)
 		total = int(resp.UsageMetadata.TotalTokenCount)
+		cacheRead = int(resp.UsageMetadata.CachedContentTokenCount)
+		reasoning = int(resp.UsageMetadata.ThoughtsTokenCount)
 	}
 
 	result := Response{
 		FinalText: text,
 		Usage: Usage{
-			InputTokens:  input,
-			OutputTokens: output,
-			TotalTokens:  total,
+			InputTokens:           input,
+			OutputTokens:          output,
+			TotalTokens:           total,
+			CacheReadInputTokens:  cacheRead,
+			ReasoningTokens:       reasoning,
 		},
 	}
 
@@ -439,5 +459,18 @@ func float32Ptr(v float32) *float32 {
 
 func int32Ptr(v int32) *int32 {
 	return &v
+}
+
+func extractText(resp *genai.GenerateContentResponse) string {
+	if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+		return ""
+	}
+	var parts []string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if !part.Thought && part.Text != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }
 
