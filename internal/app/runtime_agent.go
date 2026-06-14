@@ -37,6 +37,9 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 		return result, err
 	}
 	r.persistTurn(result)
+	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
+		go r.generateTitle(context.Background(), input, result.Assistant)
+	}
 	return result, r.maybeAutoCompact(ctx, nil)
 }
 
@@ -49,7 +52,6 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
-	firstTurn := r.currentSession == nil || len(r.currentSession.History) == 0
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
 		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
@@ -71,7 +73,7 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 		return result, err
 	}
 	r.persistTurn(result)
-	if firstTurn {
+	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
 		go r.generateTitle(context.Background(), input, result.Assistant)
 	}
 	if err := r.maybeAutoCompact(ctx, onEvent); err != nil {
