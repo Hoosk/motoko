@@ -41,6 +41,17 @@ func (t *BrainWriteTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 	filename := strings.TrimSpace(args[:idx])
 	content := args[idx+1:]
+	if strings.EqualFold(filename, "brain_write") {
+		content = strings.TrimLeft(content, " \t\n\r")
+		idx2 := strings.IndexFunc(content, func(c rune) bool {
+			return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+		})
+		if idx2 == -1 {
+			return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
+		}
+		filename = strings.TrimSpace(content[:idx2])
+		content = content[idx2+1:]
+	}
 	if filename == "" || content == "" {
 		return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
 	}
@@ -86,6 +97,13 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
 	}
 	filename := parts[0]
+	if strings.EqualFold(filename, "brain_read") {
+		if len(parts) == 1 {
+			return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		}
+		parts = parts[1:]
+		filename = parts[0]
+	}
 
 	br := t.provider.GetBrain()
 	if br == nil {

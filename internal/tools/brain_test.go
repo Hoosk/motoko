@@ -110,6 +110,32 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("expected list to contain plan.md, got: %q", res.Output)
 	}
 
+	// 5b. Test prefix stripping
+	_, err = writeTool.Run(ctx, "brain_write plan_prefixed.md Prefixed plan content")
+	if err != nil {
+		t.Fatalf("prefixed write failed: %v", err)
+	}
+	res, err = readTool.Run(ctx, "brain_read plan_prefixed.md")
+	if err != nil {
+		t.Fatalf("prefixed read failed: %v", err)
+	}
+	if res.Output != "Prefixed plan content" {
+		t.Errorf("got %q, want %q", res.Output, "Prefixed plan content")
+	}
+
+	// 5c. Test prefixed with case insensitivity
+	_, err = writeTool.Run(ctx, "BRAIN_WRITE plan_case.md Case insensitive content")
+	if err != nil {
+		t.Fatalf("case-insensitive prefixed write failed: %v", err)
+	}
+	res, err = readTool.Run(ctx, "Brain_Read plan_case.md")
+	if err != nil {
+		t.Fatalf("case-insensitive prefixed read failed: %v", err)
+	}
+	if res.Output != "Case insensitive content" {
+		t.Errorf("got %q, want %q", res.Output, "Case insensitive content")
+	}
+
 	// 6. Test with nil brain
 	provider.b = nil
 	_, err = writeTool.Run(ctx, "file.md content")

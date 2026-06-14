@@ -30,7 +30,7 @@ func DefaultBuildPermissions() AgentPermissions {
 func DefaultPlanPermissions() AgentPermissions {
 	return AgentPermissions{
 		AllowWrite:      false,
-		AllowDelegate:   false,
+		AllowDelegate:   true,
 		AllowTask:       false,
 		AllowBrainWrite: true,
 		AllowWebAccess:  true,
