@@ -10,15 +10,15 @@ import (
 type AgentFrontmatter struct {
 	Name         string   `yaml:"name"`
 	Description  string   `yaml:"description"`
-	ReadOnly     bool     `yaml:"readonly"`
 	ToolFilter   []string `yaml:"tool_filter"`
 	ExcludeTools []string `yaml:"exclude_tools"`
+	ReadOnly     bool     `yaml:"readonly"`
 }
 
 // CustomAgentDef represents an agent loaded from a markdown file.
 type CustomAgentDef struct {
-	AgentDef
 	Frontmatter AgentFrontmatter
+	AgentDef
 }
 
 // LoadCustomAgents loads all custom agents defined in markdown files from .agents/modes/.

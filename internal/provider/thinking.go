@@ -11,11 +11,11 @@ func budgetToReasoningEffort(budget int) string {
 	case budget >= 65536:
 		return "xhigh"
 	case budget >= 24576:
-		return "high"
+		return valHigh
 	case budget >= 8192:
-		return "medium"
+		return valMedium
 	default:
-		return "low"
+		return valLow
 	}
 }
 
@@ -23,17 +23,17 @@ func budgetToReasoningEffort(budget int) string {
 func budgetToGeminiThinkingLevel(budget int) string {
 	switch {
 	case budget >= 24576:
-		return "high"
+		return valHigh
 	case budget >= 8192:
-		return "medium"
+		return valMedium
 	default:
-		return "low"
+		return valLow
 	}
 }
 
 // GetThinkingLabels returns the list of thinking configuration labels for a model.
 func GetThinkingLabels(modelID string) []string {
-	return []string{"off", "low", "medium", "high", "xhigh"}
+	return []string{"off", valLow, valMedium, valHigh, "xhigh"}
 }
 
 // BudgetToAnthropicEffort maps a token budget to an Anthropic effort level.

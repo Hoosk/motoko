@@ -360,11 +360,11 @@ func (r *Runtime) SemanticIndex() *semantic.Index {
 
 func (r *Runtime) ProviderSummary() string {
 	if r.config == nil {
-		return "none"
+		return valNone
 	}
 	active, ok := r.config.Active()
 	if !ok {
-		return "none"
+		return valNone
 	}
 	if strings.TrimSpace(active.Model) == "" {
 		return fmt.Sprintf("%s (%s:no-model)", active.Name, active.Preset)

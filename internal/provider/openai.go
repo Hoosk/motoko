@@ -73,9 +73,9 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	var decoded chatCompletionResponse
 
 	payload := map[string]interface{}{
-		"model": c.model,
+		keyModel: c.model,
 		"messages": append([]map[string]any{
-			{"role": "system", "content": systemPrompt},
+			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}

@@ -54,7 +54,7 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 	// to avoid blowing up the context of the summary request itself.
 	prunedOldHistory := make([]provider.ConversationItem, 0, len(oldHistory))
 	for _, msg := range oldHistory {
-		if msg.Role == "tool" {
+		if msg.Role == provider.RoleTool {
 			// Extract tool output and truncate it if it's too large
 			call, output := provider.ParseToolResultContent(msg.Content)
 			if len(output) > 2000 {

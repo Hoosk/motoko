@@ -21,6 +21,9 @@ type ContextInfo struct {
 	BrainSummary     string
 	Workspace        string
 	SemanticSummary  string
+	Guidelines       string
+	DesignSpec       string
+	ActiveMode       string
 	RelevantSnippets []string
 	ModifiedFiles    []string
 	RelevantFiles    []string
@@ -31,9 +34,6 @@ type ContextInfo struct {
 	Staged           int
 	GitDirty         bool
 	HasGit           bool
-	Guidelines       string
-	DesignSpec       string
-	ActiveMode       string
 }
 
 func GetContextInfo() ContextInfo {

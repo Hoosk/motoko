@@ -48,13 +48,13 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			f.active = false
 			return nil
-		case "tab", "down", "ctrl+n":
+		case keyTab, keyDown, keyCtrlN:
 			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
 			return nil
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			f.fieldIndex--
 			if f.fieldIndex < 0 {
 				f.fieldIndex = f.fieldCount(runtime) - 1
@@ -113,7 +113,7 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				}
 			}
 			return nil
-		case "enter":
+		case keyEnter:
 			return f.handleEnter(runtime)
 		default:
 			if len(msg.Runes) == 0 {

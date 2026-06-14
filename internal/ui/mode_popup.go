@@ -38,10 +38,10 @@ func (p *modePopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			p.active = false
 			return nil
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			if len(p.agents) == 0 {
 				p.index = 0
 				return nil
@@ -51,14 +51,14 @@ func (p *modePopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				p.index = len(p.agents) - 1
 			}
 			return nil
-		case "down", "ctrl+n", "tab":
+		case keyDown, keyCtrlN, keyTab:
 			if len(p.agents) == 0 {
 				p.index = 0
 				return nil
 			}
 			p.index = (p.index + 1) % len(p.agents)
 			return nil
-		case "enter":
+		case keyEnter:
 			if len(p.agents) == 0 {
 				p.active = false
 				return nil

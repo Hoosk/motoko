@@ -17,6 +17,17 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+const (
+	keyTab    = "tab"
+	keyCtrlN  = "ctrl+n"
+	keyCtrlP  = "ctrl+p"
+	keyEnter  = "enter"
+	keyEsc    = "esc"
+	keyUp     = "up"
+	keyDown   = "down"
+	keyRight  = "right"
+)
+
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var thinkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 

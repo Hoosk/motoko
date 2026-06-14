@@ -59,10 +59,10 @@ type AgentOverride struct {
 }
 
 type AppConfig struct {
-	ActiveProvider string                   `json:"active_provider"`
-	Providers      []ProviderConfig         `json:"providers"`
-	Search         SearchConfig             `json:"search,omitempty"`
 	Agents         map[string]AgentOverride `json:"agents,omitempty"`
+	Providers      []ProviderConfig         `json:"providers"`
+	ActiveProvider string                   `json:"active_provider"`
+	Search         SearchConfig             `json:"search,omitempty"`
 }
 
 func Load() (*AppConfig, error) {

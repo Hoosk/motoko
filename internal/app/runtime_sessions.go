@@ -39,11 +39,11 @@ func (r *Runtime) CurrentSessionEntries() []Entry {
 			continue
 		}
 		switch msg.Role {
-		case "user":
+		case provider.RoleUser:
 			entries = append(entries, Entry{Kind: EntryUser, Text: msg.Content})
-		case "assistant":
+		case provider.RoleAssistant:
 			entries = append(entries, Entry{Kind: EntryAssistant, Text: msg.Content})
-		case "tool":
+		case provider.RoleTool:
 			_, output := provider.ParseToolResultContent(msg.Content)
 			if strings.TrimSpace(output) != "" {
 				entries = append(entries, Entry{Kind: EntrySystem, Text: output})
@@ -92,7 +92,7 @@ func (r *Runtime) maybeAutoCompact(ctx context.Context, onEvent func(AgentStream
 	}
 	err := r.doCompact(ctx)
 	if err == nil && onEvent != nil {
-		_ = onEvent(AgentStreamEvent{Kind: "status", Content: "Session auto-compacted."})
+		_ = onEvent(AgentStreamEvent{Kind: cmdStatus, Content: "Session auto-compacted."})
 	}
 	return err
 }

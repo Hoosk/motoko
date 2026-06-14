@@ -21,8 +21,8 @@ description: "Test skill description with : colons"
 This is a test skill.
 `
 	skillFilePath := filepath.Join(tmpDir, "SKILL.md")
-	if err := os.WriteFile(skillFilePath, []byte(skillContent), 0o644); err != nil {
-		t.Fatalf("failed to write skill file: %v", err)
+	if writeErr := os.WriteFile(skillFilePath, []byte(skillContent), 0o644); writeErr != nil {
+		t.Fatalf("failed to write skill file: %v", writeErr)
 	}
 
 	skill, err := ParseSkillFile(skillFilePath)
@@ -62,8 +62,8 @@ description: Project skill description
 ---
 Proj skill body
 `
-	if err := os.WriteFile(filepath.Join(projSkillsDir, "SKILL.md"), []byte(projSkillContent), 0o644); err != nil {
-		t.Fatalf("failed to write project skill: %v", err)
+	if writeErr := os.WriteFile(filepath.Join(projSkillsDir, "SKILL.md"), []byte(projSkillContent), 0o644); writeErr != nil {
+		t.Fatalf("failed to write project skill: %v", writeErr)
 	}
 
 	skills, err := Discover(tmpWorkspace)

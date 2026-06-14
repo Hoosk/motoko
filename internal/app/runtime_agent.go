@@ -216,9 +216,9 @@ func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.
 		return nil, fmt.Errorf("agente desconocido: %s", name)
 	}
 
-	override, hasOverride := r.config.Agents[aDef.Name]
+	override := r.config.Agents[aDef.Name]
 	
-	hasOverride = true
+	hasOverride := true
 	if len(cfg.ToolFilter) > 0 {
 		override.ToolFilter = append(override.ToolFilter, cfg.ToolFilter...)
 	}
@@ -284,8 +284,8 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 	}
 
 	if cfg.InheritBrain && r.brain != nil {
-		if err := r.brain.CopyTo(subBrain); err != nil {
-			return "", err
+		if copyErr := r.brain.CopyTo(subBrain); copyErr != nil {
+			return "", copyErr
 		}
 	}
 

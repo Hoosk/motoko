@@ -287,7 +287,7 @@ func parseConversationItem(msg ConversationItem) (string, []parsedBlock) {
 	if call, ok := parseAssistantToolCallContent(msg.Content); ok {
 		var toolInput map[string]any
 		if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
-			toolInput = map[string]any{"input": call.Input}
+			toolInput = map[string]any{schemaInput: call.Input}
 		}
 		blocks = append(blocks, parsedBlock{
 			isToolUse:    true,
@@ -360,9 +360,9 @@ func buildSDKTools[T any](tools ToolSet, buildFn func(t LocalToolDefinition, isL
 
 func toolProperties(t LocalToolDefinition) map[string]any {
 	return map[string]any{
-		"input": map[string]any{
-			"type":        "string",
-			"description": toolInputDescription(t),
+		schemaInput: map[string]any{
+			schemaType:        schemaString,
+			schemaDescription: toolInputDescription(t),
 		},
 	}
 }
@@ -374,7 +374,7 @@ func toSDKTools(tools ToolSet) []anthropic.ToolUnionParam {
 			Description: anthropic.String(strings.TrimSpace(t.Description)),
 			InputSchema: anthropic.ToolInputSchemaParam{
 				Properties: toolProperties(t),
-				Required:   []string{"input"},
+				Required:   []string{schemaInput},
 			},
 		}
 		if isLast {
@@ -486,7 +486,7 @@ func toSDKBetaTools(tools ToolSet) []anthropic.BetaToolUnionParam {
 			Description: anthropic.String(strings.TrimSpace(t.Description)),
 			InputSchema: anthropic.BetaToolInputSchemaParam{
 				Properties: toolProperties(t),
-				Required:   []string{"input"},
+				Required:   []string{schemaInput},
 			},
 		}
 		if isLast {

@@ -31,7 +31,7 @@ func (t *ActivateSkillTool) DynamicSpec(ctx ToolContext) Spec {
 		var xmlBuilder strings.Builder
 		xmlBuilder.WriteString("Activa y carga las instrucciones de un skill. Skills disponibles:\n<available-skills>\n")
 		for _, s := range ctx.AvailableSkills {
-			xmlBuilder.WriteString(fmt.Sprintf("  <skill name=\"%s\" />\n", s))
+			fmt.Fprintf(&xmlBuilder, "  <skill name=\"%s\" />\n", s)
 		}
 		xmlBuilder.WriteString("</available-skills>")
 		spec.Summary = xmlBuilder.String()

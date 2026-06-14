@@ -216,19 +216,19 @@ func astActionFromSelectorBlock(block string) string {
 			return normalizeASTAction(strings.TrimSpace(parts[1]))
 		}
 	}
-	return "replace"
+	return actionReplace
 }
 
 func normalizeASTAction(action string) string {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "", "replace":
-		return "replace"
-	case "delete":
-		return "delete"
-	case "insert_before":
-		return "insert_before"
-	case "insert_after":
-		return "insert_after"
+	case "", actionReplace:
+		return actionReplace
+	case actionDelete:
+		return actionDelete
+	case actionInsertBefore:
+		return actionInsertBefore
+	case actionInsertAfter:
+		return actionInsertAfter
 	default:
 		return ""
 	}

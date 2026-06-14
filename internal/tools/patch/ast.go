@@ -63,17 +63,17 @@ func applyASTPatch(content []byte, relPath string, request *astPatch) (string, e
 
 func applyASTAction(content string, start, end int, request *astPatch) (string, error) {
 	switch normalizeASTAction(request.Action) {
-	case "replace":
+	case actionReplace:
 		return content[:start] + request.Replace + content[end:], nil
-	case "delete":
+	case actionDelete:
 		return content[:start] + content[end:], nil
-	case "insert_before":
+	case actionInsertBefore:
 		text := request.Replace
 		if len(text) > 0 && text[len(text)-1] != '\n' {
 			text += "\n"
 		}
 		return content[:start] + text + content[start:], nil
-	case "insert_after":
+	case actionInsertAfter:
 		text := request.Replace
 		if len(text) > 0 && text[0] != '\n' {
 			text = "\n" + text

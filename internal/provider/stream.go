@@ -102,9 +102,9 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	mappedIndexes := make(map[int]int)
 
 	payload := map[string]interface{}{
-		"model": c.model,
+		keyModel: c.model,
 		"messages": append([]map[string]any{
-			{"role": "system", "content": systemPrompt},
+			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 		"stream":      true,
@@ -161,6 +161,12 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
 			TotalTokens:  usage.TotalTokens,
+			PromptTokensDetails: &promptTokensDetails{
+				CachedTokens: usage.CacheReadInputTokens,
+			},
+			CompletionTokensDetails: &completionTokensDetails{
+				ReasoningTokens: usage.ReasoningTokens,
+			},
 		},
 	}), nil
 }
@@ -244,6 +250,12 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
 			TotalTokens:  usage.TotalTokens,
+			PromptTokensDetails: &promptTokensDetails{
+				CachedTokens: usage.CacheReadInputTokens,
+			},
+			CompletionTokensDetails: &completionTokensDetails{
+				ReasoningTokens: usage.ReasoningTokens,
+			},
 		},
 	}), nil
 }

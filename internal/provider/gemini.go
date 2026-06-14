@@ -245,15 +245,15 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 		var decls []*genai.FunctionDeclaration
 		for _, tool := range tools.Local {
 			parameters := map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"input": map[string]any{
-						"type":        "string",
-						"description": toolInputDescription(tool),
+				schemaType: schemaObject,
+				schemaProperties: map[string]any{
+					schemaInput: map[string]any{
+						schemaType:        schemaString,
+						schemaDescription: toolInputDescription(tool),
 					},
 				},
-				"required":             []string{"input"},
-				"additionalProperties": false,
+				schemaRequired:             []string{schemaInput},
+				schemaAdditionalProperties: false,
 			}
 			decls = append(decls, &genai.FunctionDeclaration{
 				Name:                 tool.Name,
@@ -278,7 +278,7 @@ func toGenAIContent(messages []ConversationItem) []*genai.Content {
 	for _, msg := range messages {
 		role := "user"
 		if normalizeConversationRole(msg.Role) == RoleAssistant {
-			role = "model"
+			role = keyModel
 		}
 
 		var msgParts []*genai.Part
@@ -308,7 +308,7 @@ func toGenAIContent(messages []ConversationItem) []*genai.Content {
 							_ = json.Unmarshal(call.Arguments, &args)
 						}
 						if args == nil && call.Input != "" {
-							args = map[string]any{"input": call.Input}
+							args = map[string]any{schemaInput: call.Input}
 						}
 						sdkPart.FunctionCall = &genai.FunctionCall{
 							ID:   call.CallID,
@@ -328,7 +328,7 @@ func toGenAIContent(messages []ConversationItem) []*genai.Content {
 					_ = json.Unmarshal(call.Arguments, &args)
 				}
 				if args == nil && call.Input != "" {
-					args = map[string]any{"input": call.Input}
+					args = map[string]any{schemaInput: call.Input}
 				}
 				msgParts = append(msgParts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{

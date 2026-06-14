@@ -41,11 +41,11 @@ func (p *sessionPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			p.active = false
 			p.loading = false
 			return nil
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			if len(p.sessions) > 0 {
 				p.index--
 				if p.index < 0 {
@@ -53,7 +53,7 @@ func (p *sessionPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				}
 			}
 			return nil
-		case "down", "ctrl+n", "tab":
+		case keyDown, keyCtrlN, keyTab:
 			if len(p.sessions) > 0 {
 				p.index = (p.index + 1) % len(p.sessions)
 			}

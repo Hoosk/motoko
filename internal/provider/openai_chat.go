@@ -11,24 +11,27 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 )
 
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+type completionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
 type chatCompletionResponse struct {
 	Choices []chatCompletionChoice `json:"choices"`
 	Usage   chatCompletionUsage    `json:"usage"`
 }
 
 type chatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-
-	PromptTokensDetails *struct {
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"prompt_tokens_details,omitempty"`
-	CompletionTokensDetails *struct {
-		ReasoningTokens int `json:"reasoning_tokens"`
-	} `json:"completion_tokens_details,omitempty"`
+	PromptTokensDetails     *promptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *completionTokensDetails `json:"completion_tokens_details,omitempty"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	InputTokens             int                      `json:"input_tokens"`
+	OutputTokens            int                      `json:"output_tokens"`
 }
 
 func (u chatCompletionUsage) providerUsage() Usage {
@@ -166,8 +169,8 @@ func toChatMessages(messages []ConversationItem) []map[string]any {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
 					result = append(result, map[string]any{
-						"role":       RoleAssistant,
-						"content":    "",
+						keyRole:      RoleAssistant,
+						keyContent:   "",
 						"tool_calls": []map[string]any{rawToolCall},
 					})
 					continue
@@ -175,13 +178,13 @@ func toChatMessages(messages []ConversationItem) []map[string]any {
 			}
 
 			result = append(result, map[string]any{
-				"role":    RoleAssistant,
-				"content": "",
+				keyRole:    RoleAssistant,
+				keyContent: "",
 				"tool_calls": []map[string]any{{
-					"id":   call.CallID,
-					"type": "function",
-					"function": map[string]any{
-						"name":      call.Name,
+					"id":        call.CallID,
+					schemaType:  keyFunction,
+					keyFunction: map[string]any{
+						keyName:     call.Name,
 						"arguments": assistantToolCallArguments(call),
 					},
 				}},
@@ -191,21 +194,21 @@ func toChatMessages(messages []ConversationItem) []map[string]any {
 		if msg.Role == RoleTool {
 			call, output := parseToolResultContent(msg.Content)
 			item := map[string]any{
-				"role":    RoleTool,
-				"content": output,
+				keyRole:    RoleTool,
+				keyContent: output,
 			}
 			if call.CallID != "" {
 				item["tool_call_id"] = call.CallID
 			}
 			if call.Name != "" {
-				item["name"] = call.Name
+				item[keyName] = call.Name
 			}
 			result = append(result, item)
 			continue
 		}
 		result = append(result, map[string]any{
-			"role":    normalizeConversationRole(msg.Role),
-			"content": msg.Content,
+			keyRole:    normalizeConversationRole(msg.Role),
+			keyContent: msg.Content,
 		})
 	}
 	return result
@@ -238,15 +241,15 @@ func responseTools(tools ToolSet) []responses.ToolUnionParam {
 	result := make([]responses.ToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		parameters := map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"input": map[string]any{
-					"type":        "string",
-					"description": toolInputDescription(tool),
+			schemaType: schemaObject,
+			schemaProperties: map[string]any{
+				schemaInput: map[string]any{
+					"type":            schemaString,
+					schemaDescription: toolInputDescription(tool),
 				},
 			},
-			"required":             []string{"input"},
-			"additionalProperties": false,
+			schemaRequired:             []string{schemaInput},
+			schemaAdditionalProperties: false,
 		}
 		result = append(result, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name:        tool.Name,
@@ -265,20 +268,20 @@ func chatCompletionTools(tools ToolSet) []map[string]any {
 	result := make([]map[string]any, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		result = append(result, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        tool.Name,
-				"description": strings.TrimSpace(tool.Description),
+			schemaType: keyFunction,
+			keyFunction: map[string]any{
+				keyName:           tool.Name,
+				schemaDescription: strings.TrimSpace(tool.Description),
 				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"input": map[string]any{
-							"type":        "string",
-							"description": toolInputDescription(tool),
+					schemaType: schemaObject,
+					schemaProperties: map[string]any{
+						schemaInput: map[string]any{
+							schemaType:        schemaString,
+							schemaDescription: toolInputDescription(tool),
 						},
 					},
-					"required":             []string{"input"},
-					"additionalProperties": false,
+					schemaRequired:             []string{schemaInput},
+					schemaAdditionalProperties: false,
 				},
 			},
 		})
@@ -459,15 +462,15 @@ func toSDKChatTools(tools ToolSet) []openai.ChatCompletionToolUnionParam {
 	result := make([]openai.ChatCompletionToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		parameters := map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"input": map[string]any{
-					"type":        "string",
-					"description": toolInputDescription(tool),
+			schemaType: schemaObject,
+			schemaProperties: map[string]any{
+				schemaInput: map[string]any{
+					schemaType:        schemaString,
+					schemaDescription: toolInputDescription(tool),
 				},
 			},
-			"required":             []string{"input"},
-			"additionalProperties": false,
+			schemaRequired:             []string{schemaInput},
+			schemaAdditionalProperties: false,
 		}
 
 		result = append(result, openai.ChatCompletionToolUnionParam{

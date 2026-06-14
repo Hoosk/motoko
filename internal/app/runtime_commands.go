@@ -52,7 +52,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/deny     Cancel the pending shell action",
 			"!<cmd>    Execute an explicit shell command",
 		}, "\n")}}}
-	case "clear":
+	case cmdClear:
 		if r.currentSession != nil {
 			r.currentSession.History = nil
 			r.currentSession.LastInputTokens = 0
@@ -64,8 +64,8 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			Entries: []Entry{{Kind: EntrySystem, Text: "Compacting session..."}},
 			Action:  &Action{Type: ActionCompact},
 		}
-	case "plan":
-		r.SetAgentMode("plan")
+	case string(ModePlan):
+		r.SetAgentMode(string(ModePlan))
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
 	case "build":
 		r.SetAgentMode("build")
@@ -95,7 +95,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "chat":
 		r.inputMode = InputModeChat
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Input mode: chat. Normal input will be treated as a prompt."}}}
-	case "status":
+	case cmdStatus:
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.statusText(info)}}}
 	case "debug":
 		r.debug = !r.debug
@@ -114,7 +114,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Signal: "open-sessions-popup"}
 	case "tools":
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.ToolSpecs())}}}
-	case "tool":
+	case cmdTool:
 		if len(parts) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
 		}
@@ -126,13 +126,13 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
 			idx++
 		}
-		for idx < len(rawTrimmed) && !(rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
 			idx++
 		}
 		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
 			idx++
 		}
-		for idx < len(rawTrimmed) && !(rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
 			idx++
 		}
 		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
@@ -206,7 +206,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 
 		subcmd := strings.ToLower(parts[1])
 		switch subcmd {
-		case "list":
+		case cmdList:
 			tasks := r.ListTasks()
 			if len(tasks) == 0 {
 				return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active background tasks."}}}
@@ -236,26 +236,26 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay una sesión activa."}}}
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Métricas de la sesión actual (%s):\n", r.currentSession.ID))
-		sb.WriteString(fmt.Sprintf("- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05")))
-		sb.WriteString(fmt.Sprintf("- Mensajes en historial: %d\n", len(r.currentSession.History)))
+		fmt.Fprintf(&sb, "Métricas de la sesión actual (%s):\n", r.currentSession.ID)
+		fmt.Fprintf(&sb, "- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "- Mensajes en historial: %d\n", len(r.currentSession.History))
 		sb.WriteString("\nUso de Tokens Acumulado:\n")
-		sb.WriteString(fmt.Sprintf("- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens))
+		fmt.Fprintf(&sb, "- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens)
 		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
-			sb.WriteString(fmt.Sprintf("  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
+			fmt.Fprintf(&sb, "  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
 				r.currentSession.TotalCacheReadTokens, 
-				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100))
+				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100)
 		}
 		if r.currentSession.TotalCacheWriteTokens > 0 {
-			sb.WriteString(fmt.Sprintf("  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens))
+			fmt.Fprintf(&sb, "  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens)
 		}
-		sb.WriteString(fmt.Sprintf("- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens))
+		fmt.Fprintf(&sb, "- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens)
 		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
-			sb.WriteString(fmt.Sprintf("  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
+			fmt.Fprintf(&sb, "  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
 				r.currentSession.TotalReasoningTokens, 
-				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100))
+				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
 		}
-		sb.WriteString(fmt.Sprintf("- Tokens Totales:    %d\n", r.currentSession.TotalTokens))
+		fmt.Fprintf(&sb, "- Tokens Totales:    %d\n", r.currentSession.TotalTokens)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
@@ -271,7 +271,7 @@ func formatToolList(specs []tools.Spec) string {
 }
 
 func (r *Runtime) statusText(info system.ContextInfo) string {
-	pending := "none"
+	pending := valNone
 	if r.pending != nil {
 		pending = r.pending.Command
 	}
@@ -317,7 +317,7 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 
 	subcommand := strings.ToLower(args[0])
 	switch subcommand {
-	case "list":
+	case cmdList:
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.providerListText()}}}
 	case "add":
 		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Opening provider configuration form..."}}}
@@ -365,12 +365,12 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 	var supportsThinking bool
 	var contextWindow int
 	if client, err := r.providerClient(active); err == nil {
-		if info, err := client.GetModel(ctx, model); err == nil {
+		if info, modelErr := client.GetModel(ctx, model); modelErr == nil {
 			supportsThinking = info.SupportsThinking
 			contextWindow = info.ContextWindow
 			tracelog.Logf("runtime handleModelsCommand: model %q resolved: supportsThinking=%t contextWindow=%d", model, supportsThinking, contextWindow)
 		} else {
-			tracelog.Logf("runtime handleModelsCommand: failed to resolve model %q: %v", model, err)
+			tracelog.Logf("runtime handleModelsCommand: failed to resolve model %q: %v", model, modelErr)
 		}
 	} else {
 		tracelog.Logf("runtime handleModelsCommand: failed to load provider client: %v", err)
@@ -426,7 +426,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 
 	subcmd := strings.ToLower(parts[0])
 	switch subcmd {
-	case "list":
+	case cmdList:
 		return r.listBrainFiles()
 	case "read":
 		if len(parts) < 2 {
@@ -468,7 +468,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: "--- Session Summary (summary.md) ---"},
 			{Kind: EntrySystem, Text: content},
 		}}
-	case "clear":
+	case cmdClear:
 		files, err := r.brain.List()
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}

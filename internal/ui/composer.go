@@ -85,7 +85,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "tab", "right":
+		case keyTab, keyRight:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(1)
 				return m, nil
@@ -103,7 +103,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 				m.advanceSuggestion(-1)
 				return m, nil
 			}
-		case "down", "ctrl+n":
+		case keyDown, keyCtrlN:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(1)
 				return m, nil
@@ -111,7 +111,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 			m.clearSuggestionCycle()
 			m.navigateHistoryDown()
 			return m, nil
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(-1)
 				return m, nil
@@ -119,7 +119,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 			m.clearSuggestionCycle()
 			m.navigateHistoryUp()
 			return m, nil
-		case "enter":
+		case keyEnter:
 			if len(m.mentionSuggestions) > 0 {
 				m.applySelectedMention()
 				return m, nil

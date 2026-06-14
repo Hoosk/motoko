@@ -8,14 +8,14 @@ import (
 )
 
 type SubagentConfig struct {
+	ProgressChan  chan<- string   `json:"-"`
 	Mode          string          `json:"mode"`
 	Task          string          `json:"task"`
-	MaxIterations int             `json:"max_iterations"`
-	AllowDelegate bool            `json:"allow_delegate"`
-	MaxDepth      int             `json:"max_depth"`
 	ToolFilter    []string        `json:"tool_filter"`
+	MaxIterations int             `json:"max_iterations"`
+	MaxDepth      int             `json:"max_depth"`
+	AllowDelegate bool            `json:"allow_delegate"`
 	InheritBrain  bool            `json:"inherit_brain"`
-	ProgressChan  chan<- string   `json:"-"`
 }
 
 type AgentRunner interface {

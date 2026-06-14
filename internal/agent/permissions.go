@@ -3,14 +3,14 @@ package agent
 // AgentPermissions defines what an agent is allowed to do within a session.
 // This provides more granular control than a simple "read-only" flag.
 type AgentPermissions struct {
+	AllowedTools    []string // Explicit allowlist (empty = all allowed based on boolean flags)
+	DeniedTools     []string // Explicit denylist
+	MaxIterations   int      // Per-agent iteration limit
 	AllowWrite      bool     // Can use write/modify tools (bash, patch)
 	AllowDelegate   bool     // Can spawn subagents
 	AllowTask       bool     // Can launch background tasks
 	AllowBrainWrite bool     // Can write to the session brain
 	AllowWebAccess  bool     // Can use web search and fetch
-	AllowedTools    []string // Explicit allowlist (empty = all allowed based on boolean flags)
-	DeniedTools     []string // Explicit denylist
-	MaxIterations   int      // Per-agent iteration limit
 	DoomLoopDetect  bool     // Enable cycle detection
 }
 

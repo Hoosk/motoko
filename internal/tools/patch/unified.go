@@ -117,16 +117,16 @@ func applyUnifiedPatch(current string, patch *unifiedPatch) (string, error) {
 func (p *unifiedPatch) targetPath() (string, error) {
 	oldPath := normalizeDiffPath(p.OldPath)
 	newPath := normalizeDiffPath(p.NewPath)
-	if newPath == "/dev/null" {
+	if newPath == devNull {
 		return "", fmt.Errorf("el unified diff no soporta borrado de archivos")
 	}
-	if oldPath != "" && oldPath != "/dev/null" && newPath != "" && oldPath != newPath {
+	if oldPath != "" && oldPath != devNull && newPath != "" && oldPath != newPath {
 		return "", fmt.Errorf("el unified diff no soporta renombrados; old=%s new=%s", oldPath, newPath)
 	}
 	if newPath != "" {
 		return newPath, nil
 	}
-	if oldPath != "" && oldPath != "/dev/null" {
+	if oldPath != "" && oldPath != devNull {
 		return oldPath, nil
 	}
 	return "", fmt.Errorf("no se pudo resolver la ruta objetivo del unified diff")
