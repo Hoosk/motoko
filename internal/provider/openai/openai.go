@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type openAIClient struct {
 	httpClient         *http.Client
 	sdkClient          openai.Client
 	thinkingBudget     int
+	contextWindow      int
 	useChatCompletions bool
 	useSDK             bool
 }
@@ -53,6 +55,7 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 		providerName:       cfg.Name,
 		httpClient:         httpClient,
 		thinkingBudget:     cfg.ThinkingBudget,
+		contextWindow:      cfg.ContextWindow,
 		sdkClient:          sdkClient,
 		useChatCompletions: cfg.Preset != config.ProviderPresetOpenAI && cfg.Preset != config.ProviderPresetLMStudio,
 		useSDK:             cfg.UseSDK,
@@ -228,9 +231,45 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, er
 }
 
 func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	// Intento 1: Consulta de modelo individual vía SDK
+	m, err := c.sdkClient.Models.Get(ctx, model)
+	if err == nil && m != nil {
+		if field, ok := m.JSON.ExtraFields["context_length"]; ok {
+			if raw := field.Raw(); raw != "" {
+				if contextLength, atoiErr := strconv.Atoi(raw); atoiErr == nil && contextLength > 0 {
+					return provider.ModelInfo{
+						ID:               model,
+						ContextWindow:    contextLength,
+						SupportsThinking: true,
+					}, nil
+				}
+			}
+		}
+	}
+
+	// Intento 2: Consulta de listado general en red (si la API no soporta consultas individuales o no devolvió el campo)
+	list, err := c.ListModels(ctx)
+	if err == nil {
+		for _, item := range list {
+			if item.ID == model {
+				return item, nil
+			}
+		}
+	}
+
+	// Intento 3: LookupModel (local catalog cache)
+	if info, ok := provider.LookupModel(c.providerName, model); ok {
+		return info, nil
+	}
+
+	// Fallback to configured or standard default context window
+	fallback := c.contextWindow
+	if fallback <= 0 {
+		fallback = 131072 // standard fallback
+	}
 	return provider.ModelInfo{
 		ID:               model,
-		ContextWindow:    131072, // standard fallback
+		ContextWindow:    fallback,
 		SupportsThinking: true,
 	}, nil
 }

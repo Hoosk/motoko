@@ -8,8 +8,8 @@ import (
 func TestLoadFragment(t *testing.T) {
 	tests := []struct {
 		name         string
-		expectExists bool
 		contains     string
+		expectExists bool
 	}{
 		{
 			name:         "plan_active",

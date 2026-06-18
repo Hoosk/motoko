@@ -143,3 +143,59 @@ func TestBrainTools(t *testing.T) {
 		t.Error("expected error with nil brain")
 	}
 }
+
+func TestBrainToolsContextPropagation(t *testing.T) {
+	tmpDir := t.TempDir()
+	prev := session.SessionsBaseDir
+	session.SessionsBaseDir = tmpDir
+	t.Cleanup(func() {
+		session.SessionsBaseDir = prev
+	})
+
+	mainBrain, err := brain.New("workspace", "mainSession")
+	if err != nil {
+		t.Fatalf("failed to create main brain: %v", err)
+	}
+	subBrain, err := brain.New("workspace", "subSession")
+	if err != nil {
+		t.Fatalf("failed to create sub brain: %v", err)
+	}
+
+	provider := &testBrainProvider{b: mainBrain}
+	writeTool := NewBrainWriteTool(provider)
+	readTool := NewBrainReadTool(provider)
+	listTool := NewBrainListTool(provider)
+
+	// ctx with subBrain
+	ctx := WithBrain(context.Background(), subBrain)
+
+	// 1. Write should go to subBrain
+	_, err = writeTool.Run(ctx, "subfile.md Content for subagent")
+	if err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	// Verify mainBrain is empty
+	mainFiles, _ := mainBrain.List()
+	if len(mainFiles) > 0 {
+		t.Errorf("expected main brain to be empty, found files")
+	}
+
+	// 2. Read should come from subBrain
+	res, err := readTool.Run(ctx, "subfile.md")
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if res.Output != "Content for subagent" {
+		t.Errorf("got %q, want %q", res.Output, "Content for subagent")
+	}
+
+	// 3. List should show subBrain contents
+	res, err = listTool.Run(ctx, "")
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if !strings.Contains(res.Output, "subfile.md") {
+		t.Errorf("expected list to contain subfile.md, got: %q", res.Output)
+	}
+}

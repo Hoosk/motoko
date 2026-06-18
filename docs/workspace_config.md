@@ -44,7 +44,8 @@ Here is an example of a workspace-level `<workspace-root>/.agents/config.json` t
       "provider": "lmstudio"
     },
     "build": {
-      "provider": "claude-4.6-sonnet",
+      "provider": "anthropic",
+      "model": "claude-4.6-sonnet",
       "temperature": 0.2
     }
   },
@@ -60,7 +61,7 @@ Here is an example of a workspace-level `<workspace-root>/.agents/config.json` t
 In this setup:
 1. `lmstudio` is registered as a local provider for this project specifically.
 2. The **`plan`** agent is overridden to run on the local `qwen2.5-coder-7b-instruct` model via `lmstudio`.
-3. The **`build`** agent is configured to use the `claude-4.6-sonnet` provider (loaded from your global configuration keys) with a custom temperature of `0.2` for maximum code generation stability.
+3. The **`build`** agent is configured to use the `anthropic` provider with the `claude-4.6-sonnet` model (loaded from your global configuration keys) with a custom temperature of `0.2` for maximum code generation stability.
 4. Custom exclude patterns (`coverage.out`, `*.bin`) are added to the search exclusions list for this workspace.
 
 > [!IMPORTANT]

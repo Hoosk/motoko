@@ -253,15 +253,16 @@ func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
 
 func (f *providerForm) syncPreset(runtime *app.Runtime) {
 	preset := f.currentProviderPreset(runtime)
-	if preset == config.ProviderPresetOpenAICompatible {
+	switch preset {
+	case config.ProviderPresetOpenAICompatible:
 		f.name = ""
 		f.baseURL = "http://localhost:11434/v1"
 		f.apiKey = ""
-	} else if preset == config.ProviderPresetLMStudio {
+	case config.ProviderPresetLMStudio:
 		f.name = ""
 		f.baseURL = "http://127.0.0.1:1234/v1"
 		f.apiKey = "lm-studio"
-	} else {
+	default:
 		f.name = config.DefaultProviderName(preset)
 		f.baseURL = config.DefaultBaseURL(preset, "")
 		f.apiKey = ""

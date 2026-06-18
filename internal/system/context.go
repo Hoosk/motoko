@@ -34,6 +34,7 @@ type ContextInfo struct {
 	Staged           int
 	GitDirty         bool
 	HasGit           bool
+	ContextWindow    int
 }
 
 func GetContextInfo() ContextInfo {

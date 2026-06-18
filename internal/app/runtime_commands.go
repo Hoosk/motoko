@@ -146,7 +146,9 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return r.handleShell(toolArgs)
 		}
 
-		result, err := r.tools.Run(tools.WithBrain(context.Background(), r.brain), toolName, toolArgs)
+		runCtx := tools.WithBrain(context.Background(), r.brain)
+		runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(r.contextWindow))
+		result, err := r.tools.Run(runCtx, toolName, toolArgs)
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
@@ -320,6 +322,25 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 	case cmdList:
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.providerListText()}}}
 	case "add":
+		if len(args) >= 5 {
+			name := args[1]
+			preset := config.ProviderPreset(args[2])
+			baseURL := args[3]
+			apiKey := args[4]
+			newProv := config.ProviderConfig{
+				Name:    name,
+				Preset:  preset,
+				BaseURL: baseURL,
+				APIKey:  apiKey,
+			}
+			newProv = config.NormalizeProvider(newProv)
+			r.config.UpsertProvider(newProv)
+			if err := r.config.Save(); err != nil {
+				return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+			}
+			r.refreshAgent()
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider added and saved: %s", name)}}}
+		}
 		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Opening provider configuration form..."}}}
 	case "use":
 		if len(args) < 2 {
@@ -360,6 +381,10 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 
 	if len(args) == 0 {
 		return Response{Signal: "open-models-popup"}
+	}
+
+	if len(args) > 1 && strings.EqualFold(args[0], "use") {
+		args = args[1:]
 	}
 
 	model := strings.TrimSpace(strings.Join(args, " "))

@@ -312,6 +312,12 @@ func NormalizeProvider(provider ProviderConfig) ProviderConfig {
 		provider.Kind = ProviderKindLMStudio
 	}
 
+	if provider.ContextWindow <= 0 {
+		if provider.Preset == ProviderPresetLMStudio || provider.Preset == ProviderPresetOpenAICompatible {
+			provider.ContextWindow = 8192
+		}
+	}
+
 	if provider.APIKey == "" && (provider.Preset == ProviderPresetOpenAICompatible || provider.Preset == ProviderPresetLMStudio) {
 		provider.APIKey = "lm-studio"
 	}

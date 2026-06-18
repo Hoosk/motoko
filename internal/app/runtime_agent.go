@@ -32,6 +32,7 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
 	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.Run(ctx, info, input, priorHistory)
 	if err != nil {
 		return result, err
@@ -58,6 +59,7 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
 	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
 			return nil
@@ -83,6 +85,8 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 }
 
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
+	info.ContextWindow = r.contextWindow
+
 	br := tools.GetBrain(ctx)
 	if br == nil {
 		br = r.brain
@@ -148,12 +152,15 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		return info
 	}
 
-	relevant := snapshot.RelevantFiles(input, 4)
+	// Dynamic scaling of semantic context injection based on the context window
+	limits := system.GetSemanticLimits(r.contextWindow)
+
+	relevant := snapshot.RelevantFiles(input, limits.NumFiles)
 	info.RelevantFiles = make([]string, 0, len(relevant))
 	for _, file := range relevant {
 		info.RelevantFiles = append(info.RelevantFiles, file.Descriptor())
 	}
-	snippets := snapshot.RelevantSnippets(input, 3, 180)
+	snippets := snapshot.RelevantSnippets(input, limits.NumSnippets, limits.SnippetLines)
 	info.RelevantSnippets = make([]string, 0, len(snippets))
 	for _, snippet := range snippets {
 		info.RelevantSnippets = append(info.RelevantSnippets, snippet.Descriptor())
@@ -170,7 +177,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 			info.RelevantFiles = append([]string{file.Descriptor()}, info.RelevantFiles...)
 			content := string(file.Content)
 			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
-			limit := min(120, len(lines))
+			limit := min(limits.ExplicitLimit, len(lines))
 			var numbered []string
 			for i := 0; i < limit; i++ {
 				numbered = append(numbered, fmt.Sprintf("%d: %s", i+1, lines[i]))
@@ -298,6 +305,7 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 	}
 
 	subCtx := tools.WithBrain(ctx, subBrain)
+	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(r.contextWindow))
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
 	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
 	subCtx = provider.WithTelemetry(subCtx, subSessionID, reqID)

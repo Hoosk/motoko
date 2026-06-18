@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/provider"
+	"github.com/Hoosk/motoko/internal/system"
 )
 
 func (r *Runtime) doCompact(ctx context.Context) error {
@@ -21,13 +22,14 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		return err
 	}
 
-	// 1. Identify which part of the history to compact and which to preserve (recent ~40k tokens).
-	// We want to preserve roughly the last 40,000 tokens.
-	preserveTokens := 40000
+	// 1. Identify which part of the history to compact and which to preserve.
+	// We want to preserve roughly the last 40,000 tokens by default, but for small context windows (like local models),
+	// we scale the preservation budget to roughly 30% of the context window to prevent overflow and compaction failure.
+	preserveTokens := system.PreserveHistoryTokens(r.contextWindow)
 	var recentHistory []provider.ConversationItem
 	var oldHistory []provider.ConversationItem
 
-	// Simple heuristic: count chars from the end. 40k tokens ~ 160k chars.
+	// Simple heuristic: count chars from the end. 4 chars per token.
 	charBudget := preserveTokens * 4
 	currentChars := 0
 	splitIdx := len(r.currentSession.History)

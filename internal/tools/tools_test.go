@@ -337,3 +337,21 @@ func runGitInWorkspace(t *testing.T, workdir string, args ...string) {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
 	}
 }
+
+func TestTruncateToolOutput(t *testing.T) {
+	longOutput := strings.Repeat("A", 20000)
+	
+	// Default limit is 12000
+	ctxDefault := context.Background()
+	truncatedDefault := truncateToolOutput(ctxDefault, longOutput)
+	if len(truncatedDefault) > 12000+500 { // +500 for suffix
+		t.Fatalf("expected output truncated to ~12000 bytes, got %d", len(truncatedDefault))
+	}
+	
+	// Custom limit via context
+	ctxCustom := WithMaxOutputSize(context.Background(), 1000)
+	truncatedCustom := truncateToolOutput(ctxCustom, longOutput)
+	if len(truncatedCustom) > 1000+500 { // +500 for suffix
+		t.Fatalf("expected output truncated to ~1000 bytes, got %d", len(truncatedCustom))
+	}
+}

@@ -56,7 +56,10 @@ func (t *BrainWriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
 	}
 
-	br := t.provider.GetBrain()
+	br := GetBrain(ctx)
+	if br == nil {
+		br = t.provider.GetBrain()
+	}
 	if br == nil {
 		return Result{}, fmt.Errorf("session brain not initialized")
 	}
@@ -105,7 +108,10 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 		filename = parts[0]
 	}
 
-	br := t.provider.GetBrain()
+	br := GetBrain(ctx)
+	if br == nil {
+		br = t.provider.GetBrain()
+	}
 	if br == nil {
 		return Result{}, fmt.Errorf("session brain not initialized")
 	}
@@ -180,7 +186,10 @@ func (t *BrainListTool) Spec() Spec {
 
 func (t *BrainListTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
-	br := t.provider.GetBrain()
+	br := GetBrain(ctx)
+	if br == nil {
+		br = t.provider.GetBrain()
+	}
 	if br == nil {
 		return Result{}, fmt.Errorf("session brain not initialized")
 	}

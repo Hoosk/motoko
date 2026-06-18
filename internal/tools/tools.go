@@ -136,7 +136,8 @@ func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
 }
 
 func truncateToolOutput(ctx context.Context, output string) string {
-	if len(output) <= maxToolOutputBytes {
+	maxOutput := GetMaxOutputSize(ctx)
+	if len(output) <= maxOutput {
 		return output
 	}
 	
@@ -145,7 +146,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 		err := br.Write(filename, output)
 		if err == nil {
 			suffix := fmt.Sprintf("\n\n[Output truncated. Full output saved to session brain as: %s]\n[Use the `brain_read` tool with offset/limit to paginate and read the full output]", filename)
-			return output[:maxToolOutputBytes] + suffix
+			return output[:maxOutput] + suffix
 		}
 	}
 
@@ -154,10 +155,10 @@ func truncateToolOutput(ctx context.Context, output string) string {
 		_, _ = f.WriteString(output)
 		f.Close()
 		suffix := fmt.Sprintf("\n...[output truncated. Full output saved to %s]", f.Name())
-		return output[:maxToolOutputBytes] + suffix
+		return output[:maxOutput] + suffix
 	}
 
-	return output[:maxToolOutputBytes] + truncatedToolOutputSuffix
+	return output[:maxOutput] + truncatedToolOutputSuffix
 }
 
 // IsWriteTool returns true if the tool modifies the codebase.
@@ -214,4 +215,20 @@ func GetBrain(ctx context.Context) *brain.Brain {
 		return b
 	}
 	return nil
+}
+
+type maxOutputSizeKey struct{}
+
+func WithMaxOutputSize(ctx context.Context, size int) context.Context {
+	return context.WithValue(ctx, maxOutputSizeKey{}, size)
+}
+
+func GetMaxOutputSize(ctx context.Context) int {
+	if ctx == nil {
+		return maxToolOutputBytes
+	}
+	if size, ok := ctx.Value(maxOutputSizeKey{}).(int); ok {
+		return size
+	}
+	return maxToolOutputBytes
 }

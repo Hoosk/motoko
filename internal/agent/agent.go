@@ -72,11 +72,12 @@ func (a *Agent) Configured() bool {
 }
 
 func buildToolContext(info system.ContextInfo) tools.ToolContext {
+	maxOutputSize := system.MaxToolOutputBytes(info.ContextWindow)
 	ctx := tools.ToolContext{
 		Workspace:       info.Workspace,
 		ActiveMode:      info.ActiveMode,
 		AvailableAgents: info.AvailableAgents,
-		MaxOutputSize:   12000,
+		MaxOutputSize:   maxOutputSize,
 	}
 	for _, s := range info.AvailableSkills {
 		ctx.AvailableSkills = append(ctx.AvailableSkills, s.Name)

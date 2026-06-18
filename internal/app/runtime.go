@@ -276,10 +276,11 @@ func (r *Runtime) PendingApproval() string {
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
+	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
 	tCtx := tools.ToolContext{
 		Workspace:       r.workspaceID,
 		ActiveMode:      string(r.mode),
-		MaxOutputSize:   12000,
+		MaxOutputSize:   maxOutputSize,
 	}
 	if len(r.availableAgents) > 0 {
 		for _, a := range r.availableAgents {
@@ -295,10 +296,11 @@ func (r *Runtime) ToolSpecs() []tools.Spec {
 }
 
 func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
+	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
 	tCtx := tools.ToolContext{
 		Workspace:       r.workspaceID,
 		ActiveMode:      string(r.mode),
-		MaxOutputSize:   12000,
+		MaxOutputSize:   maxOutputSize,
 	}
 	if len(r.availableAgents) > 0 {
 		for _, a := range r.availableAgents {
@@ -432,6 +434,12 @@ func (r *Runtime) SetThinkingBudget(budget int) error {
 	active, ok := r.config.Active()
 	if !ok {
 		return fmt.Errorf("no hay provider activo")
+	}
+	if active.ContextWindow > 0 {
+		maxAllowed := active.ContextWindow / 2
+		if budget > maxAllowed {
+			budget = maxAllowed
+		}
 	}
 	active.ThinkingBudget = budget
 	r.config.UpsertProvider(active)
@@ -685,6 +693,11 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(ctx)
 	}
+
+	// Start catalog loading in background
+	go func() {
+		_ = provider.LoadCatalog(ctx)
+	}()
 
 	// Start update check in background
 	go func() {
