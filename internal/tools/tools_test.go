@@ -380,14 +380,14 @@ func runGitInWorkspace(t *testing.T, workdir string, args ...string) {
 
 func TestTruncateToolOutput(t *testing.T) {
 	longOutput := strings.Repeat("A", 20000)
-	
+
 	// Default limit is 12000
 	ctxDefault := context.Background()
 	truncatedDefault := truncateToolOutput(ctxDefault, longOutput)
 	if len(truncatedDefault) > 12000+500 { // +500 for suffix
 		t.Fatalf("expected output truncated to ~12000 bytes, got %d", len(truncatedDefault))
 	}
-	
+
 	// Custom limit via context
 	ctxCustom := WithMaxOutputSize(context.Background(), 1000)
 	truncatedCustom := truncateToolOutput(ctxCustom, longOutput)

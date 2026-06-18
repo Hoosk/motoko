@@ -14,9 +14,9 @@ type fakeLoopProvider struct {
 	count int
 }
 
-func (f *fakeLoopProvider) Configured() bool { return true }
+func (f *fakeLoopProvider) Configured() bool     { return true }
 func (f *fakeLoopProvider) ProviderKind() string { return "fake" }
-func (f *fakeLoopProvider) Summary() string  { return "fake:loop" }
+func (f *fakeLoopProvider) Summary() string      { return "fake:loop" }
 func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "loop"}}, nil
 }
@@ -45,9 +45,9 @@ type fakeMultiProvider struct {
 	count int
 }
 
-func (f *fakeMultiProvider) Configured() bool { return true }
+func (f *fakeMultiProvider) Configured() bool     { return true }
 func (f *fakeMultiProvider) ProviderKind() string { return "fake" }
-func (f *fakeMultiProvider) Summary() string  { return "fake:multi" }
+func (f *fakeMultiProvider) Summary() string      { return "fake:multi" }
 func (f *fakeMultiProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "multi"}}, nil
 }
