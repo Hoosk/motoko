@@ -1,4 +1,4 @@
-package provider
+package openai
 
 import (
 	"encoding/json"
@@ -9,6 +9,8 @@ import (
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
 type promptTokensDetails struct {
@@ -34,7 +36,7 @@ type chatCompletionUsage struct {
 	OutputTokens            int                      `json:"output_tokens"`
 }
 
-func (u chatCompletionUsage) providerUsage() Usage {
+func (u chatCompletionUsage) providerUsage() provider.Usage {
 	input := u.InputTokens
 	if input == 0 {
 		input = u.PromptTokens
@@ -47,7 +49,7 @@ func (u chatCompletionUsage) providerUsage() Usage {
 	if total == 0 {
 		total = input + output
 	}
-	usage := Usage{InputTokens: input, OutputTokens: output, TotalTokens: total}
+	usage := provider.Usage{InputTokens: input, OutputTokens: output, TotalTokens: total}
 	if u.PromptTokensDetails != nil {
 		usage.CacheReadInputTokens = u.PromptTokensDetails.CachedTokens
 	}
@@ -118,33 +120,33 @@ type chatCompletionToolFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-func responseFromChatCompletion(decoded chatCompletionResponse) Response {
+func responseFromChatCompletion(decoded chatCompletionResponse) provider.Response {
 	if len(decoded.Choices) == 0 {
-		return Response{}
+		return provider.Response{}
 	}
 	message := decoded.Choices[0].Message
 	text := strings.TrimSpace(message.Content)
-	result := Response{FinalText: text, Usage: decoded.Usage.providerUsage()}
+	result := provider.Response{FinalText: text, Usage: decoded.Usage.providerUsage()}
 	if text != "" {
-		result.OutputItems = []ConversationItem{AssistantText(text)}
+		result.OutputItems = []provider.ConversationItem{provider.AssistantText(text)}
 	}
 	result.PendingCalls = pendingCallsFromChatToolCalls(message.ToolCalls)
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
+		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result
 }
 
-func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []ToolInvocation {
-	result := make([]ToolInvocation, 0, len(toolCalls))
+func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []provider.ToolInvocation {
+	result := make([]provider.ToolInvocation, 0, len(toolCalls))
 	for _, call := range toolCalls {
 		if strings.TrimSpace(call.Function.Name) == "" {
 			continue
 		}
 		arguments := strings.TrimSpace(call.Function.Arguments)
-		invocation := ToolInvocation{
-			Kind:   InvokeCustomTool,
+		invocation := provider.ToolInvocation{
+			Kind:   provider.InvokeCustomTool,
 			Name:   strings.TrimSpace(call.Function.Name),
 			CallID: strings.TrimSpace(call.ID),
 			Raw:    append(json.RawMessage(nil), call.Raw...),
@@ -161,16 +163,16 @@ func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []ToolInv
 	return result
 }
 
-func toChatMessages(messages []ConversationItem) []map[string]any {
+func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
+		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
 			if len(call.Raw) > 0 {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
 					result = append(result, map[string]any{
-						keyRole:      RoleAssistant,
-						keyContent:   "",
+						"role":       provider.RoleAssistant,
+						"content":    "",
 						"tool_calls": []map[string]any{rawToolCall},
 					})
 					continue
@@ -178,78 +180,78 @@ func toChatMessages(messages []ConversationItem) []map[string]any {
 			}
 
 			result = append(result, map[string]any{
-				keyRole:    RoleAssistant,
-				keyContent: "",
+				"role":    provider.RoleAssistant,
+				"content": "",
 				"tool_calls": []map[string]any{{
-					"id":        call.CallID,
-					schemaType:  keyFunction,
-					keyFunction: map[string]any{
-						keyName:     call.Name,
-						"arguments": assistantToolCallArguments(call),
+					"id":         call.CallID,
+					"type":       "function",
+					"function": map[string]any{
+						"name":      call.Name,
+						"arguments": provider.AssistantToolCallArguments(call),
 					},
 				}},
 			})
 			continue
 		}
-		if msg.Role == RoleTool {
-			call, output := parseToolResultContent(msg.Content)
+		if msg.Role == provider.RoleTool {
+			call, output := provider.ParseToolResultContent(msg.Content)
 			item := map[string]any{
-				keyRole:    RoleTool,
-				keyContent: output,
+				"role":    provider.RoleTool,
+				"content": output,
 			}
 			if call.CallID != "" {
 				item["tool_call_id"] = call.CallID
 			}
 			if call.Name != "" {
-				item[keyName] = call.Name
+				item["name"] = call.Name
 			}
 			result = append(result, item)
 			continue
 		}
 		result = append(result, map[string]any{
-			keyRole:    normalizeConversationRole(msg.Role),
-			keyContent: msg.Content,
+			"role":    provider.NormalizeConversationRole(msg.Role),
+			"content": msg.Content,
 		})
 	}
 	return result
 }
 
-func toResponsesInputItems(messages []ConversationItem) responses.ResponseInputParam {
+func toResponsesInputItems(messages []provider.ConversationItem) responses.ResponseInputParam {
 	items := make(responses.ResponseInputParam, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := parseAssistantToolCallContent(msg.Content); ok && call.CallID != "" {
-			items = append(items, responses.ResponseInputItemParamOfFunctionCall(assistantToolCallArguments(call), call.CallID, call.Name))
+		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok && call.CallID != "" {
+			items = append(items, responses.ResponseInputItemParamOfFunctionCall(provider.AssistantToolCallArguments(call), call.CallID, call.Name))
 			continue
 		}
-		if msg.Role == RoleTool {
-			call, output := parseToolResultContent(msg.Content)
+		if msg.Role == provider.RoleTool {
+			call, output := provider.ParseToolResultContent(msg.Content)
 			if call.CallID != "" {
 				items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(call.CallID, output))
 				continue
 			}
 		}
-		role := responses.EasyInputMessageRole(normalizeConversationRole(msg.Role))
+		role := responses.EasyInputMessageRole(provider.NormalizeConversationRole(msg.Role))
 		items = append(items, responses.ResponseInputItemParamOfMessage(msg.Content, role))
 	}
 	return items
 }
 
-func responseTools(tools ToolSet) []responses.ToolUnionParam {
+func responseTools(tools provider.ToolSet) []responses.ToolUnionParam {
 	if len(tools.Local) == 0 {
 		return nil
 	}
 	result := make([]responses.ToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		parameters := map[string]any{
-			schemaType: schemaObject,
-			schemaProperties: map[string]any{
-				schemaInput: map[string]any{
-					"type":            schemaString,
-					schemaDescription: toolInputDescription(tool),
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{
+					"type":        "string",
+					"description": provider.ToolInputDescription(tool),
 				},
 			},
-			schemaRequired:             []string{schemaInput},
-			schemaAdditionalProperties: false,
+			"required":             []string{"input"},
+			"additionalProperties": false,
 		}
 		result = append(result, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name:        tool.Name,
@@ -261,47 +263,32 @@ func responseTools(tools ToolSet) []responses.ToolUnionParam {
 	return result
 }
 
-func chatCompletionTools(tools ToolSet) []map[string]any {
+func chatCompletionTools(tools provider.ToolSet) []map[string]any {
 	if len(tools.Local) == 0 {
 		return nil
 	}
 	result := make([]map[string]any, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		result = append(result, map[string]any{
-			schemaType: keyFunction,
-			keyFunction: map[string]any{
-				keyName:           tool.Name,
-				schemaDescription: strings.TrimSpace(tool.Description),
+			"type": "function",
+			"function": map[string]any{
+				"name":        tool.Name,
+				"description": strings.TrimSpace(tool.Description),
 				"parameters": map[string]any{
-					schemaType: schemaObject,
-					schemaProperties: map[string]any{
-						schemaInput: map[string]any{
-							schemaType:        schemaString,
-							schemaDescription: toolInputDescription(tool),
+					"type": "object",
+					"properties": map[string]any{
+						"input": map[string]any{
+							"type":        "string",
+							"description": provider.ToolInputDescription(tool),
 						},
 					},
-					schemaRequired:             []string{schemaInput},
-					schemaAdditionalProperties: false,
+					"required":             []string{"input"},
+					"additionalProperties": false,
 				},
 			},
 		})
 	}
 	return result
-}
-
-func toolInputDescription(tool LocalToolDefinition) string {
-	hint := strings.TrimSpace(tool.InputHint)
-	if hint != "" {
-		prefix := tool.Name + " "
-		if strings.HasPrefix(strings.ToLower(hint), strings.ToLower(prefix)) {
-			hint = strings.TrimSpace(hint[len(prefix):])
-		}
-		return hint
-	}
-	if desc := strings.TrimSpace(tool.Description); desc != "" {
-		return desc
-	}
-	return "Raw text input for the tool."
 }
 
 func mergeChatToolCallDeltas(acc map[int]*chatCompletionToolCall, deltas []chatCompletionToolCallDelta, mappedIndexes map[int]int) {
@@ -403,10 +390,10 @@ func sortedChatToolCalls(acc map[int]*chatCompletionToolCall) []chatCompletionTo
 	return result
 }
 
-func toSDKChatMessages(messages []ConversationItem) []openai.ChatCompletionMessageParamUnion {
+func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := parseAssistantToolCallContent(msg.Content); ok {
+		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
 			var sdkToolCalls []openai.ChatCompletionMessageToolCallUnionParam
 			if len(call.Raw) > 0 {
 				var rawToolCall map[string]any
@@ -427,7 +414,7 @@ func toSDKChatMessages(messages []ConversationItem) []openai.ChatCompletionMessa
 						Type: "function",
 						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
 							Name:      call.Name,
-							Arguments: assistantToolCallArguments(call),
+							Arguments: provider.AssistantToolCallArguments(call),
 						},
 					},
 				})
@@ -441,17 +428,17 @@ func toSDKChatMessages(messages []ConversationItem) []openai.ChatCompletionMessa
 			})
 			continue
 		}
-		if msg.Role == RoleTool {
-			call, output := parseToolResultContent(msg.Content)
+		if msg.Role == provider.RoleTool {
+			call, output := provider.ParseToolResultContent(msg.Content)
 			result = append(result, openai.ToolMessage(output, call.CallID))
 			continue
 		}
 
-		role := normalizeConversationRole(msg.Role)
+		role := provider.NormalizeConversationRole(msg.Role)
 		switch role {
-		case RoleUser:
+		case provider.RoleUser:
 			result = append(result, openai.UserMessage(msg.Content))
-		case RoleAssistant:
+		case provider.RoleAssistant:
 			result = append(result, openai.AssistantMessage(msg.Content))
 		default:
 			result = append(result, openai.UserMessage(msg.Content))
@@ -460,22 +447,22 @@ func toSDKChatMessages(messages []ConversationItem) []openai.ChatCompletionMessa
 	return result
 }
 
-func toSDKChatTools(tools ToolSet) []openai.ChatCompletionToolUnionParam {
+func toSDKChatTools(tools provider.ToolSet) []openai.ChatCompletionToolUnionParam {
 	if len(tools.Local) == 0 {
 		return nil
 	}
 	result := make([]openai.ChatCompletionToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		parameters := map[string]any{
-			schemaType: schemaObject,
-			schemaProperties: map[string]any{
-				schemaInput: map[string]any{
-					schemaType:        schemaString,
-					schemaDescription: toolInputDescription(tool),
+			"type": "object",
+			"properties": map[string]any{
+				"input": map[string]any{
+					"type":        "string",
+					"description": provider.ToolInputDescription(tool),
 				},
 			},
-			schemaRequired:             []string{schemaInput},
-			schemaAdditionalProperties: false,
+			"required":             []string{"input"},
+			"additionalProperties": false,
 		}
 
 		result = append(result, openai.ChatCompletionToolUnionParam{
@@ -493,9 +480,9 @@ func toSDKChatTools(tools ToolSet) []openai.ChatCompletionToolUnionParam {
 	return result
 }
 
-func responseFromSDKChatCompletion(comp *openai.ChatCompletion) Response {
+func responseFromSDKChatCompletion(comp *openai.ChatCompletion) provider.Response {
 	if len(comp.Choices) == 0 {
-		return Response{}
+		return provider.Response{}
 	}
 	message := comp.Choices[0].Message
 	text := strings.TrimSpace(message.Content)
@@ -506,9 +493,9 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) Response {
 	cacheRead := int(comp.Usage.PromptTokensDetails.CachedTokens)
 	reasoning := int(comp.Usage.CompletionTokensDetails.ReasoningTokens)
 
-	result := Response{
+	result := provider.Response{
 		FinalText: text,
-		Usage: Usage{
+		Usage: provider.Usage{
 			InputTokens:           input,
 			OutputTokens:          output,
 			TotalTokens:           total,
@@ -517,18 +504,18 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) Response {
 		},
 	}
 	if text != "" {
-		result.OutputItems = []ConversationItem{AssistantText(text)}
+		result.OutputItems = []provider.ConversationItem{provider.AssistantText(text)}
 	}
 	result.PendingCalls = pendingCallsFromSDKToolCalls(message.ToolCalls)
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
+		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result
 }
 
-func pendingCallsFromSDKToolCalls(toolCalls []openai.ChatCompletionMessageToolCallUnion) []ToolInvocation {
-	result := make([]ToolInvocation, 0, len(toolCalls))
+func pendingCallsFromSDKToolCalls(toolCalls []openai.ChatCompletionMessageToolCallUnion) []provider.ToolInvocation {
+	result := make([]provider.ToolInvocation, 0, len(toolCalls))
 	for _, call := range toolCalls {
 		if strings.TrimSpace(call.Function.Name) == "" {
 			continue
@@ -538,8 +525,8 @@ func pendingCallsFromSDKToolCalls(toolCalls []openai.ChatCompletionMessageToolCa
 			raw = []byte(rawJSON)
 		}
 		arguments := strings.TrimSpace(call.Function.Arguments)
-		invocation := ToolInvocation{
-			Kind:   InvokeCustomTool,
+		invocation := provider.ToolInvocation{
+			Kind:   provider.InvokeCustomTool,
 			Name:   strings.TrimSpace(call.Function.Name),
 			CallID: strings.TrimSpace(call.ID),
 			Raw:    raw,
@@ -575,4 +562,14 @@ func toInternalToolCallDeltas(sdkDeltas []openai.ChatCompletionChunkChoiceDeltaT
 		})
 	}
 	return result
+}
+
+func openAIInvocationInput(arguments json.RawMessage) string {
+	var parsed struct {
+		Input string `json:"input"`
+	}
+	if err := json.Unmarshal(arguments, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Input)
 }

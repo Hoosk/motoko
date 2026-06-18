@@ -31,7 +31,8 @@ func (f *providerForm) Open(runtime *app.Runtime) {
 }
 
 func (f *providerForm) isOpenAICompatible(runtime *app.Runtime) bool {
-	return f.currentProviderPreset(runtime) == config.ProviderPresetOpenAICompatible
+	preset := f.currentProviderPreset(runtime)
+	return preset == config.ProviderPresetOpenAICompatible || preset == config.ProviderPresetLMStudio
 }
 
 func (f *providerForm) fieldCount(runtime *app.Runtime) int {
@@ -255,15 +256,25 @@ func (f *providerForm) syncPreset(runtime *app.Runtime) {
 	if preset == config.ProviderPresetOpenAICompatible {
 		f.name = ""
 		f.baseURL = "http://localhost:11434/v1"
+		f.apiKey = ""
+	} else if preset == config.ProviderPresetLMStudio {
+		f.name = ""
+		f.baseURL = "http://127.0.0.1:1234/v1"
+		f.apiKey = "lm-studio"
 	} else {
 		f.name = config.DefaultProviderName(preset)
 		f.baseURL = config.DefaultBaseURL(preset, "")
+		f.apiKey = ""
 	}
 }
 
 func renderProviderField(index, active int, label, value string) string {
 	if index == active {
-		return styles.PopupSelectionStyle.Render(label + ": " + value)
+		val := value
+		if index > 0 {
+			val += "█"
+		}
+		return styles.PopupSelectionStyle.Render(label + ": " + val)
 	}
 	return styles.PopupFieldLabelStyle.Render(label+": ") + styles.PopupFieldValueStyle.Render(value)
 }

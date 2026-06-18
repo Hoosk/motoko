@@ -235,6 +235,9 @@ func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.
 			active = p
 		}
 	}
+	if hasOverride && override.Model != "" {
+		active.Model = override.Model
+	}
 
 	client, err := r.providerClient(active)
 	if err != nil {

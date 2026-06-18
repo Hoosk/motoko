@@ -1,4 +1,4 @@
-package provider
+package openai
 
 import (
 	"context"
@@ -15,35 +15,82 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
+func init() {
+	provider.Register(config.ProviderKindOpenAICompatible, NewClient)
+}
+
 type openAIClient struct {
-	baseClient
+	baseURL            string
+	apiKey             string
+	model              string
+	providerName       string
+	httpClient         *http.Client
 	sdkClient          openai.Client
 	thinkingBudget     int
 	useChatCompletions bool
 	useSDK             bool
 }
 
-func newOpenAIClient(cfg config.ProviderConfig) Client {
-	base := newBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)
+func NewClient(cfg config.ProviderConfig) provider.Client {
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	model := strings.TrimSpace(cfg.Model)
+	httpClient := &http.Client{Timeout: 15 * time.Minute}
+
 	sdkClient := openai.NewClient(
-		option.WithAPIKey(cfg.APIKey),
-		option.WithBaseURL(cfg.BaseURL),
-		option.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}),
+		option.WithAPIKey(apiKey),
+		option.WithBaseURL(baseURL),
+		option.WithHTTPClient(&http.Client{Timeout: 15 * time.Minute}),
 	)
+
 	return &openAIClient{
-		baseClient:         base,
+		baseURL:            baseURL,
+		apiKey:             apiKey,
+		model:              model,
+		providerName:       cfg.Name,
+		httpClient:         httpClient,
 		thinkingBudget:     cfg.ThinkingBudget,
 		sdkClient:          sdkClient,
-		useChatCompletions: cfg.Preset != config.ProviderPresetOpenAI,
+		useChatCompletions: cfg.Preset != config.ProviderPresetOpenAI && cfg.Preset != config.ProviderPresetLMStudio,
 		useSDK:             cfg.UseSDK,
 	}
 }
 
-func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
+func (c *openAIClient) Configured() bool {
+	return c.baseURL != "" && c.apiKey != "" && c.model != ""
+}
+
+func (c *openAIClient) ConfigurationError() error {
+	if c.baseURL == "" {
+		return fmt.Errorf("provider no configurado: URL base vacía")
+	}
+	if c.apiKey == "" {
+		return fmt.Errorf("provider no configurado: API Key vacía")
+	}
+	if c.model == "" {
+		return fmt.Errorf("provider no configurado: modelo no especificado")
+	}
+	return nil
+}
+
+func (c *openAIClient) listReady() bool {
+	return c.baseURL != "" && c.apiKey != ""
+}
+
+func (c *openAIClient) ProviderKind() string {
+	return c.providerName
+}
+
+func (c *openAIClient) Summary() string {
+	return fmt.Sprintf("%s:%s", c.providerName, c.model)
+}
+
+func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	if err := c.ConfigurationError(); err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 
 	if c.useChatCompletions {
@@ -54,7 +101,7 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 	}
 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
-	sessionID, requestID := GetTelemetry(ctx)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 	reqOpts := make([]option.RequestOption, 0)
 	if sessionID != "" {
 		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
@@ -64,18 +111,18 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 	}
 	resp, err := c.sdkClient.Responses.New(ctx, params, reqOpts...)
 	if err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 	return responseFromOpenAI(resp), nil
 }
 
-func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
+func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	var decoded chatCompletionResponse
 
 	payload := map[string]interface{}{
-		keyModel: c.model,
+		"model": c.model,
 		"messages": append([]map[string]any{
-			{keyRole: "system", keyContent: systemPrompt},
+			{"role": "system", "content": systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}
@@ -85,8 +132,8 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		payload["parallel_tool_calls"] = false
 	}
 
-	headers := buildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := GetTelemetry(ctx)
+	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 	if sessionID != "" {
 		headers["X-Session-ID"] = sessionID
 		if requestID != "" {
@@ -94,17 +141,17 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		}
 	}
 
-	if err := postJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
-		return Response{}, err
+	if err := provider.PostJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
+		return provider.Response{}, err
 	}
 
 	if len(decoded.Choices) == 0 {
-		return Response{}, fmt.Errorf("no hay respuesta del modelo")
+		return provider.Response{}, fmt.Errorf("no hay respuesta del modelo")
 	}
 	return responseFromChatCompletion(decoded), nil
 }
 
-func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error) {
+func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	sdkMessages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(systemPrompt),
 	}
@@ -123,8 +170,8 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 		params.ParallelToolCalls = param.NewOpt(false)
 	}
 
-	headers := buildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := GetTelemetry(ctx)
+	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 	if sessionID != "" {
 		headers["X-Session-ID"] = sessionID
 		if requestID != "" {
@@ -138,12 +185,12 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 
 	comp, err := c.sdkClient.Chat.Completions.New(ctx, params, reqOpts...)
 	if err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 	return responseFromSDKChatCompletion(comp), nil
 }
 
-func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
+func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	if !c.listReady() {
 		return nil, fmt.Errorf("provider no configurado")
 	}
@@ -154,12 +201,12 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		} `json:"data"`
 	}
 
-	listHeaders := buildAuthHeaders(c.baseURL, c.apiKey)
+	listHeaders := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
 
-	if err := getJSON(ctx, c.httpClient, c.baseURL+"/models", listHeaders, &decoded); err != nil {
+	if err := provider.GetJSON(ctx, c.httpClient, c.baseURL+"/models", listHeaders, &decoded); err != nil {
 		return nil, err
 	}
-	result := make([]ModelInfo, 0, len(decoded.Data))
+	result := make([]provider.ModelInfo, 0, len(decoded.Data))
 	seen := make(map[string]struct{})
 	for _, item := range decoded.Data {
 		id := strings.TrimSpace(item.ID)
@@ -170,7 +217,7 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			continue
 		}
 		seen[id] = struct{}{}
-		result = append(result, ModelInfo{
+		result = append(result, provider.ModelInfo{
 			ID:               id,
 			ContextWindow:    item.ContextLength,
 			SupportsThinking: true,
@@ -180,8 +227,8 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	return result, nil
 }
 
-func (c *openAIClient) GetModel(ctx context.Context, model string) (ModelInfo, error) {
-	return ModelInfo{
+func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	return provider.ModelInfo{
 		ID:               model,
 		ContextWindow:    131072, // standard fallback
 		SupportsThinking: true,
@@ -190,7 +237,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (ModelInfo, e
 
 // buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
 // The system prompt goes into Instructions; messages become the Input item list.
-func buildResponseParams(model, systemPrompt string, messages []ConversationItem, tools ToolSet, thinkingBudget int) responses.ResponseNewParams {
+func buildResponseParams(model, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, thinkingBudget int) responses.ResponseNewParams {
 	p := responses.ResponseNewParams{
 		Model:        model,
 		Instructions: param.NewOpt(systemPrompt),
@@ -211,7 +258,7 @@ func buildResponseParams(model, systemPrompt string, messages []ConversationItem
 	}
 	if thinkingBudget > 0 {
 		p.Reasoning = shared.ReasoningParam{
-			Effort:  shared.ReasoningEffort(budgetToReasoningEffort(thinkingBudget)),
+			Effort:  shared.ReasoningEffort(provider.BudgetToReasoningEffort(thinkingBudget)),
 			Summary: shared.ReasoningSummaryAuto,
 		}
 	} else {

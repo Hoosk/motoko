@@ -1,40 +1,42 @@
-package provider
+package openai
 
 import (
 	"encoding/json"
 	"strings"
 
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
-func responseFromOpenAI(resp *responses.Response) Response {
+func responseFromOpenAI(resp *responses.Response) provider.Response {
 	if resp == nil {
-		return Response{}
+		return provider.Response{}
 	}
-	result := Response{
+	result := provider.Response{
 		FinalText:   strings.TrimSpace(resp.OutputText()),
 		OutputItems: outputItemsFromOpenAI(resp.Output),
-		Usage: Usage{
-			InputTokens:           int(resp.Usage.InputTokens),
-			OutputTokens:          int(resp.Usage.OutputTokens),
-			TotalTokens:           int(resp.Usage.TotalTokens),
-			CacheReadInputTokens:  int(resp.Usage.InputTokensDetails.CachedTokens),
-			ReasoningTokens:       int(resp.Usage.OutputTokensDetails.ReasoningTokens),
+		Usage: provider.Usage{
+			InputTokens:          int(resp.Usage.InputTokens),
+			OutputTokens:         int(resp.Usage.OutputTokens),
+			TotalTokens:          int(resp.Usage.TotalTokens),
+			CacheReadInputTokens: int(resp.Usage.InputTokensDetails.CachedTokens),
+			ReasoningTokens:      int(resp.Usage.OutputTokensDetails.ReasoningTokens),
 		},
 	}
 	result.PendingCalls = pendingCallsFromOpenAI(resp.Output)
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
+		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	if len(result.OutputItems) == 0 && result.FinalText != "" {
-		result.OutputItems = []ConversationItem{AssistantText(result.FinalText)}
+		result.OutputItems = []provider.ConversationItem{provider.AssistantText(result.FinalText)}
 	}
 	return result
 }
 
-func pendingCallsFromOpenAI(items []responses.ResponseOutputItemUnion) []ToolInvocation {
-	var calls []ToolInvocation
+func pendingCallsFromOpenAI(items []responses.ResponseOutputItemUnion) []provider.ToolInvocation {
+	var calls []provider.ToolInvocation
 	for _, item := range items {
 		switch item.Type {
 		case "function_call":
@@ -42,8 +44,8 @@ func pendingCallsFromOpenAI(items []responses.ResponseOutputItemUnion) []ToolInv
 			calls = append(calls, openAIFunctionCall(call))
 		case "custom_tool_call":
 			call := item.AsCustomToolCall()
-			calls = append(calls, ToolInvocation{
-				Kind:   InvokeCustomTool,
+			calls = append(calls, provider.ToolInvocation{
+				Kind:   provider.InvokeCustomTool,
 				Name:   strings.TrimSpace(call.Name),
 				Input:  strings.TrimSpace(call.Input),
 				CallID: strings.TrimSpace(call.CallID),
@@ -53,8 +55,8 @@ func pendingCallsFromOpenAI(items []responses.ResponseOutputItemUnion) []ToolInv
 	return calls
 }
 
-func outputItemsFromOpenAI(items []responses.ResponseOutputItemUnion) []ConversationItem {
-	var result []ConversationItem
+func outputItemsFromOpenAI(items []responses.ResponseOutputItemUnion) []provider.ConversationItem {
+	var result []provider.ConversationItem
 	for _, item := range items {
 		if item.Type != "message" {
 			continue
@@ -64,7 +66,7 @@ func outputItemsFromOpenAI(items []responses.ResponseOutputItemUnion) []Conversa
 		if text == "" {
 			continue
 		}
-		result = append(result, AssistantText(text))
+		result = append(result, provider.AssistantText(text))
 	}
 	return result
 }
@@ -88,10 +90,10 @@ func openAIMessageText(message responses.ResponseOutputMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-func openAIFunctionCall(call responses.ResponseFunctionToolCall) ToolInvocation {
+func openAIFunctionCall(call responses.ResponseFunctionToolCall) provider.ToolInvocation {
 	arguments := strings.TrimSpace(call.Arguments)
-	invocation := ToolInvocation{
-		Kind:   InvokeCustomTool,
+	invocation := provider.ToolInvocation{
+		Kind:   provider.InvokeCustomTool,
 		Name:   strings.TrimSpace(call.Name),
 		CallID: strings.TrimSpace(call.CallID),
 		Raw:    json.RawMessage(call.RawJSON()),
@@ -105,14 +107,4 @@ func openAIFunctionCall(call responses.ResponseFunctionToolCall) ToolInvocation 
 		invocation.Input = arguments
 	}
 	return invocation
-}
-
-func openAIInvocationInput(arguments json.RawMessage) string {
-	var parsed struct {
-		Input string `json:"input"`
-	}
-	if err := json.Unmarshal(arguments, &parsed); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(parsed.Input)
 }

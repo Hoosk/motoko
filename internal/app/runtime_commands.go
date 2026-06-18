@@ -325,7 +325,8 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 		if len(args) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider use <name>"}}}
 		}
-		if err := r.config.SetActive(args[1]); err != nil {
+		name := strings.Join(args[1:], " ")
+		if err := r.config.SetActive(name); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		if err := r.config.Save(); err != nil {
@@ -337,14 +338,15 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 		if len(args) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider remove <name>"}}}
 		}
-		if !r.config.RemoveProvider(args[1]) {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider not found: %s", args[1])}}}
+		name := strings.Join(args[1:], " ")
+		if !r.config.RemoveProvider(name) {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider not found: %s", name)}}}
 		}
 		if err := r.config.Save(); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		r.refreshAgent()
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider removed: %s", args[1])}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider removed: %s", name)}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s", subcommand)}}}
 	}

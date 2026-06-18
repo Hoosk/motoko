@@ -21,6 +21,11 @@ import (
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/updater"
+
+	_ "github.com/Hoosk/motoko/internal/provider/anthropic"
+	_ "github.com/Hoosk/motoko/internal/provider/gemini"
+	_ "github.com/Hoosk/motoko/internal/provider/lmstudio"
+	_ "github.com/Hoosk/motoko/internal/provider/openai"
 )
 
 type Mode string
@@ -148,7 +153,8 @@ type AgentStreamEvent struct {
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	toolsRegistry := tools.NewRegistry()
-	cfg, _ := config.Load()
+	workspacePath, _ := os.Getwd()
+	cfg, _ := config.Load(workspacePath)
 	if cfg == nil {
 		cfg = &config.AppConfig{}
 	}
@@ -156,7 +162,6 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if len(opts) > 0 {
 		runtimeOpts = opts[0]
 	}
-	workspacePath, _ := os.Getwd()
 	workspaceID := session.WorkspaceIDFor(workspacePath)
 
 	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
@@ -564,6 +569,9 @@ func (r *Runtime) refreshAgent() {
 		if p, ok := r.config.Provider(override.Provider); ok {
 			active = p
 		}
+	}
+	if hasOverride && override.Model != "" {
+		active.Model = override.Model
 	}
 
 	client, err := r.providerClient(active)

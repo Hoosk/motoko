@@ -16,12 +16,14 @@ const (
 	ProviderKindOpenAICompatible ProviderKind = "openai-compatible"
 	ProviderKindAnthropic        ProviderKind = "anthropic"
 	ProviderKindGemini           ProviderKind = "gemini"
+	ProviderKindLMStudio         ProviderKind = "lmstudio"
 
 	ProviderPresetOpenAI           ProviderPreset = "openai"
 	ProviderPresetOpenRouter       ProviderPreset = "openrouter"
 	ProviderPresetAnthropic        ProviderPreset = "anthropic"
 	ProviderPresetGemini           ProviderPreset = "gemini"
 	ProviderPresetOpenAICompatible ProviderPreset = "openai-compatible"
+	ProviderPresetLMStudio         ProviderPreset = "lmstudio"
 )
 
 type ProviderConfig struct {
@@ -65,33 +67,110 @@ type AppConfig struct {
 	Search         SearchConfig             `json:"search,omitempty"`
 }
 
-func Load() (*AppConfig, error) {
+func (c *AppConfig) Merge(other *AppConfig) {
+	if other == nil {
+		return
+	}
+	if other.ActiveProvider != "" {
+		c.ActiveProvider = other.ActiveProvider
+	}
+	for _, op := range other.Providers {
+		op = NormalizeProvider(op)
+		found := false
+		for i, p := range c.Providers {
+			if strings.EqualFold(p.Name, op.Name) {
+				c.Providers[i] = op
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.Providers = append(c.Providers, op)
+		}
+	}
+	if len(other.Search.ExcludePatterns) > 0 {
+		c.Search.ExcludePatterns = UniqueSortedKeep(c.Search.ExcludePatterns, other.Search.ExcludePatterns...)
+	}
+	if other.Search.MaxResults > 0 {
+		c.Search.MaxResults = other.Search.MaxResults
+	}
+	if other.Search.CaseSensitive {
+		c.Search.CaseSensitive = true
+	}
+	if c.Agents == nil {
+		c.Agents = make(map[string]AgentOverride)
+	}
+	for name, override := range other.Agents {
+		existing := c.Agents[name]
+		if override.Model != "" {
+			existing.Model = override.Model
+		}
+		if override.Provider != "" {
+			existing.Provider = override.Provider
+		}
+		if override.Temperature != nil {
+			existing.Temperature = override.Temperature
+		}
+		if override.ThinkingBudget != nil {
+			existing.ThinkingBudget = override.ThinkingBudget
+		}
+		if override.MaxIterations != nil {
+			existing.MaxIterations = override.MaxIterations
+		}
+		if override.SystemPrompt != "" {
+			existing.SystemPrompt = override.SystemPrompt
+		}
+		if len(override.ToolFilter) > 0 {
+			existing.ToolFilter = UniqueSortedKeep(existing.ToolFilter, override.ToolFilter...)
+		}
+		if len(override.ExcludeTools) > 0 {
+			existing.ExcludeTools = UniqueSortedKeep(existing.ExcludeTools, override.ExcludeTools...)
+		}
+		if override.Disabled {
+			existing.Disabled = true
+		}
+		c.Agents[name] = existing
+	}
+}
+
+func Load(workspacePath ...string) (*AppConfig, error) {
 	path, err := Path()
 	if err != nil {
 		return nil, err
 	}
 
+	var cfg AppConfig
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			cfg := &AppConfig{}
-			cfg.Search.MaxResults = 100
-			cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
-			return cfg, nil
+		if !os.IsNotExist(err) {
+			return nil, err
 		}
-		return nil, err
+		cfg.Search.MaxResults = 100
+		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
+	} else {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
 	}
 
-	var cfg AppConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	// Merge workspace-level config if provided and exists
+	if len(workspacePath) > 0 && workspacePath[0] != "" {
+		wsPath := filepath.Join(workspacePath[0], ".agents", "config.json")
+		if wsData, err := os.ReadFile(wsPath); err == nil {
+			var wsCfg AppConfig
+			if err := json.Unmarshal(wsData, &wsCfg); err == nil {
+				cfg.Merge(&wsCfg)
+			}
+		}
 	}
+
 	if cfg.Search.MaxResults <= 0 {
 		cfg.Search.MaxResults = 100
 	}
 	if len(cfg.Search.ExcludePatterns) == 0 {
 		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	}
+
 	for i, p := range cfg.Providers {
 		if strings.HasPrefix(p.APIKey, "enc:") {
 			dec, err := Decrypt(p.APIKey)
@@ -101,12 +180,12 @@ func Load() (*AppConfig, error) {
 			cfg.Providers[i].APIKey = dec
 		}
 	}
+
 	for i := range cfg.Providers {
 		cfg.Providers[i] = NormalizeProvider(cfg.Providers[i])
 	}
 	cfg.sortProviders()
 	return &cfg, nil
-
 }
 
 func Path() (string, error) {
@@ -224,6 +303,19 @@ func NormalizeProvider(provider ProviderConfig) ProviderConfig {
 		provider.Kind = ProviderKindGemini
 	}
 
+	isLMStudio := provider.Preset == ProviderPresetLMStudio ||
+		provider.Kind == ProviderKindLMStudio ||
+		strings.Contains(provider.BaseURL, ":1234")
+
+	if isLMStudio {
+		provider.Preset = ProviderPresetLMStudio
+		provider.Kind = ProviderKindLMStudio
+	}
+
+	if provider.APIKey == "" && (provider.Preset == ProviderPresetOpenAICompatible || provider.Preset == ProviderPresetLMStudio) {
+		provider.APIKey = "lm-studio"
+	}
+
 	if provider.Name == "" {
 		provider.Name = DefaultProviderName(provider.Preset)
 		if provider.Name == "" {
@@ -232,6 +324,13 @@ func NormalizeProvider(provider ProviderConfig) ProviderConfig {
 	}
 	if provider.BaseURL == "" {
 		provider.BaseURL = DefaultBaseURL(provider.Preset, provider.Kind)
+	}
+
+	if (provider.Preset == ProviderPresetOpenAICompatible || provider.Preset == ProviderPresetLMStudio) && provider.BaseURL != "" {
+		trimmedURL := strings.TrimRight(provider.BaseURL, "/")
+		if !strings.HasSuffix(trimmedURL, "/v1") {
+			provider.BaseURL = trimmedURL + "/v1"
+		}
 	}
 	return provider
 }
@@ -248,6 +347,8 @@ func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
 		return ""
 	case ProviderPresetOpenAICompatible:
 		return "http://localhost:11434/v1"
+	case ProviderPresetLMStudio:
+		return "http://127.0.0.1:1234/v1"
 	default:
 		return ""
 	}
@@ -277,7 +378,7 @@ func UniqueSortedKeep(items []string, extra ...string) []string {
 }
 
 func ValidProviderPresets() []ProviderPreset {
-	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible}
+	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible, ProviderPresetLMStudio}
 }
 
 func DefaultProviderName(preset ProviderPreset) string {
@@ -290,7 +391,7 @@ func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
 
 	// 1. Exact preset match
 	switch p {
-	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible:
+	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible, ProviderPresetLMStudio:
 		return p
 	}
 
@@ -302,6 +403,8 @@ func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
 		return ProviderPresetAnthropic
 	case ProviderKindGemini:
 		return ProviderPresetGemini
+	case ProviderKindLMStudio:
+		return ProviderPresetLMStudio
 	}
 
 	return ""
@@ -318,6 +421,8 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 		return ProviderKindAnthropic
 	case ProviderKindGemini:
 		return ProviderKindGemini
+	case ProviderKindLMStudio:
+		return ProviderKindLMStudio
 	}
 
 	// 2. Kind from normalized preset
@@ -328,6 +433,8 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 		return ProviderKindAnthropic
 	case ProviderPresetGemini:
 		return ProviderKindGemini
+	case ProviderPresetLMStudio:
+		return ProviderKindLMStudio
 	}
 
 	return ""

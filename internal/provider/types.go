@@ -106,7 +106,7 @@ func ToolResultForInvocation(call ToolInvocation, output string) ConversationIte
 	}
 	return ConversationItem{
 		Role:    RoleTool,
-		Content: formatToolResultContent(call, payload),
+		Content: FormatToolResultContent(call, payload),
 	}
 }
 

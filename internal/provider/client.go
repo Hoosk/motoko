@@ -4,22 +4,30 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
 )
 
-type clientFactory func(config.ProviderConfig) Client
+type ClientFactory func(config.ProviderConfig) Client
 
-var clientFactories = map[config.ProviderKind]clientFactory{
-	config.ProviderKindOpenAICompatible: newOpenAIClient,
-	config.ProviderKindAnthropic:        newAnthropicClient,
-	config.ProviderKindGemini:           newGeminiClient,
+var (
+	mu              sync.RWMutex
+	clientFactories = make(map[config.ProviderKind]ClientFactory)
+)
+
+func Register(kind config.ProviderKind, factory ClientFactory) {
+	mu.Lock()
+	defer mu.Unlock()
+	clientFactories[kind] = factory
 }
 
 func NewClient(cfg config.ProviderConfig) (Client, error) {
 	cfg = config.NormalizeProvider(cfg)
+	mu.RLock()
 	factory, ok := clientFactories[cfg.Kind]
+	mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("provider no soportado: %s", cfg.Kind)
 	}
@@ -41,7 +49,7 @@ func newBaseClient(providerName, baseURL, apiKey, model string) baseClient {
 		apiKey:       strings.TrimSpace(apiKey),
 		model:        strings.TrimSpace(model),
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 15 * time.Minute,
 		},
 	}
 }
