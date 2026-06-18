@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const defaultReadLimit = 200
 
 type ReadTool struct {
 	injectedInstructions map[string]bool
+	mu                   sync.Mutex
 }
 
 func NewReadTool() *ReadTool {
@@ -125,6 +127,9 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 }
 
 func (t *ReadTool) getInjectedInstructions(absPath string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	workspaceRoot, _, err := resolveWorkspacePath("")
 	if err != nil {
 		return ""

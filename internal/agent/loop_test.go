@@ -103,6 +103,23 @@ func TestMaxToolIterationsFallsBackOnInvalidEnv(t *testing.T) {
 	}
 }
 
+func TestRunHonorsMaxToolIterationsOverride(t *testing.T) {
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "1")
+
+	registry := tools.NewRegistry()
+	registry.Register(&fakeLoopTool{})
+	provider := &fakeLoopProvider{}
+	a := New(provider, registry)
+
+	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err == nil {
+		t.Fatal("expected max-iterations error")
+	}
+	if provider.count != 1 {
+		t.Fatalf("expected a single completion attempt, got %d", provider.count)
+	}
+}
+
 func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(&fakeLoopTool{})

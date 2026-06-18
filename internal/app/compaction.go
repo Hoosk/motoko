@@ -96,7 +96,7 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 
 	// 5. Update session history: [Summary System Msg] + [Recent History]
 	newHistory := []provider.ConversationItem{
-		{Role: "system", Content: "Compacted conversation summary:\n" + summaryText},
+		provider.UserText("Compacted conversation summary:\n" + summaryText),
 	}
 	newHistory = append(newHistory, recentHistory...)
 	
