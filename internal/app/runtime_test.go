@@ -539,6 +539,9 @@ func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
 	if len(r.currentSession.History) != 2 {
 		t.Fatalf("expected compacted two-message history, got %#v", r.currentSession.History)
 	}
+	if got := r.currentSession.History[0].Role; got != provider.RoleUser {
+		t.Fatalf("expected compacted summary role %q, got %q", provider.RoleUser, got)
+	}
 	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen breve") {
 		t.Fatalf("expected compacted summary in history, got %q", got)
 	}
@@ -581,6 +584,9 @@ func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 	}
 	if !reflect.DeepEqual(events, []AgentStreamEvent{{Kind: "compacting", Content: "Compacting session..."}, {Kind: "status", Content: "Session auto-compacted."}}) {
 		t.Fatalf("unexpected compact events %#v", events)
+	}
+	if got := r.currentSession.History[0].Role; got != provider.RoleUser {
+		t.Fatalf("expected auto-compacted summary role %q, got %q", provider.RoleUser, got)
 	}
 	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen automatico") {
 		t.Fatalf("expected auto-compact summary in history, got %q", got)

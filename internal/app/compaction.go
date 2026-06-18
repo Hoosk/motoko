@@ -43,7 +43,7 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		splitIdx = i
 	}
 
-	// Make sure we always compact at least something if we triggered compaction, 
+	// Make sure we always compact at least something if we triggered compaction,
 	// but if splitIdx is 0, we shouldn't compact anything.
 	if splitIdx <= 0 {
 		return nil // nothing to compact
@@ -96,10 +96,10 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 
 	// 5. Update session history: [Summary System Msg] + [Recent History]
 	newHistory := []provider.ConversationItem{
-		{Role: "system", Content: "Compacted conversation summary:\n" + summaryText},
+		provider.UserText("Compacted conversation summary:\n" + summaryText),
 	}
 	newHistory = append(newHistory, recentHistory...)
-	
+
 	r.currentSession.History = newHistory
 	r.currentSession.LastInputTokens = 0
 	return r.currentSession.Save()

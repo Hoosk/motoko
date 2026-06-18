@@ -119,7 +119,8 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		RelevantSnippets: info.RelevantSnippetsSummary(),
 	}
 
-	for i := 0; i < defaultMaxToolIterations; i++ {
+	maxIterations := maxToolIterations()
+	for i := 0; i < maxIterations; i++ {
 		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(history), a.provider.Summary())
 
 		currentHistory := make([]provider.ConversationItem, len(history))
@@ -140,7 +141,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			}
 		}
 
-		if i >= defaultMaxToolIterations-2 {
+		if i >= maxIterations-2 {
 			frag := system.LoadFragment("max_steps")
 			if frag != "" {
 				currentHistory = append(currentHistory, provider.AssistantText(frag))

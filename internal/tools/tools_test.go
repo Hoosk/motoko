@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -167,6 +168,45 @@ func TestReadToolReadsFileAndDirectory(t *testing.T) {
 	}
 	if !strings.Contains(dirResult.Output, "context.go") {
 		t.Fatalf("expected directory listing, got %q", dirResult.Output)
+	}
+}
+
+func TestReadToolConcurrentInjectedInstructions(t *testing.T) {
+	root := withTempWorkspace(t)
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# agent guidance"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readTool := NewReadTool()
+	outputs := make([]string, 8)
+	errs := make(chan error, len(outputs))
+	var wg sync.WaitGroup
+	for i := range outputs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := readTool.Run(context.Background(), "internal/system/context.go 1 1")
+			if err != nil {
+				errs <- err
+				return
+			}
+			outputs[i] = result.Output
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("unexpected concurrent read error: %v", err)
+	}
+
+	injectedCount := 0
+	for _, output := range outputs {
+		if strings.Contains(output, "<system-reminder>") {
+			injectedCount++
+		}
+	}
+	if injectedCount != 1 {
+		t.Fatalf("expected injected instructions once, got %d", injectedCount)
 	}
 }
 
@@ -340,14 +380,14 @@ func runGitInWorkspace(t *testing.T, workdir string, args ...string) {
 
 func TestTruncateToolOutput(t *testing.T) {
 	longOutput := strings.Repeat("A", 20000)
-	
+
 	// Default limit is 12000
 	ctxDefault := context.Background()
 	truncatedDefault := truncateToolOutput(ctxDefault, longOutput)
 	if len(truncatedDefault) > 12000+500 { // +500 for suffix
 		t.Fatalf("expected output truncated to ~12000 bytes, got %d", len(truncatedDefault))
 	}
-	
+
 	// Custom limit via context
 	ctxCustom := WithMaxOutputSize(context.Background(), 1000)
 	truncatedCustom := truncateToolOutput(ctxCustom, longOutput)
