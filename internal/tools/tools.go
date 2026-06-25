@@ -164,7 +164,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 // IsWriteTool returns true if the tool modifies the codebase.
 func IsWriteTool(name string) bool {
 	n := strings.ToLower(name)
-	return n == "bash" || n == "patch"
+	return n == toolNameBash || n == "patch"
 }
 
 // Registry filtering for sandboxing

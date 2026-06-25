@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Hoosk/motoko/internal/config"
 )
 
 func TestParseAndPopulate(t *testing.T) {
@@ -149,9 +151,9 @@ func TestLoadCatalogFileCache(t *testing.T) {
 		}
 	}`
 
-	// Write cache file manually to test local load
 	_ = os.MkdirAll(filepath.Dir(cachePath), 0755)
-	if err := os.WriteFile(cachePath, []byte(mockData), 0644); err != nil {
+	err = os.WriteFile(cachePath, []byte(mockData), 0644)
+	if err != nil {
 		t.Fatalf("failed to write test cache file: %v", err)
 	}
 
@@ -172,5 +174,110 @@ func TestLoadCatalogFileCache(t *testing.T) {
 	}
 	if info.ContextWindow != 128000 {
 		t.Fatalf("unexpected context window: %d", info.ContextWindow)
+	}
+}
+
+func TestParseAndPopulateNested(t *testing.T) {
+	mockData := `{
+		"models": {
+			"xai/grok-4": {
+				"id": "xai/grok-4",
+				"name": "Grok 4",
+				"family": "grok",
+				"reasoning": true,
+				"limit": {
+					"context": 256000,
+					"output": 64000
+				}
+			}
+		},
+		"providers": {
+			"xai": {
+				"id": "xai",
+				"name": "xAI",
+				"api": "https://api.x.ai/v1",
+				"env": ["XAI_API_KEY"]
+			}
+		}
+	}`
+
+	err := parseAndPopulate([]byte(mockData))
+	if err != nil {
+		t.Fatalf("unexpected parsing error: %v", err)
+	}
+
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	if len(catalogCache) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(catalogCache))
+	}
+
+	m, ok := catalogCache["xai/grok-4"]
+	if !ok {
+		t.Fatalf("model xai/grok-4 not found")
+	}
+	if m.ContextWindow != 256000 || !m.SupportsThinking {
+		t.Fatalf("unexpected model details: %+v", m)
+	}
+
+	if len(providersCache) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providersCache))
+	}
+
+	p, ok := providersCache["xai"]
+	if !ok {
+		t.Fatalf("provider xai not found")
+	}
+	if p.Name != "xAI" || p.API != "https://api.x.ai/v1" || len(p.Env) != 1 || p.Env[0] != "XAI_API_KEY" {
+		t.Fatalf("unexpected provider details: %+v", p)
+	}
+
+	// Test LookupProvider
+	p2, found := LookupProvider("xai")
+	if !found {
+		t.Fatalf("LookupProvider failed for xai")
+	}
+	if p2.Name != "xAI" {
+		t.Fatalf("LookupProvider returned wrong provider name: %s", p2.Name)
+	}
+}
+
+func TestNewClientDynamicBaseURL(t *testing.T) {
+	mockData := `{
+		"models": {},
+		"providers": {
+			"deepseek": {
+				"id": "deepseek",
+				"name": "DeepSeek",
+				"api": "https://api.deepseek.com/v2",
+				"env": ["DEEPSEEK_API_KEY"]
+			}
+		}
+	}`
+
+	err := parseAndPopulate([]byte(mockData))
+	if err != nil {
+		t.Fatalf("unexpected parsing error: %v", err)
+	}
+
+	cfg := config.ProviderConfig{
+		Name:   "my-deepseek-custom",
+		Preset: "deepseek",
+		APIKey: "sk-test-key",
+		Model:  "deepseek-chat",
+	}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient failed for custom deepseek preset: %v", err)
+	}
+
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+
+	if client.Summary() != "my-deepseek-custom:deepseek-chat" {
+		t.Fatalf("expected summary 'my-deepseek-custom:deepseek-chat', got %q", client.Summary())
 	}
 }

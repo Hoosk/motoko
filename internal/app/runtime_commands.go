@@ -50,8 +50,12 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/task     Manage running background tasks",
 			"/approve  Execute the pending shell action",
 			"/deny     Cancel the pending shell action",
+			"/exit     Exit the application",
+			"/quit     Exit the application",
 			"!<cmd>    Execute an explicit shell command",
 		}, "\n")}}}
+	case "exit", "quit":
+		return Response{Signal: "quit"}
 	case cmdClear:
 		if r.currentSession != nil {
 			r.currentSession.History = nil

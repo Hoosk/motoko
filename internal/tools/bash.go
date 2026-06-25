@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-const bashTimeout = 20 * time.Second
+const (
+	toolNameBash = "bash"
+	bashTimeout  = 20 * time.Second
+)
 
 type BashTool struct{}
 
@@ -19,7 +22,7 @@ func NewBashTool() *BashTool {
 
 func (t *BashTool) Spec() Spec {
 	return Spec{
-		Name:    "bash",
+		Name:    toolNameBash,
 		Summary: "Ejecuta un comando shell en el workspace actual.",
 		Usage:   "bash <comando>",
 	}
@@ -48,7 +51,17 @@ func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = toolNameBash
+	}
+
+	var cmd *exec.Cmd
+	if strings.Contains(shell, "bash") || strings.Contains(shell, "zsh") {
+		cmd = exec.CommandContext(ctx, shell, "-lc", command)
+	} else {
+		cmd = exec.CommandContext(ctx, shell, "-c", command)
+	}
 	cmd.Dir = wd
 	output, err := cmd.CombinedOutput()
 	result := Result{

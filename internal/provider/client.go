@@ -25,6 +25,11 @@ func Register(kind config.ProviderKind, factory ClientFactory) {
 
 func NewClient(cfg config.ProviderConfig) (Client, error) {
 	cfg = config.NormalizeProvider(cfg)
+	if cfg.BaseURL == "" && cfg.Preset != "" {
+		if catProv, ok := LookupProvider(string(cfg.Preset)); ok && catProv.API != "" {
+			cfg.BaseURL = catProv.API
+		}
+	}
 	mu.RLock()
 	factory, ok := clientFactories[cfg.Kind]
 	mu.RUnlock()

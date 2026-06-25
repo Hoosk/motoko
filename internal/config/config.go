@@ -413,6 +413,10 @@ func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
 		return ProviderPresetLMStudio
 	}
 
+	if p != "" {
+		return p
+	}
+
 	return ""
 }
 
@@ -432,7 +436,8 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 	}
 
 	// 2. Kind from normalized preset
-	switch normalizePreset(preset, kind) {
+	normalizedPreset := normalizePreset(preset, kind)
+	switch normalizedPreset {
 	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetOpenAICompatible:
 		return ProviderKindOpenAICompatible
 	case ProviderPresetAnthropic:
@@ -441,6 +446,10 @@ func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
 		return ProviderKindGemini
 	case ProviderPresetLMStudio:
 		return ProviderKindLMStudio
+	}
+
+	if normalizedPreset != "" {
+		return ProviderKindOpenAICompatible
 	}
 
 	return ""

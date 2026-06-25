@@ -38,21 +38,22 @@ type agentStreamBuffer struct {
 }
 
 type Model struct {
+	lastCtrlC        time.Time
 	notificationTime time.Time
-	runtime          *app.Runtime
 	agentBuffer      *agentStreamBuffer
 	agentStream      chan app.AgentStreamEvent
+	runtime          *app.Runtime
+	modelPicker      modelPickerState
 	taskStatus       string
 	notificationText string
+	sessionPicker    sessionPickerState
 	sidebar          SidebarModel
 	providerForm     providerForm
 	modePopup        modePopupState
-	sessionPicker    sessionPickerState
-	modelPicker      modelPickerState
 	thinkingPicker   thinkingPickerState
 	composer         ComposerModel
-	footer           FooterModel
 	timeline         TimelineModel
+	footer           FooterModel
 	width            int
 	height           int
 	notificationShow bool
@@ -100,7 +101,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "ctrl+c":
-			return m, tea.Quit
+			if time.Since(m.lastCtrlC) < 2*time.Second {
+				return m, tea.Quit
+			}
+			m.lastCtrlC = time.Now()
+			m.notificationShow = true
+			m.notificationText = "Press Ctrl+C again to exit"
+			m.notificationTime = time.Now()
+			return m, m.hideNotification()
 		}
 	}
 
@@ -189,6 +197,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if resp.Signal != "" {
 			switch resp.Signal {
+			case "quit":
+				cmds = append(cmds, tea.Quit)
 			case "open-provider-popup":
 				m.providerForm.Open(m.runtime)
 			case "open-models-popup":
@@ -362,13 +372,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			if m.showTools || m.showHelp {
 				m.showTools = false
 				m.showHelp = false
 				return m, nil
 			}
-		case "ctrl+p":
+		case keyCtrlP:
 			m.providerForm.Open(m.runtime)
 		case "ctrl+m":
 			cmds = append(cmds, m.listModels())

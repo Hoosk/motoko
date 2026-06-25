@@ -807,3 +807,15 @@ func TestRuntimeBrainCommands(t *testing.T) {
 		t.Error("plan should not exist after brain clear")
 	}
 }
+
+func TestHandleInputExitAndQuitCommands(t *testing.T) {
+	r := NewRuntime()
+
+	for _, cmd := range []string{"/exit", "/quit"} {
+		resp := r.HandleInput(cmd, system.ContextInfo{})
+		if resp.Signal != "quit" {
+			t.Errorf("expected Signal to be 'quit' for command %q, got %q", cmd, resp.Signal)
+		}
+	}
+}
+

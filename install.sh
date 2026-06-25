@@ -44,24 +44,14 @@ if echo "$LATEST_RELEASE" | grep -q "Not Found"; then
     LATEST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases | grep -v '\[\]' | head -n 50 | tr -d '\n' | sed 's/},{/}\n{/g' | head -n 1)
 fi
 
-TAG=$(echo "$LATEST_RELEASE" | grep -oP '"tag_name":\s*"\K[^"]+' || echo "")
-
-if [[ -z "$TAG" ]]; then
-    # Fallback for very simple environments without grep -P
-    TAG=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | cut -d'"' -f4)
-fi
+TAG=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | head -n 1 | cut -d'"' -f4 || echo "")
 
 if [[ -n "$TAG" ]]; then
     echo -e "${GREEN}Found version: $TAG${NC}"
     
     # Construct the asset name pattern
     ASSET_PATTERN="motoko_${OS}_${ARCH}"
-    DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep "$ASSET_PATTERN" | head -n 1)
-    
-    if [[ -z "$DOWNLOAD_URL" ]]; then
-        # Fallback parsing
-        DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url" | grep "$ASSET_PATTERN" | cut -d'"' -f4 | head -n 1)
-    fi
+    DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url" | grep "$ASSET_PATTERN" | head -n 1 | cut -d'"' -f4 || echo "")
 
     if [[ -n "$DOWNLOAD_URL" ]]; then
         echo -e "${BLUE}Downloading $DOWNLOAD_URL...${NC}"
@@ -132,5 +122,15 @@ if [[ "$FALLBACK_BUILD" == true ]]; then
 fi
 
 echo -e ""
-echo -e "Make sure ${BLUE}$INSTALL_DIR${NC} is in your ${BLUE}\$PATH${NC}."
-echo -e "Run ${GREEN}motoko${NC} to start."
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    echo -e "${YELLOW}Warning: $INSTALL_DIR is not in your \$PATH.${NC}"
+    if [[ "$OS" == "darwin" ]]; then
+        echo -e "To add it to your path, run:"
+        echo -e "  ${GREEN}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc${NC}"
+    else
+        echo -e "To add it to your path, add the following to your shell profile (e.g. ~/.bashrc or ~/.profile):"
+        echo -e "  ${GREEN}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+    fi
+else
+    echo -e "Run ${GREEN}motoko${NC} to start."
+fi

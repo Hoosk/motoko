@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +26,23 @@ type CatalogModel struct {
 	} `json:"limit"`
 }
 
+type CatalogProvider struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	API  string   `json:"api"`
+	Env  []string `json:"env"`
+}
+
+type CatalogContainer struct {
+	Models    map[string]CatalogModel    `json:"models"`
+	Providers map[string]CatalogProvider `json:"providers"`
+}
+
 var (
-	catalogMu     sync.RWMutex
-	catalogCache  = make(map[string]ModelInfo)
-	catalogLoaded bool
+	catalogMu      sync.RWMutex
+	catalogCache   = make(map[string]ModelInfo)
+	providersCache = make(map[string]CatalogProvider)
+	catalogLoaded  bool
 )
 
 // LoadCatalog loads the catalog from the daily cache or downloads it if expired.
@@ -75,7 +89,7 @@ func LoadCatalog(ctx context.Context) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(fetchCtx, "GET", "https://models.dev/models.json", nil)
+	req, err := http.NewRequestWithContext(fetchCtx, "GET", "https://models.dev/catalog.json", nil)
 	if err != nil {
 		tracelog.Logf("catalog: failed to create request: %v", err)
 		return fallbackToCache(cachePath)
@@ -132,6 +146,26 @@ func fallbackToCache(cachePath string) error {
 }
 
 func parseAndPopulate(data []byte) error {
+	var container CatalogContainer
+	// Try parsing nested structure
+	if err := json.Unmarshal(data, &container); err == nil && len(container.Models) > 0 {
+		catalogCache = make(map[string]ModelInfo)
+		for k, m := range container.Models {
+			catalogCache[strings.ToLower(k)] = ModelInfo{
+				ID:               m.ID,
+				ContextWindow:    m.Limit.Context,
+				SupportsThinking: m.Reasoning,
+			}
+		}
+		providersCache = make(map[string]CatalogProvider)
+		for k, p := range container.Providers {
+			providersCache[strings.ToLower(k)] = p
+		}
+		tracelog.Logf("catalog: parsed nested catalog.json with %d models and %d providers", len(catalogCache), len(providersCache))
+		return nil
+	}
+
+	// Fallback to legacy flat model mapping
 	var rawCatalog map[string]CatalogModel
 	if err := json.Unmarshal(data, &rawCatalog); err != nil {
 		return err
@@ -145,8 +179,32 @@ func parseAndPopulate(data []byte) error {
 			SupportsThinking: m.Reasoning,
 		}
 	}
-	tracelog.Logf("catalog: parsed and populated %d models from catalog", len(catalogCache))
+	// Clear providers cache in legacy mode
+	providersCache = make(map[string]CatalogProvider)
+	tracelog.Logf("catalog: parsed legacy models.json with %d models", len(catalogCache))
 	return nil
+}
+
+// LookupProvider searches for a provider in the catalog cache.
+func LookupProvider(providerID string) (CatalogProvider, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	p, ok := providersCache[strings.ToLower(strings.TrimSpace(providerID))]
+	return p, ok
+}
+
+// ListCatalogProviders returns a list of provider IDs from the catalog cache.
+func ListCatalogProviders() []string {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	var list []string
+	for k := range providersCache {
+		list = append(list, k)
+	}
+	sort.Strings(list)
+	return list
 }
 
 // LookupModel searches for a model in the catalog cache.

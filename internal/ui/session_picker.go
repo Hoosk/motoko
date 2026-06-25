@@ -10,16 +10,33 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type sessionFilterItem struct {
+	session *session.Session
+}
+
+func (s sessionFilterItem) FilterKey() string {
+	return s.session.Title
+}
+
+func (s sessionFilterItem) Render(active bool) string {
+	cursor := "  "
+	style := styles.PopupFieldLabelStyle
+	if active {
+		cursor = styles.BoldNeonStyle.Render("> ")
+		style = styles.PopupSelectionStyle
+	}
+	line := fmt.Sprintf("%s  %s  (%d mensajes)", s.session.Title, s.session.UpdatedAt.Format("2006-01-02 15:04"), len(s.session.History))
+	return cursor + style.Render(line)
+}
+
 type sessionPickerState struct {
-	sessions []*session.Session
-	index    int
-	active   bool
-	loading  bool
+	list    *FilterList
+	active  bool
+	loading bool
 }
 
 func (p *sessionPickerState) Open() {
-	p.sessions = nil
-	p.index = 0
+	p.list = nil
 	p.loading = true
 	p.active = true
 }
@@ -30,47 +47,37 @@ func (p *sessionPickerState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 		if msg.Err != nil {
 			return func() tea.Msg { return ErrorMsg{Err: msg.Err} }
 		}
-		p.sessions = msg.Sessions
+		p.list = NewFilterList("Sessions", "Search session...")
+		p.list.Active = true
+		var items []FilterableItem
+		for _, s := range msg.Sessions {
+			items = append(items, sessionFilterItem{session: s})
+		}
+		p.list.SetItems(items)
 		p.active = true
-		p.index = 0
 		p.loading = false
 		return nil
 
 	case tea.KeyMsg:
-		if !p.active {
+		if !p.active || p.list == nil {
 			return nil
 		}
-		switch msg.String() {
-		case keyEsc:
+		chosen, selected, cancelled := p.list.Update(msg)
+		if cancelled {
 			p.active = false
 			p.loading = false
 			return nil
-		case keyUp, keyCtrlP:
-			if len(p.sessions) > 0 {
-				p.index--
-				if p.index < 0 {
-					p.index = len(p.sessions) - 1
-				}
-			}
-			return nil
-		case keyDown, keyCtrlN, keyTab:
-			if len(p.sessions) > 0 {
-				p.index = (p.index + 1) % len(p.sessions)
-			}
-			return nil
-		case "enter":
-			if len(p.sessions) == 0 {
-				p.active = false
-				return nil
-			}
-			chosen := p.sessions[p.index]
+		}
+		if selected {
 			p.active = false
 			p.loading = false
+			sessionItem := chosen.(sessionFilterItem)
+			chosenSession := sessionItem.session
 			return func() tea.Msg {
-				if err := runtime.LoadSession(chosen.ID); err != nil {
+				if err := runtime.LoadSession(chosenSession.ID); err != nil {
 					return SessionLoadedMsg{Err: err}
 				}
-				return SessionLoadedMsg{Session: chosen}
+				return SessionLoadedMsg{Session: chosenSession}
 			}
 		}
 	}
@@ -81,26 +88,21 @@ func (p sessionPickerState) View() string {
 	if !p.active {
 		return ""
 	}
-	rows := []string{
-		styles.PopupTitleStyle.Render("Sesiones"),
-		styles.PopupMutedStyle.Render("↑↓ navega  Enter carga  Esc cancela"),
-		"",
-	}
-	if p.loading && len(p.sessions) == 0 {
-		rows = append(rows, styles.PopupMutedStyle.Render("Cargando sesiones..."))
-		return strings.Join(rows, "\n")
-	}
-	if len(p.sessions) == 0 {
-		rows = append(rows, styles.PopupMutedStyle.Render("No hay sesiones guardadas para este workspace."))
-		return strings.Join(rows, "\n")
-	}
-	for i, s := range p.sessions {
-		line := fmt.Sprintf("%s  %s  (%d mensajes)", s.Title, s.UpdatedAt.Format("2006-01-02 15:04"), len(s.History))
-		if i == p.index {
-			rows = append(rows, styles.PopupSelectionStyle.Render(line))
-		} else {
-			rows = append(rows, styles.PopupFieldLabelStyle.Render(line))
+	if p.loading && (p.list == nil || len(p.list.Items) == 0) {
+		rows := []string{
+			styles.PopupTitleStyle.Render("Sessions"),
+			"",
+			styles.PopupMutedStyle.Render("Loading sessions..."),
 		}
+		return strings.Join(rows, "\n")
 	}
-	return strings.Join(rows, "\n")
+	if p.list == nil || len(p.list.Items) == 0 {
+		rows := []string{
+			styles.PopupTitleStyle.Render("Sessions"),
+			"",
+			styles.PopupMutedStyle.Render("No sessions saved for this workspace."),
+		}
+		return strings.Join(rows, "\n")
+	}
+	return p.list.View()
 }

@@ -380,7 +380,24 @@ func (r *Runtime) ProviderSummary() string {
 }
 
 func (r *Runtime) ProviderPresets() []config.ProviderPreset {
-	return config.ValidProviderPresets()
+	presets := config.ValidProviderPresets()
+	seen := make(map[config.ProviderPreset]bool)
+	for _, p := range presets {
+		seen[p] = true
+	}
+
+	for _, cp := range provider.ListCatalogProviders() {
+		preset := config.ProviderPreset(cp)
+		if !seen[preset] {
+			presets = append(presets, preset)
+			seen[preset] = true
+		}
+	}
+	return presets
+}
+
+func (r *Runtime) LookupCatalogProvider(id string) (provider.CatalogProvider, bool) {
+	return provider.LookupProvider(id)
 }
 
 // GetActiveProviderConfig returns the currently active ProviderConfig.

@@ -11,6 +11,7 @@ import (
 )
 
 type providerForm struct {
+	picker      *FilterList
 	name        string
 	baseURL     string
 	apiKey      string
@@ -19,20 +20,59 @@ type providerForm struct {
 	presetIndex int
 	active      bool
 	loading     bool
+	showPicker  bool
+}
+
+type providerFilterItem struct {
+	preset config.ProviderPreset
+	name   string
+}
+
+func (p providerFilterItem) FilterKey() string {
+	return string(p.preset) + " " + p.name
+}
+
+func (p providerFilterItem) Render(active bool) string {
+	if active {
+		return styles.PopupSelectionStyle.Render("> " + p.name + " (" + string(p.preset) + ")")
+	}
+	return styles.PopupFieldValueStyle.Render("  " + p.name + " (" + string(p.preset) + ")")
 }
 
 func (f *providerForm) Open(runtime *app.Runtime) {
-	preset := f.currentProviderPreset(runtime)
 	f.active = true
-	f.name = config.DefaultProviderName(preset)
-	f.baseURL = config.DefaultBaseURL(preset, "")
+	f.status = ""
+
+	presets := runtime.ProviderPresets()
+	var items []FilterableItem
+	for _, preset := range presets {
+		name := ""
+		if cp, ok := runtime.LookupCatalogProvider(string(preset)); ok {
+			name = cp.Name
+		} else {
+			name = config.DefaultProviderName(preset)
+		}
+		items = append(items, providerFilterItem{
+			preset: preset,
+			name:   name,
+		})
+	}
+
+	f.picker = NewFilterList("Select Provider", "Search...")
+	f.picker.SetItems(items)
+	f.picker.Active = true
+	f.showPicker = true
 	f.presetIndex = 0
 	f.fieldIndex = 0
 }
 
 func (f *providerForm) isOpenAICompatible(runtime *app.Runtime) bool {
 	preset := f.currentProviderPreset(runtime)
-	return preset == config.ProviderPresetOpenAICompatible || preset == config.ProviderPresetLMStudio
+	switch preset {
+	case config.ProviderPresetOpenAI, config.ProviderPresetAnthropic, config.ProviderPresetGemini:
+		return false
+	}
+	return true
 }
 
 func (f *providerForm) fieldCount(runtime *app.Runtime) int {
@@ -46,6 +86,28 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if !f.active {
+			return nil
+		}
+		if f.showPicker {
+			item, selected, cancelled := f.picker.Update(msg)
+			if cancelled {
+				f.active = false
+				f.showPicker = false
+				return nil
+			}
+			if selected {
+				pItem := item.(providerFilterItem)
+				presets := runtime.ProviderPresets()
+				for i, p := range presets {
+					if p == pItem.preset {
+						f.presetIndex = i
+						break
+					}
+				}
+				f.showPicker = false
+				f.syncPreset(runtime)
+				f.fieldIndex = 1
+			}
 			return nil
 		}
 		switch msg.String() {
@@ -63,12 +125,9 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		case "left":
 			if f.fieldIndex == 0 {
-				presets := runtime.ProviderPresets()
-				f.presetIndex--
-				if f.presetIndex < 0 {
-					f.presetIndex = len(presets) - 1
-				}
-				f.syncPreset(runtime)
+				f.showPicker = true
+				f.picker.Active = true
+				return nil
 			} else {
 				saveIdx := 2
 				cancelIdx := 3
@@ -83,9 +142,9 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		case "right":
 			if f.fieldIndex == 0 {
-				presets := runtime.ProviderPresets()
-				f.presetIndex = (f.presetIndex + 1) % len(presets)
-				f.syncPreset(runtime)
+				f.showPicker = true
+				f.picker.Active = true
+				return nil
 			} else {
 				saveIdx := 2
 				cancelIdx := 3
@@ -115,6 +174,11 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			}
 			return nil
 		case keyEnter:
+			if f.fieldIndex == 0 {
+				f.showPicker = true
+				f.picker.Active = true
+				return nil
+			}
 			return f.handleEnter(runtime)
 		default:
 			if len(msg.Runes) == 0 {
@@ -144,9 +208,12 @@ func (f *providerForm) View(runtime *app.Runtime) string {
 	if !f.active {
 		return ""
 	}
+	if f.showPicker {
+		return f.picker.View()
+	}
 	preset := f.currentProviderPreset(runtime)
 	presetLine := renderProviderField(0, f.fieldIndex,
-		"Provider", string(preset)+"  < >")
+		"Provider", string(preset)+"  <Enter to change>")
 
 	var lines []string
 	lines = append(lines, styles.PopupTitleStyle.Render("Add Provider"))
@@ -263,9 +330,15 @@ func (f *providerForm) syncPreset(runtime *app.Runtime) {
 		f.baseURL = "http://127.0.0.1:1234/v1"
 		f.apiKey = "lm-studio"
 	default:
-		f.name = config.DefaultProviderName(preset)
-		f.baseURL = config.DefaultBaseURL(preset, "")
-		f.apiKey = ""
+		if cp, ok := runtime.LookupCatalogProvider(string(preset)); ok {
+			f.name = cp.Name
+			f.baseURL = cp.API
+			f.apiKey = ""
+		} else {
+			f.name = config.DefaultProviderName(preset)
+			f.baseURL = config.DefaultBaseURL(preset, "")
+			f.apiKey = ""
+		}
 	}
 }
 
