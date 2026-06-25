@@ -13,6 +13,7 @@ import (
 type fakeStreamingProvider struct{}
 
 func (f *fakeStreamingProvider) Configured() bool { return true }
+func (f *fakeStreamingProvider) ProviderKind() string { return "fake" }
 func (f *fakeStreamingProvider) Summary() string  { return "fake:test" }
 func (f *fakeStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
@@ -50,6 +51,7 @@ func TestRunStreamEmitsAssistantDeltas(t *testing.T) {
 type fakePlainStreamingProvider struct{}
 
 func (f *fakePlainStreamingProvider) Configured() bool { return true }
+func (f *fakePlainStreamingProvider) ProviderKind() string { return "fake" }
 func (f *fakePlainStreamingProvider) Summary() string  { return "fake:plain" }
 func (f *fakePlainStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil
@@ -90,6 +92,7 @@ type fakeToolStreamingProvider struct {
 }
 
 func (f *fakeToolStreamingProvider) Configured() bool { return true }
+func (f *fakeToolStreamingProvider) ProviderKind() string { return "fake" }
 func (f *fakeToolStreamingProvider) Summary() string  { return "fake:tool-stream" }
 func (f *fakeToolStreamingProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "test"}}, nil

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/agent"
-	"github.com/Hoosk/motoko/internal/app/sessiontitle"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
@@ -40,11 +39,11 @@ func (r *Runtime) CurrentSessionEntries() []Entry {
 			continue
 		}
 		switch msg.Role {
-		case "user":
+		case provider.RoleUser:
 			entries = append(entries, Entry{Kind: EntryUser, Text: msg.Content})
-		case "assistant":
+		case provider.RoleAssistant:
 			entries = append(entries, Entry{Kind: EntryAssistant, Text: msg.Content})
-		case "tool":
+		case provider.RoleTool:
 			_, output := provider.ParseToolResultContent(msg.Content)
 			if strings.TrimSpace(output) != "" {
 				entries = append(entries, Entry{Kind: EntrySystem, Text: output})
@@ -60,7 +59,7 @@ func (r *Runtime) CompactSession(ctx context.Context) Response {
 	if err := r.doCompact(ctx); err != nil {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 	}
-	return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Sesion compactada."}}}
+	return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Session compacted."}}}
 }
 
 func (r *Runtime) persistTurn(result agent.Result) {
@@ -70,6 +69,14 @@ func (r *Runtime) persistTurn(result agent.Result) {
 	}
 	r.currentSession.History = append([]provider.ConversationItem(nil), result.History...)
 	r.currentSession.LastInputTokens = result.Usage.InputTokens
+
+	r.currentSession.TotalInputTokens += result.Usage.InputTokens
+	r.currentSession.TotalOutputTokens += result.Usage.OutputTokens
+	r.currentSession.TotalTokens += result.Usage.TotalTokens
+	r.currentSession.TotalReasoningTokens += result.Usage.ReasoningTokens
+	r.currentSession.TotalCacheReadTokens += result.Usage.CacheReadInputTokens
+	r.currentSession.TotalCacheWriteTokens += result.Usage.CacheWriteInputTokens
+
 	_ = r.currentSession.Save()
 }
 
@@ -81,83 +88,15 @@ func (r *Runtime) maybeAutoCompact(ctx context.Context, onEvent func(AgentStream
 		return nil
 	}
 	if onEvent != nil {
-		_ = onEvent(AgentStreamEvent{Kind: "compacting", Content: "Compactando sesion..."})
+		_ = onEvent(AgentStreamEvent{Kind: "compacting", Content: "Compacting session..."})
 	}
 	err := r.doCompact(ctx)
 	if err == nil && onEvent != nil {
-		_ = onEvent(AgentStreamEvent{Kind: "status", Content: "Sesion compactada automaticamente."})
+		_ = onEvent(AgentStreamEvent{Kind: cmdStatus, Content: "Session auto-compacted."})
 	}
 	return err
 }
 
-func (r *Runtime) doCompact(ctx context.Context) error {
-	if r.currentSession == nil || len(r.currentSession.History) == 0 {
-		return nil
-	}
-	active, ok := r.config.Active()
-	if !ok {
-		return fmt.Errorf("no hay provider activo")
-	}
-	client, err := r.providerClient(active)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Complete(ctx,
-		"Resume la conversacion para continuarla despues. Devuelve un resumen concreto, con decisiones, estado actual y siguientes pasos.",
-		r.currentSession.History,
-		provider.ToolSet{},
-	)
-	if err != nil {
-		return err
-	}
-	r.currentSession.CompactWith(strings.TrimSpace(resp.FinalText))
-	if r.brain != nil {
-		if err := r.brain.Write("summary.md", strings.TrimSpace(resp.FinalText)); err != nil {
-			return fmt.Errorf("failed to persist compact summary to session brain: %w", err)
-		}
-	}
-	return r.currentSession.Save()
-}
 
-func (r *Runtime) generateTitle(ctx context.Context, userInput, assistantResponse string) {
-	if r.currentSession == nil {
-		return
-	}
-	if strings.TrimSpace(r.currentSession.Title) != "" && !strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "Nueva sesion") {
-		return
-	}
-	active, ok := r.config.Active()
-	if !ok {
-		return
-	}
-	client, err := r.providerClient(active)
-	if err != nil {
-		return
-	}
-	resp, err := client.Complete(ctx,
-		"Genera un titulo corto de 4 a 8 palabras para esta sesion. Responde exactamente con un objeto JSON de una linea con este formato: {\"message\":\"titulo\"}. No devuelvas markdown, comillas triples, explicaciones, opciones ni texto adicional.",
-		[]provider.ConversationItem{provider.UserText(userInput), provider.AssistantText(assistantResponse)},
-		provider.ToolSet{},
-	)
-	if err != nil {
-		return
-	}
-	title := titleFromModelResponse(resp)
-	if title == "" {
-		return
-	}
-	r.currentSession.Title = title
-	_ = r.currentSession.Save()
-}
 
-func titleFromModelResponse(resp provider.Response) string {
-	return sessiontitle.FromModelResponse(resp)
-}
 
-func extractStructuredMessage(raw string) string {
-	return sessiontitle.ExtractStructuredMessage(raw)
-}
-
-func sanitizeSessionTitle(raw string) string {
-	return sessiontitle.Sanitize(raw)
-}

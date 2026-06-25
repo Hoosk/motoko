@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -57,12 +58,12 @@ func TestRegistrySuggestionsAndRun(t *testing.T) {
 	r.Register(fakeTool{name: "zeta"})
 	r.Register(fakeTool{name: "alpha"})
 
-	specs := r.Specs()
+	specs := r.Specs(ToolContext{})
 	if len(specs) != 2 || specs[0].Name != "alpha" {
 		t.Fatalf("expected sorted specs, got %#v", specs)
 	}
-	if len(r.Suggestions("al")) != 1 {
-		t.Fatalf("expected prefix suggestion, got %#v", r.Suggestions("al"))
+	if len(r.Suggestions(ToolContext{}, "al")) != 1 {
+		t.Fatalf("expected prefix suggestion, got %#v", r.Suggestions(ToolContext{}, "al"))
 	}
 	result, err := r.Run(context.Background(), "alpha", "hola")
 	if err != nil {
@@ -81,11 +82,11 @@ func TestRegistryRunTruncatesLargeToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(result.Output, truncatedToolOutputSuffix) {
-		t.Fatalf("expected truncated suffix, got %q", result.Output)
+	if !strings.Contains(result.Output, "Full output saved to") {
+		t.Fatalf("expected truncated suffix with temp file, got %q", result.Output)
 	}
-	if len(result.Output) != maxToolOutputBytes+len(truncatedToolOutputSuffix) {
-		t.Fatalf("unexpected truncated length %d", len(result.Output))
+	if !strings.HasPrefix(result.Output, strings.Repeat("a", maxToolOutputBytes)) {
+		t.Fatalf("unexpected truncated output prefix")
 	}
 }
 
@@ -167,6 +168,45 @@ func TestReadToolReadsFileAndDirectory(t *testing.T) {
 	}
 	if !strings.Contains(dirResult.Output, "context.go") {
 		t.Fatalf("expected directory listing, got %q", dirResult.Output)
+	}
+}
+
+func TestReadToolConcurrentInjectedInstructions(t *testing.T) {
+	root := withTempWorkspace(t)
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# agent guidance"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readTool := NewReadTool()
+	outputs := make([]string, 8)
+	errs := make(chan error, len(outputs))
+	var wg sync.WaitGroup
+	for i := range outputs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := readTool.Run(context.Background(), "internal/system/context.go 1 1")
+			if err != nil {
+				errs <- err
+				return
+			}
+			outputs[i] = result.Output
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("unexpected concurrent read error: %v", err)
+	}
+
+	injectedCount := 0
+	for _, output := range outputs {
+		if strings.Contains(output, "<system-reminder>") {
+			injectedCount++
+		}
+	}
+	if injectedCount != 1 {
+		t.Fatalf("expected injected instructions once, got %d", injectedCount)
 	}
 }
 
@@ -335,5 +375,23 @@ func runGitInWorkspace(t *testing.T, workdir string, args ...string) {
 	cmd.Dir = workdir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
+}
+
+func TestTruncateToolOutput(t *testing.T) {
+	longOutput := strings.Repeat("A", 20000)
+
+	// Default limit is 12000
+	ctxDefault := context.Background()
+	truncatedDefault := truncateToolOutput(ctxDefault, longOutput)
+	if len(truncatedDefault) > 12000+500 { // +500 for suffix
+		t.Fatalf("expected output truncated to ~12000 bytes, got %d", len(truncatedDefault))
+	}
+
+	// Custom limit via context
+	ctxCustom := WithMaxOutputSize(context.Background(), 1000)
+	truncatedCustom := truncateToolOutput(ctxCustom, longOutput)
+	if len(truncatedCustom) > 1000+500 { // +500 for suffix
+		t.Fatalf("expected output truncated to ~1000 bytes, got %d", len(truncatedCustom))
 	}
 }

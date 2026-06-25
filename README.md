@@ -22,6 +22,28 @@ go build -o motoko ./cmd/motoko
 mv motoko /usr/local/bin/ # or any directory in your $PATH
 ```
 
+### Usage
+
+Run `motoko` without flags to enter the interactive TUI mode:
+```bash
+motoko
+```
+
+#### Command-Line Options
+Motoko supports several command-line flags for automation, updates, and quick queries:
+
+*   `-q, --question "<prompt>"`: Ask a question directly to the AI assistant, stream the output, and exit.
+*   `--resume`: Resume the last active chat session (can be combined with `-q`).
+*   `-h, --help`: Show the help menu with all available options.
+*   `-v, --version`: Print the version information.
+*   `--update`: Check and install the latest updates.
+*   `--check-update`: Check if a newer version is available.
+
+For example, to run a direct query on your codebase using Tachikoma-gathered context:
+```bash
+motoko -q "Dime cuántos archivos hay en este proyecto"
+```
+
 ### Agents & Modes
 
 Motoko includes task-focused agent modes that you can switch between:
@@ -114,10 +136,6 @@ Motoko reads its configuration from `~/.config/motoko/config.toml`. You can conf
 /provider use <name>   # Switch active provider
 /models                # Select models for the active provider
 ```
-
-#### Thinking/Reasoning Budget
-Adjust the reasoning budget of supported models (e.g. Claude 3.7 Sonnet) via the model selector (`Ctrl+M` or `/models`). Select between: `off`, `low` (1k tokens), `medium` (8k tokens), `high` (24k tokens), and `xhigh` (64k tokens).
-
 ---
 
 *"If we all reacted the same way, we'd be predictable, and there's always more than one way to view a situation."* — Motoko Kusanagi

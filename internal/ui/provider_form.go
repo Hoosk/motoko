@@ -31,7 +31,8 @@ func (f *providerForm) Open(runtime *app.Runtime) {
 }
 
 func (f *providerForm) isOpenAICompatible(runtime *app.Runtime) bool {
-	return f.currentProviderPreset(runtime) == config.ProviderPresetOpenAICompatible
+	preset := f.currentProviderPreset(runtime)
+	return preset == config.ProviderPresetOpenAICompatible || preset == config.ProviderPresetLMStudio
 }
 
 func (f *providerForm) fieldCount(runtime *app.Runtime) int {
@@ -48,13 +49,13 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			f.active = false
 			return nil
-		case "tab", "down", "ctrl+n":
+		case keyTab, keyDown, keyCtrlN:
 			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
 			return nil
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			f.fieldIndex--
 			if f.fieldIndex < 0 {
 				f.fieldIndex = f.fieldCount(runtime) - 1
@@ -113,7 +114,7 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				}
 			}
 			return nil
-		case "enter":
+		case keyEnter:
 			return f.handleEnter(runtime)
 		default:
 			if len(msg.Runes) == 0 {
@@ -252,18 +253,29 @@ func (f *providerForm) handleEnter(runtime *app.Runtime) tea.Cmd {
 
 func (f *providerForm) syncPreset(runtime *app.Runtime) {
 	preset := f.currentProviderPreset(runtime)
-	if preset == config.ProviderPresetOpenAICompatible {
+	switch preset {
+	case config.ProviderPresetOpenAICompatible:
 		f.name = ""
 		f.baseURL = "http://localhost:11434/v1"
-	} else {
+		f.apiKey = ""
+	case config.ProviderPresetLMStudio:
+		f.name = ""
+		f.baseURL = "http://127.0.0.1:1234/v1"
+		f.apiKey = "lm-studio"
+	default:
 		f.name = config.DefaultProviderName(preset)
 		f.baseURL = config.DefaultBaseURL(preset, "")
+		f.apiKey = ""
 	}
 }
 
 func renderProviderField(index, active int, label, value string) string {
 	if index == active {
-		return styles.PopupSelectionStyle.Render(label + ": " + value)
+		val := value
+		if index > 0 {
+			val += "█"
+		}
+		return styles.PopupSelectionStyle.Render(label + ": " + val)
 	}
 	return styles.PopupFieldLabelStyle.Render(label+": ") + styles.PopupFieldValueStyle.Render(value)
 }

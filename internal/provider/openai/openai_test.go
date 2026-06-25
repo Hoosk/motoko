@@ -1,17 +1,18 @@
-package provider
+package openai
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/Hoosk/motoko/internal/config"
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
 func TestMessageSerializationHelpers(t *testing.T) {
-	// OpenAI Responses API: toResponsesInputItems maps messages to input item params.
-	items := toResponsesInputItems([]Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})
+	items := toResponsesInputItems([]provider.Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
@@ -24,7 +25,7 @@ func TestMessageSerializationHelpers(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", []ConversationItem{UserText("hola")}, ToolSet{}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0)
 	if params.Temperature.Value != 0.2 {
 		t.Fatalf("expected temperature for non-reasoning model, got %#v", params.Temperature)
 	}
@@ -40,7 +41,7 @@ func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) {
-	params := buildResponseParams("o1-preview", "system", []ConversationItem{AssistantText("hola")}, ToolSet{}, 24576)
+	params := buildResponseParams("o1-preview", "system", []provider.ConversationItem{provider.AssistantText("hola")}, provider.ToolSet{}, 24576)
 	if params.Reasoning.Effort != "high" {
 		t.Fatalf("expected high reasoning effort, got %#v", params.Reasoning)
 	}
@@ -53,7 +54,7 @@ func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) 
 }
 
 func TestBuildResponseParamsIncludesTools(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", nil, ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", nil, provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0)
 	if len(params.Tools) != 1 {
 		t.Fatalf("expected one tool, got %#v", params.Tools)
 	}
@@ -66,7 +67,7 @@ func TestBuildResponseParamsIncludesTools(t *testing.T) {
 }
 
 func TestResponsesInputItemsNormalizeUnknownRoleToUser(t *testing.T) {
-	items := toResponsesInputItems([]ConversationItem{{Role: "otro", Content: "hola"}})
+	items := toResponsesInputItems([]provider.ConversationItem{{Role: "otro", Content: "hola"}})
 	if len(items) != 1 || items[0].OfMessage == nil {
 		t.Fatalf("unexpected response input items %#v", items)
 	}
@@ -76,8 +77,8 @@ func TestResponsesInputItemsNormalizeUnknownRoleToUser(t *testing.T) {
 }
 
 func TestResponsesInputItemsSerializeToolResultsAsFunctionOutputs(t *testing.T) {
-	item := ToolResultForInvocation(ToolInvocation{Name: "read", CallID: "call_123"}, "contenido")
-	items := toResponsesInputItems([]ConversationItem{item})
+	item := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "read", CallID: "call_123"}, "contenido")
+	items := toResponsesInputItems([]provider.ConversationItem{item})
 	if len(items) != 1 {
 		t.Fatalf("expected one input item, got %#v", items)
 	}
@@ -92,7 +93,7 @@ func TestResponsesInputItemsSerializeToolResultsAsFunctionOutputs(t *testing.T) 
 }
 
 func TestResponsesInputItemsSerializeAssistantToolCalls(t *testing.T) {
-	items := toResponsesInputItems(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789"}}))
+	items := toResponsesInputItems(provider.AssistantToolCallItems([]provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789"}}))
 	if len(items) != 1 {
 		t.Fatalf("expected one input item, got %#v", items)
 	}
@@ -118,7 +119,7 @@ func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
 
 func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
-	messages := toChatMessages(assistantToolCallItems([]ToolInvocation{{Kind: InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
+	messages := toChatMessages(provider.AssistantToolCallItems([]provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
 	if len(messages) != 1 {
 		t.Fatalf("expected one chat message, got %#v", messages)
 	}
@@ -132,25 +133,23 @@ func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 }
 
 func TestToChatMessagesStructuredFlow(t *testing.T) {
-	// Test standard user message
-	messages := toChatMessages([]ConversationItem{UserText("hello")})
+	messages := toChatMessages([]provider.ConversationItem{provider.UserText("hello")})
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
 	}
-	if messages[0]["role"] != RoleUser || messages[0]["content"] != "hello" {
+	if messages[0]["role"] != provider.RoleUser || messages[0]["content"] != "hello" {
 		t.Fatalf("unexpected serialized message: %#v", messages[0])
 	}
 
-	// Test assistant tool call without raw payload
-	callItems := assistantToolCallItems([]ToolInvocation{
-		{Kind: InvokeCustomTool, Name: "grep", Arguments: json.RawMessage(`{"pattern": "func"}`), CallID: "call_abc"},
+	callItems := provider.AssistantToolCallItems([]provider.ToolInvocation{
+		{Kind: provider.InvokeCustomTool, Name: "grep", Arguments: json.RawMessage(`{"pattern": "func"}`), CallID: "call_abc"},
 	})
 	messages = toChatMessages(callItems)
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
 	}
 	msg := messages[0]
-	if msg["role"] != RoleAssistant {
+	if msg["role"] != provider.RoleAssistant {
 		t.Fatalf("expected role assistant, got %v", msg["role"])
 	}
 	if msg["content"] != "" {
@@ -169,14 +168,13 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 		t.Fatalf("unexpected function values: %#v", call["function"])
 	}
 
-	// Test tool result message (should NOT degrade to text or RoleUser)
-	resultItem := ToolResultForInvocation(ToolInvocation{Name: "grep", CallID: "call_abc"}, "found 3 matches")
-	messages = toChatMessages([]ConversationItem{resultItem})
+	resultItem := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "grep", CallID: "call_abc"}, "found 3 matches")
+	messages = toChatMessages([]provider.ConversationItem{resultItem})
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
 	}
 	msg = messages[0]
-	if msg["role"] != RoleTool {
+	if msg["role"] != provider.RoleTool {
 		t.Fatalf("expected role tool, got %v", msg["role"])
 	}
 	if msg["content"] != "found 3 matches" {
@@ -191,15 +189,14 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 }
 
 func TestBuildResponseParamsLeavesReasoningEmptyWithoutBudget(t *testing.T) {
-	params := buildResponseParams("o4-mini", "system", nil, ToolSet{}, 0)
+	params := buildResponseParams("o4-mini", "system", nil, provider.ToolSet{}, 0)
 	if params.Reasoning.Effort != "" {
 		t.Fatalf("expected empty reasoning effort without budget, got %#v", params.Reasoning)
 	}
 }
 
 func TestOpenAIClientUseChatCompletions(t *testing.T) {
-	// Preset OpenAI -> useChatCompletions is false
-	client := newOpenAIClient(config.ProviderConfig{
+	client := NewClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetOpenAI,
 		BaseURL: "https://api.openai.com/v1",
 		APIKey:  "key",
@@ -209,8 +206,7 @@ func TestOpenAIClientUseChatCompletions(t *testing.T) {
 		t.Fatal("expected useChatCompletions false for OpenAI preset")
 	}
 
-	// Preset OpenAICompatible -> useChatCompletions is true
-	clientComp := newOpenAIClient(config.ProviderConfig{
+	clientComp := NewClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetOpenAICompatible,
 		BaseURL: "http://localhost:11434/v1",
 		APIKey:  "key",
@@ -223,11 +219,20 @@ func TestOpenAIClientUseChatCompletions(t *testing.T) {
 	if !clientComp.(*openAIClient).useSDK {
 		t.Fatal("expected useSDK true when UseSDK is true in configuration")
 	}
+
+	clientLM := NewClient(config.ProviderConfig{
+		Preset:  config.ProviderPresetLMStudio,
+		BaseURL: "http://localhost:1234/v1",
+		APIKey:  "key",
+		Model:   "llama",
+	})
+	if clientLM.(*openAIClient).useChatCompletions {
+		t.Fatal("expected useChatCompletions false for LMStudio preset")
+	}
 }
 
 func TestToSDKChatMessagesAndTools(t *testing.T) {
-	// Test toSDKChatMessages with user message
-	sdkMsgs := toSDKChatMessages([]ConversationItem{UserText("hi")})
+	sdkMsgs := toSDKChatMessages([]provider.ConversationItem{provider.UserText("hi")})
 	if len(sdkMsgs) != 1 {
 		t.Fatalf("expected 1 sdk message, got %d", len(sdkMsgs))
 	}
@@ -235,9 +240,8 @@ func TestToSDKChatMessagesAndTools(t *testing.T) {
 		t.Fatalf("unexpected user message mapping: %#v", sdkMsgs[0])
 	}
 
-	// Test toSDKChatMessages with tool result
-	resultItem := ToolResultForInvocation(ToolInvocation{Name: "ls", CallID: "call_999"}, "file.go")
-	sdkMsgs = toSDKChatMessages([]ConversationItem{resultItem})
+	resultItem := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "ls", CallID: "call_999"}, "file.go")
+	sdkMsgs = toSDKChatMessages([]provider.ConversationItem{resultItem})
 	if len(sdkMsgs) != 1 {
 		t.Fatalf("expected 1 sdk message, got %d", len(sdkMsgs))
 	}
@@ -245,13 +249,12 @@ func TestToSDKChatMessagesAndTools(t *testing.T) {
 		t.Fatalf("unexpected tool message mapping: %#v", sdkMsgs[0])
 	}
 
-	// Test toSDKChatTools
-	tools := ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run command", InputHint: "command"}}}
+	tools := provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "ls", Description: "List files", InputHint: "dir"}}}
 	sdkTools := toSDKChatTools(tools)
 	if len(sdkTools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(sdkTools))
 	}
-	if sdkTools[0].OfFunction == nil || sdkTools[0].OfFunction.Function.Name != "bash" {
+	if sdkTools[0].OfFunction == nil || sdkTools[0].OfFunction.Function.Name != "ls" {
 		t.Fatalf("unexpected tool mapping: %#v", sdkTools[0])
 	}
 }

@@ -1,34 +1,47 @@
-package provider
+package anthropic
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/Hoosk/motoko/internal/config"
-	"github.com/anthropics/anthropic-sdk-go"
+	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type ioNopCloser struct {
+	io.Reader
+}
+
+func (ioNopCloser) Close() error { return nil }
+
 func TestToSDKMessagesSkipsSystemAndNormalizesUnknownRole(t *testing.T) {
-	got := toSDKMessages([]ConversationItem{{Role: RoleSystem, Content: "sys"}, {Role: "weird", Content: "hola"}, {Role: RoleAssistant, Content: "ok"}})
+	got := toSDKMessages([]provider.ConversationItem{{Role: provider.RoleSystem, Content: "sys"}, {Role: "weird", Content: "hola"}, {Role: provider.RoleAssistant, Content: "ok"}})
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
-	if got[0].Role != anthropic.MessageParamRoleUser || got[0].Content[0].OfText.Text != "hola" {
+	if got[0].Role != sdk.MessageParamRoleUser || got[0].Content[0].OfText.Text != "hola" {
 		t.Fatalf("unexpected first message: %#v", got[0])
 	}
-	if got[1].Role != anthropic.MessageParamRoleAssistant || got[1].Content[0].OfText.Text != "ok" {
+	if got[1].Role != sdk.MessageParamRoleAssistant || got[1].Content[0].OfText.Text != "ok" {
 		t.Fatalf("unexpected second message: %#v", got[1])
 	}
 }
 
 func TestResponseFromSDKJoinsTextParts(t *testing.T) {
-	sdkMsg := &anthropic.Message{
-		Content: []anthropic.ContentBlockUnion{
+	sdkMsg := &sdk.Message{
+		Content: []sdk.ContentBlockUnion{
 			{Type: "text", Text: "uno"},
 			{Type: "tool_use", ID: "call_1", Name: "bash", Input: json.RawMessage(`{"input":"ls"}`)},
 			{Type: "text", Text: "dos"},
@@ -38,9 +51,8 @@ func TestResponseFromSDKJoinsTextParts(t *testing.T) {
 	if resp.FinalText != "" {
 		t.Fatalf("expected empty final text since tool use is present, got %q", resp.FinalText)
 	}
-	// Let's test with text only
-	sdkMsgTextOnly := &anthropic.Message{
-		Content: []anthropic.ContentBlockUnion{
+	sdkMsgTextOnly := &sdk.Message{
+		Content: []sdk.ContentBlockUnion{
 			{Type: "text", Text: "uno"},
 			{Type: "text", Text: "dos"},
 		},
@@ -52,34 +64,32 @@ func TestResponseFromSDKJoinsTextParts(t *testing.T) {
 }
 
 func TestToSDKMessagesToolCalling(t *testing.T) {
-	// 1. Text message
-	messages := []ConversationItem{
-		UserText("hello"),
-		AssistantText("world"),
+	messages := []provider.ConversationItem{
+		provider.UserText("hello"),
+		provider.AssistantText("world"),
 	}
 	got := toSDKMessages(messages)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(got))
 	}
-	if got[0].Role != anthropic.MessageParamRoleUser || got[0].Content[0].OfText.Text != "hello" {
+	if got[0].Role != sdk.MessageParamRoleUser || got[0].Content[0].OfText.Text != "hello" {
 		t.Fatalf("unexpected user message: %#v", got[0])
 	}
-	if got[1].Role != anthropic.MessageParamRoleAssistant || got[1].Content[0].OfText.Text != "world" {
+	if got[1].Role != sdk.MessageParamRoleAssistant || got[1].Content[0].OfText.Text != "world" {
 		t.Fatalf("unexpected assistant message: %#v", got[1])
 	}
 
-	// 2. Assistant tool call
-	call := ToolInvocation{
-		Kind:   InvokeCustomTool,
+	call := provider.ToolInvocation{
+		Kind:   provider.InvokeCustomTool,
 		Name:   "bash",
 		Input:  "ls",
 		CallID: "call_abc",
 	}
-	messages = []ConversationItem{
-		{Role: RoleAssistant, Content: formatAssistantToolCallContent(call)},
+	messages = []provider.ConversationItem{
+		{Role: provider.RoleAssistant, Content: provider.FormatAssistantToolCallContent(call)},
 	}
 	got = toSDKMessages(messages)
-	if len(got) != 1 || got[0].Role != anthropic.MessageParamRoleAssistant {
+	if len(got) != 1 || got[0].Role != sdk.MessageParamRoleAssistant {
 		t.Fatalf("expected 1 assistant message, got %#v", got)
 	}
 	blocks := got[0].Content
@@ -91,12 +101,11 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 		t.Fatalf("unexpected tool_use block: %#v", b.OfToolUse)
 	}
 
-	// 3. Tool result
-	resultItem := ToolResultForInvocation(call, "result_text")
-	messages = []ConversationItem{resultItem}
+	resultItem := provider.ToolResultForInvocation(call, "result_text")
+	messages = []provider.ConversationItem{resultItem}
 	got = toSDKMessages(messages)
-	if len(got) != 1 || got[0].Role != anthropic.MessageParamRoleUser {
-		t.Fatalf("expected 1 user message (anthropic tool results are user messages), got %#v", got)
+	if len(got) != 1 || got[0].Role != sdk.MessageParamRoleUser {
+		t.Fatalf("expected 1 user message, got %#v", got)
 	}
 	blocks = got[0].Content
 	if len(blocks) != 1 {
@@ -127,7 +136,7 @@ func TestResponseFromSDKToolUse(t *testing.T) {
 			"output_tokens": 20
 		}
 	}`
-	var sdkMsg anthropic.Message
+	var sdkMsg sdk.Message
 	if err := json.Unmarshal([]byte(rawJSON), &sdkMsg); err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +155,8 @@ func TestResponseFromSDKToolUse(t *testing.T) {
 }
 
 func TestToSDKTools(t *testing.T) {
-	tools := ToolSet{
-		Local: []LocalToolDefinition{
+	tools := provider.ToolSet{
+		Local: []provider.LocalToolDefinition{
 			{Name: "bash", Description: "run bash cmd", InputHint: "command"},
 		},
 	}
@@ -169,7 +178,6 @@ func TestToSDKTools(t *testing.T) {
 }
 
 func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
-	// Case 1: Model supports adaptive thinking according to /v1/models response
 	var callCount int
 	httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		callCount++
@@ -201,22 +209,20 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 		}, nil
 	})}
 
-	client := newAnthropicClient(config.ProviderConfig{
+	client := NewClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetAnthropic,
 		BaseURL: "http://api.example.com",
 		APIKey:  "test-key",
 		Model:   "claude-test-model",
 	})
 	aClient := client.(*anthropicClient)
-	aClient.httpClient = httpClient // swap client transport client
-	sdkClient := anthropic.NewClient(
+	sdkClient := sdk.NewClient(
 		option.WithAPIKey(aClient.apiKey),
 		option.WithBaseURL(aClient.baseURL),
 		option.WithHTTPClient(httpClient),
 	)
 	aClient.sdkClient = &sdkClient
 
-	// First call should make an HTTP request
 	isAdaptive := aClient.checkAdaptiveThinking(context.Background())
 	if !isAdaptive {
 		t.Fatal("expected model to support adaptive thinking")
@@ -225,7 +231,6 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 		t.Fatalf("expected 1 call, got %d", callCount)
 	}
 
-	// Second call should return cached value (no HTTP request)
 	isAdaptive2 := aClient.checkAdaptiveThinking(context.Background())
 	if !isAdaptive2 {
 		t.Fatal("expected cached value to be true")
@@ -234,12 +239,11 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 		t.Fatalf("expected call count to remain 1, got %d", callCount)
 	}
 
-	// Case 2: HTTP fails, should fallback to model name check
-	clientFallback := newAnthropicClient(config.ProviderConfig{
+	clientFallback := NewClient(config.ProviderConfig{
 		Preset:  config.ProviderPresetAnthropic,
 		BaseURL: "http://api.example.com",
 		APIKey:  "test-key",
-		Model:   "claude-opus-4-7", // fallback should return true
+		Model:   "claude-opus-4-7",
 	})
 	aClientFallback := clientFallback.(*anthropicClient)
 	fallbackHTTPClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -248,7 +252,7 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 			Body:       ioNopCloser{bytes.NewBufferString("error")},
 		}, nil
 	})}
-	sdkClientFallback := anthropic.NewClient(
+	sdkClientFallback := sdk.NewClient(
 		option.WithAPIKey(aClientFallback.apiKey),
 		option.WithBaseURL(aClientFallback.baseURL),
 		option.WithHTTPClient(fallbackHTTPClient),
@@ -256,6 +260,6 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 	aClientFallback.sdkClient = &sdkClientFallback
 
 	if !aClientFallback.checkAdaptiveThinking(context.Background()) {
-		t.Fatal("expected fallback to detect adaptive thinking based on model name prefix")
+		t.Fatal("expected fallback to detect adaptive thinking")
 	}
 }

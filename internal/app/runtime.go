@@ -21,6 +21,11 @@ import (
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/updater"
+
+	_ "github.com/Hoosk/motoko/internal/provider/anthropic"
+	_ "github.com/Hoosk/motoko/internal/provider/gemini"
+	_ "github.com/Hoosk/motoko/internal/provider/lmstudio"
+	_ "github.com/Hoosk/motoko/internal/provider/openai"
 )
 
 type Mode string
@@ -100,6 +105,7 @@ type SubagentInfo struct {
 	StartedAt time.Time
 	Name      string
 	Prompt    string
+	Progress  string
 }
 
 type Runtime struct {
@@ -147,7 +153,8 @@ type AgentStreamEvent struct {
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	toolsRegistry := tools.NewRegistry()
-	cfg, _ := config.Load()
+	workspacePath, _ := os.Getwd()
+	cfg, _ := config.Load(workspacePath)
 	if cfg == nil {
 		cfg = &config.AppConfig{}
 	}
@@ -155,11 +162,10 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if len(opts) > 0 {
 		runtimeOpts = opts[0]
 	}
-	workspacePath, _ := os.Getwd()
 	workspaceID := session.WorkspaceIDFor(workspacePath)
 
 	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
-	if customAgents, err := agent.LoadAgentsFile(".agents"); err == nil && len(customAgents) > 0 {
+	if customAgents, err := agent.LoadWorkspaceAgents(workspacePath); err == nil && len(customAgents) > 0 {
 		allAgents = append(allAgents, customAgents...)
 	}
 
@@ -251,9 +257,7 @@ func (r *Runtime) SetAgentMode(name string) {
 			} else {
 				r.mode = ModePlan
 			}
-			if r.agent != nil {
-				r.agent.SetAgentOverride(a.System)
-			}
+			r.refreshAgent()
 			return
 		}
 	}
@@ -272,7 +276,43 @@ func (r *Runtime) PendingApproval() string {
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
-	return r.tools.Specs()
+	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
+	tCtx := tools.ToolContext{
+		Workspace:       r.workspaceID,
+		ActiveMode:      string(r.mode),
+		MaxOutputSize:   maxOutputSize,
+	}
+	if len(r.availableAgents) > 0 {
+		for _, a := range r.availableAgents {
+			tCtx.AvailableAgents = append(tCtx.AvailableAgents, a.Name)
+		}
+	}
+	if len(r.availableSkills) > 0 {
+		for _, s := range r.availableSkills {
+			tCtx.AvailableSkills = append(tCtx.AvailableSkills, s.Name)
+		}
+	}
+	return r.tools.Specs(tCtx)
+}
+
+func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
+	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
+	tCtx := tools.ToolContext{
+		Workspace:       r.workspaceID,
+		ActiveMode:      string(r.mode),
+		MaxOutputSize:   maxOutputSize,
+	}
+	if len(r.availableAgents) > 0 {
+		for _, a := range r.availableAgents {
+			tCtx.AvailableAgents = append(tCtx.AvailableAgents, a.Name)
+		}
+	}
+	if len(r.availableSkills) > 0 {
+		for _, s := range r.availableSkills {
+			tCtx.AvailableSkills = append(tCtx.AvailableSkills, s.Name)
+		}
+	}
+	return r.tools.Suggestions(tCtx, prefix)
 }
 
 func (r *Runtime) StartTask(ctx context.Context, command string) (string, error) {
@@ -327,11 +367,11 @@ func (r *Runtime) SemanticIndex() *semantic.Index {
 
 func (r *Runtime) ProviderSummary() string {
 	if r.config == nil {
-		return "none"
+		return valNone
 	}
 	active, ok := r.config.Active()
 	if !ok {
-		return "none"
+		return valNone
 	}
 	if strings.TrimSpace(active.Model) == "" {
 		return fmt.Sprintf("%s (%s:no-model)", active.Name, active.Preset)
@@ -394,6 +434,12 @@ func (r *Runtime) SetThinkingBudget(budget int) error {
 	active, ok := r.config.Active()
 	if !ok {
 		return fmt.Errorf("no hay provider activo")
+	}
+	if active.ContextWindow > 0 {
+		maxAllowed := active.ContextWindow / 2
+		if budget > maxAllowed {
+			budget = maxAllowed
+		}
 	}
 	active.ThinkingBudget = budget
 	r.config.UpsertProvider(active)
@@ -504,6 +550,38 @@ func (r *Runtime) refreshAgent() {
 		r.contextWindow = 0
 		return
 	}
+	
+	var aDef agent.AgentDef
+	found := false
+	for _, a := range r.availableAgents {
+		if strings.EqualFold(a.Name, r.currentAgentName) {
+			aDef = a
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Should not happen, fallback to build
+		for _, a := range r.availableAgents {
+			if strings.EqualFold(a.Name, "build") {
+				aDef = a
+				break
+			}
+		}
+	}
+
+	override, hasOverride := r.config.Agents[aDef.Name]
+	
+	// AppConfig provider override
+	if hasOverride && override.Provider != "" {
+		if p, ok := r.config.Provider(override.Provider); ok {
+			active = p
+		}
+	}
+	if hasOverride && override.Model != "" {
+		active.Model = override.Model
+	}
+
 	client, err := r.providerClient(active)
 	if err != nil {
 		r.agent = nil
@@ -512,33 +590,99 @@ func (r *Runtime) refreshAgent() {
 	}
 	r.contextWindow = active.ContextWindow
 
-	var toolsRegistry *tools.Registry
-	if strings.EqualFold(r.currentAgentName, "plan") || strings.EqualFold(r.currentAgentName, "search") {
-		toolsRegistry = r.tools.Filter(func(t tools.Tool) bool {
-			return !tools.IsWriteTool(t.Spec().Name)
-		})
-	} else {
-		toolsRegistry = r.tools
-	}
-
-	r.agent = agent.New(client, toolsRegistry)
-	r.agent.SetDebug(r.debug)
-	// Re-apply the current agent mode system prompt.
-	for _, a := range r.availableAgents {
-		if strings.EqualFold(a.Name, r.currentAgentName) {
-			r.agent.SetAgentOverride(a.System)
-			break
-		}
-	}
+	r.agent = r.buildAgentFromDef(client, aDef, override, hasOverride)
 }
 
-// ActiveSubagents returns a sorted list of currently active subagent labels.
+func (r *Runtime) buildAgentFromDef(client provider.Client, aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) *agent.Agent {
+	// Apply overrides
+	sysPrompt := aDef.System
+	if hasOverride && override.SystemPrompt != "" {
+		sysPrompt = override.SystemPrompt
+	}
+	
+	allowedTools := aDef.Permissions.AllowedTools
+	if hasOverride && len(override.ToolFilter) > 0 {
+		allowedTools = override.ToolFilter
+	}
+	
+	deniedTools := aDef.Permissions.DeniedTools
+	if hasOverride && len(override.ExcludeTools) > 0 {
+		deniedTools = override.ExcludeTools
+	}
+
+	toolsRegistry := r.tools.Filter(func(t tools.Tool) bool {
+		name := t.Spec().Name
+		
+		// 1. Check explicit allow list
+		if len(allowedTools) > 0 {
+			allowed := false
+			for _, allowedName := range allowedTools {
+				if strings.EqualFold(name, allowedName) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return false
+			}
+		}
+		
+		// 2. Check explicit deny list
+		if len(deniedTools) > 0 {
+			for _, deniedName := range deniedTools {
+				if strings.EqualFold(name, deniedName) {
+					return false
+				}
+			}
+		}
+		
+		// 3. Fallback to boolean permissions
+		if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
+			return false
+		}
+		
+		if name == "delegate" && !aDef.Permissions.AllowDelegate {
+			return false
+		}
+		
+		if name == "task" && !aDef.Permissions.AllowTask {
+			return false
+		}
+		
+		if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
+			// Actually brain_read and brain_list should be allowed even if AllowBrainWrite is false
+			if name == "brain_write" {
+				return false
+			}
+		}
+		
+		if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
+			return false
+		}
+		
+		return true
+	})
+
+	newAgent := agent.New(client, toolsRegistry)
+	newAgent.SetDebug(r.debug)
+	newAgent.SetAgentOverride(sysPrompt)
+	
+	// We can also apply Temperature, ThinkingBudget, and MaxIterations if added to agent
+	// For now we just create the agent
+	return newAgent
+}
+
+
 func (r *Runtime) ActiveSubagents() []string {
 	r.subagentsMu.Lock()
 	defer r.subagentsMu.Unlock()
 	var list []string
-	for id := range r.activeSubagents {
-		list = append(list, id)
+	for id, info := range r.activeSubagents {
+		if info.Progress != "" {
+			list = append(list, fmt.Sprintf("%s: %s", id, info.Progress))
+		} else {
+			list = append(list, id)
+		}
 	}
 	sort.Strings(list)
 	return list
@@ -549,6 +693,11 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(ctx)
 	}
+
+	// Start catalog loading in background
+	go func() {
+		_ = provider.LoadCatalog(ctx)
+	}()
 
 	// Start update check in background
 	go func() {

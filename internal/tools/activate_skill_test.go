@@ -19,7 +19,7 @@ func TestActivateSkillTool(t *testing.T) {
 	}
 
 	tool := NewActivateSkillTool(mockSkills)
-	spec := tool.Spec()
+	spec := tool.DynamicSpec(ToolContext{AvailableSkills: []string{"test-skill"}})
 
 	if spec.Name != "activate_skill" {
 		t.Errorf("expected tool name 'activate_skill', got '%s'", spec.Name)

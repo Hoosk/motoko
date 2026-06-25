@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,7 +16,7 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 		RelevantFiles:    []string{"internal/app/runtime.go [go] | symbols: RunAgent"},
 		RelevantSnippets: []string{"FILE internal/app/runtime.go\nLINES 10-20\nREASON symbol match: RunAgent\nfunc RunAgent() error {\n\treturn nil\n}"},
 	}
-	prompt := buildSystemPrompt(info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
+	prompt := buildSystemPrompt("default", info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
 	if !strings.Contains(prompt, "[Pre-extracted Relevant Snippets]:") {
 		t.Fatalf("prompt missing snippets section: %s", prompt)
 	}
@@ -28,26 +26,16 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 }
 
 func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Write mock AGENTS.md
 	agentsContent := "Rule 1: Be fast.\nRule 2: Be precise."
-	if err := os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte(agentsContent), 0644); err != nil {
-		t.Fatalf("failed to write mock AGENTS.md: %v", err)
-	}
-
-	// Write mock DESIGN.md
 	designContent := "Primary color: #00FF00\nBorder radius: 4px"
-	if err := os.WriteFile(filepath.Join(tmpDir, "DESIGN.md"), []byte(designContent), 0644); err != nil {
-		t.Fatalf("failed to write mock DESIGN.md: %v", err)
-	}
 
 	info := system.ContextInfo{
-		Workspace: "motoko",
-		Path:      tmpDir,
+		Workspace:  "motoko",
+		Guidelines: agentsContent,
+		DesignSpec: designContent,
 	}
 
-	prompt := buildSystemPrompt(info, nil, "")
+	prompt := buildSystemPrompt("default", info, nil, "Modo test: solo pruebas.")
 
 	if !strings.Contains(prompt, "AGENTS & DESIGN RULES") {
 		t.Errorf("prompt missing the operating rule alignment instruction")

@@ -1,0 +1,176 @@
+package provider
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestParseAndPopulate(t *testing.T) {
+	mockData := `{
+		"openai/gpt-4o": {
+			"id": "openai/gpt-4o",
+			"name": "GPT-4o",
+			"family": "gpt",
+			"reasoning": false,
+			"limit": {
+				"context": 128000,
+				"output": 16384
+			}
+		},
+		"google/gemini-2.5-pro": {
+			"id": "google/gemini-2.5-pro",
+			"name": "Gemini 2.5 Pro",
+			"family": "gemini",
+			"reasoning": true,
+			"limit": {
+				"context": 1048576,
+				"output": 65536
+			}
+		}
+	}`
+
+	err := parseAndPopulate([]byte(mockData))
+	if err != nil {
+		t.Fatalf("unexpected parsing error: %v", err)
+	}
+
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	if len(catalogCache) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(catalogCache))
+	}
+
+	m1, ok := catalogCache["openai/gpt-4o"]
+	if !ok {
+		t.Fatalf("model openai/gpt-4o not found in cache")
+	}
+	if m1.ContextWindow != 128000 || m1.SupportsThinking {
+		t.Fatalf("unexpected properties for openai/gpt-4o: %+v", m1)
+	}
+
+	m2, ok := catalogCache["google/gemini-2.5-pro"]
+	if !ok {
+		t.Fatalf("model google/gemini-2.5-pro not found in cache")
+	}
+	if m2.ContextWindow != 1048576 || !m2.SupportsThinking {
+		t.Fatalf("unexpected properties for google/gemini-2.5-pro: %+v", m2)
+	}
+}
+
+func TestLookupModel(t *testing.T) {
+	mockData := `{
+		"openai/gpt-4o": {
+			"id": "openai/gpt-4o",
+			"name": "GPT-4o",
+			"family": "gpt",
+			"reasoning": false,
+			"limit": {
+				"context": 128000,
+				"output": 16384
+			}
+		},
+		"google/gemini-2.5-pro": {
+			"id": "google/gemini-2.5-pro",
+			"name": "Gemini 2.5 Pro",
+			"family": "gemini",
+			"reasoning": true,
+			"limit": {
+				"context": 1048576,
+				"output": 65536
+			}
+		}
+	}`
+
+	_ = parseAndPopulate([]byte(mockData))
+
+	tests := []struct {
+		provider string
+		model    string
+		expected bool
+		context  int
+	}{
+		{"openai", "openai/gpt-4o", true, 128000},
+		{"openai", "gpt-4o", true, 128000},
+		{"gemini", "gemini-2.5-pro", true, 1048576},
+		{"google", "gemini-2.5-pro", true, 1048576},
+		{"google", "google/gemini-2.5-pro", true, 1048576},
+		{"other", "gemini-2.5-pro", true, 1048576}, // suffix match
+		{"openai", "non-existent", false, 0},
+	}
+
+	for _, tc := range tests {
+		info, ok := LookupModel(tc.provider, tc.model)
+		if ok != tc.expected {
+			t.Errorf("LookupModel(%q, %q) expected found=%t, got %t", tc.provider, tc.model, tc.expected, ok)
+		}
+		if ok && info.ContextWindow != tc.context {
+			t.Errorf("LookupModel(%q, %q) expected context=%d, got %d", tc.provider, tc.model, tc.context, info.ContextWindow)
+		}
+	}
+}
+
+func TestLoadCatalogFileCache(t *testing.T) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatalf("failed to get user cache dir: %v", err)
+	}
+	cachePath := filepath.Join(cacheDir, "motoko", "models_cache.json")
+
+	// Backup existing cache file if any
+	var backupData []byte
+	backupExists := false
+	if _, statErr := os.Stat(cachePath); statErr == nil {
+		backupData, _ = os.ReadFile(cachePath)
+		backupExists = true
+		_ = os.Remove(cachePath)
+	}
+	defer func() {
+		if backupExists {
+			_ = os.MkdirAll(filepath.Dir(cachePath), 0755)
+			_ = os.WriteFile(cachePath, backupData, 0644)
+		} else {
+			_ = os.Remove(cachePath)
+		}
+	}()
+
+	mockData := `{
+		"openai/gpt-4o-mini": {
+			"id": "openai/gpt-4o-mini",
+			"name": "GPT-4o Mini",
+			"family": "gpt",
+			"reasoning": false,
+			"limit": {
+				"context": 128000,
+				"output": 16384
+			}
+		}
+	}`
+
+	// Write cache file manually to test local load
+	_ = os.MkdirAll(filepath.Dir(cachePath), 0755)
+	if err := os.WriteFile(cachePath, []byte(mockData), 0644); err != nil {
+		t.Fatalf("failed to write test cache file: %v", err)
+	}
+
+	// Reset global state
+	catalogMu.Lock()
+	catalogLoaded = false
+	catalogCache = make(map[string]ModelInfo)
+	catalogMu.Unlock()
+
+	err = LoadCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCatalog failed: %v", err)
+	}
+
+	info, ok := LookupModel("openai", "gpt-4o-mini")
+	if !ok {
+		t.Fatalf("failed to look up gpt-4o-mini from loaded cache")
+	}
+	if info.ContextWindow != 128000 {
+		t.Fatalf("unexpected context window: %d", info.ContextWindow)
+	}
+}

@@ -145,7 +145,7 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "up", "down":
+		case keyUp, keyDown:
 			return nil
 		case "alt+up":
 			if len(m.model.Messages) > 0 {

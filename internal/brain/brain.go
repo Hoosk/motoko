@@ -229,3 +229,24 @@ func isInvalidName(name string) bool {
 	prefix := ".." + string(filepath.Separator)
 	return strings.HasPrefix(name, prefix)
 }
+
+// CopyTo copies all files from this brain to the target brain.
+func (b *Brain) CopyTo(target *Brain) error {
+	if b == nil || target == nil {
+		return nil
+	}
+	files, err := b.List()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		content, err := b.Read(f.Name)
+		if err != nil {
+			continue
+		}
+		if err := target.Write(f.Name, content); err != nil {
+			return err
+		}
+	}
+	return nil
+}

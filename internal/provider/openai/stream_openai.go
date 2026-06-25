@@ -1,4 +1,4 @@
-package provider
+package openai
 
 import (
 	"bufio"
@@ -9,25 +9,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	openai "github.com/openai/openai-go/v3"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
 var errSSEDone = errors.New("sse done")
 
-func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	if err := c.ConfigurationError(); err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 
-	// We fall back to Chat Completions if useChatCompletions is set.
 	if c.useChatCompletions {
 		if c.useSDK {
 			return c.streamChatSDK(ctx, systemPrompt, messages, tools, onDelta)
@@ -36,7 +34,15 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	}
 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
-	stream := c.sdkClient.Responses.NewStreaming(ctx, params)
+	sessionID, requestID := provider.GetTelemetry(ctx)
+	reqOpts := make([]openaioption.RequestOption, 0)
+	if sessionID != "" {
+		reqOpts = append(reqOpts, openaioption.WithHeader("X-Session-ID", sessionID))
+		if requestID != "" {
+			reqOpts = append(reqOpts, openaioption.WithHeader("X-Request-ID", requestID))
+		}
+	}
+	stream := c.sdkClient.Responses.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
 
 	var completed *responses.Response
@@ -49,8 +55,8 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 				continue
 			}
 			if onDelta != nil {
-				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
-					return Response{}, err
+				if err := onDelta(provider.Delta{ReasoningContent: delta}); err != nil {
+					return provider.Response{}, err
 				}
 			}
 		case "response.reasoning_text.delta":
@@ -59,8 +65,8 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 				continue
 			}
 			if onDelta != nil {
-				if err := onDelta(Delta{ReasoningContent: delta}); err != nil {
-					return Response{}, err
+				if err := onDelta(provider.Delta{ReasoningContent: delta}); err != nil {
+					return provider.Response{}, err
 				}
 			}
 		case "response.output_text.delta":
@@ -69,8 +75,8 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 				continue
 			}
 			if onDelta != nil {
-				if err := onDelta(Delta{Content: delta}); err != nil {
-					return Response{}, err
+				if err := onDelta(provider.Delta{Content: delta}); err != nil {
+					return provider.Response{}, err
 				}
 			}
 		case "response.completed":
@@ -79,17 +85,17 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 	if completed != nil {
 		return responseFromOpenAI(completed), nil
 	}
-	return Response{}, nil
+	return provider.Response{}, nil
 }
 
-func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	var raw strings.Builder
-	usage := Usage{}
+	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
 
@@ -107,7 +113,14 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		payload["parallel_tool_calls"] = false
 	}
 
-	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := provider.GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
@@ -122,7 +135,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 			if delta.Content != "" || delta.ReasoningContent != "" {
 				raw.WriteString(delta.Content)
 				if onDelta != nil {
-					if err := onDelta(Delta{
+					if err := onDelta(provider.Delta{
 						Content:          delta.Content,
 						ReasoningContent: delta.ReasoningContent,
 					}); err != nil {
@@ -138,7 +151,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		return nil
 	})
 	if err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 	return responseFromChatCompletion(chatCompletionResponse{
 		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
@@ -146,11 +159,17 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
 			TotalTokens:  usage.TotalTokens,
+			PromptTokensDetails: &promptTokensDetails{
+				CachedTokens: usage.CacheReadInputTokens,
+			},
+			CompletionTokensDetails: &completionTokensDetails{
+				ReasoningTokens: usage.ReasoningTokens,
+			},
 		},
 	}), nil
 }
 
-func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
+func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	sdkMessages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage(systemPrompt),
 	}
@@ -169,7 +188,14 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		params.ParallelToolCalls = param.NewOpt(false)
 	}
 
-	headers := buildAuthHeaders(c.baseURL, c.apiKey)
+	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	sessionID, requestID := provider.GetTelemetry(ctx)
+	if sessionID != "" {
+		headers["X-Session-ID"] = sessionID
+		if requestID != "" {
+			headers["X-Request-ID"] = requestID
+		}
+	}
 	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
@@ -179,7 +205,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	defer func() { _ = stream.Close() }()
 
 	var raw strings.Builder
-	usage := Usage{}
+	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
 
@@ -195,8 +221,8 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 			if text != "" {
 				raw.WriteString(text)
 				if onDelta != nil {
-					if err := onDelta(Delta{Content: text}); err != nil {
-						return Response{}, err
+					if err := onDelta(provider.Delta{Content: text}); err != nil {
+						return provider.Response{}, err
 					}
 				}
 			}
@@ -208,10 +234,12 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 			usage.InputTokens = int(chunk.Usage.PromptTokens)
 			usage.OutputTokens = int(chunk.Usage.CompletionTokens)
 			usage.TotalTokens = int(chunk.Usage.TotalTokens)
+			usage.CacheReadInputTokens = int(chunk.Usage.PromptTokensDetails.CachedTokens)
+			usage.ReasoningTokens = int(chunk.Usage.CompletionTokensDetails.ReasoningTokens)
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return Response{}, err
+		return provider.Response{}, err
 	}
 
 	return responseFromChatCompletion(chatCompletionResponse{
@@ -220,163 +248,14 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
 			TotalTokens:  usage.TotalTokens,
-		},
-	}), nil
-}
-
-func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error) {
-	if err := c.ConfigurationError(); err != nil {
-		return Response{}, err
-	}
-	maxTokens := 4096
-	if c.thinkingBudget > 0 {
-		if c.thinkingBudget >= maxTokens {
-			maxTokens = c.thinkingBudget + 1024
-		}
-	}
-
-	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
-		MaxTokens: int64(maxTokens),
-		System: []anthropic.TextBlockParam{
-			{
-				Text:         systemPrompt,
-				CacheControl: anthropic.NewCacheControlEphemeralParam(),
+			PromptTokensDetails: &promptTokensDetails{
+				CachedTokens: usage.CacheReadInputTokens,
+			},
+			CompletionTokensDetails: &completionTokensDetails{
+				ReasoningTokens: usage.ReasoningTokens,
 			},
 		},
-		Messages: toSDKMessages(messages),
-	}
-
-	if sdkTools := toSDKTools(tools); len(sdkTools) > 0 {
-		params.Tools = sdkTools
-	}
-
-	if c.thinkingBudget > 0 {
-		params.OutputConfig = anthropic.OutputConfigParam{
-			Effort: BudgetToAnthropicEffort(c.thinkingBudget),
-		}
-		if c.checkAdaptiveThinking(ctx) {
-			params.Thinking = anthropic.ThinkingConfigParamUnion{
-				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
-					Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
-				},
-			}
-		} else {
-			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(c.thinkingBudget))
-		}
-	}
-
-	stream := c.sdkClient.Messages.NewStreaming(ctx, params, option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"))
-	defer func() { _ = stream.Close() }()
-
-	var raw strings.Builder
-	usage := Usage{}
-
-	type streamedToolCall struct {
-		id           string
-		name         string
-		partialInput strings.Builder
-	}
-	toolCalls := make(map[int]*streamedToolCall)
-
-	for stream.Next() {
-		event := stream.Current()
-		switch event.Type {
-		case "message_start":
-			msgEvent := event.AsMessageStart()
-			usage.InputTokens = int(msgEvent.Message.Usage.InputTokens)
-
-		case "content_block_start":
-			blockEvent := event.AsContentBlockStart()
-			if blockEvent.ContentBlock.Type == "tool_use" {
-				toolCalls[int(blockEvent.Index)] = &streamedToolCall{
-					id:   blockEvent.ContentBlock.ID,
-					name: blockEvent.ContentBlock.Name,
-				}
-			}
-
-		case "content_block_delta":
-			deltaEvent := event.AsContentBlockDelta()
-			switch d := deltaEvent.Delta.AsAny().(type) {
-			case anthropic.TextDelta:
-				if d.Text != "" {
-					raw.WriteString(d.Text)
-					if onDelta != nil {
-						if err := onDelta(Delta{Content: d.Text}); err != nil {
-							return Response{}, err
-						}
-					}
-				}
-			case anthropic.ThinkingDelta:
-				if d.Thinking != "" {
-					if onDelta != nil {
-						if err := onDelta(Delta{ReasoningContent: d.Thinking}); err != nil {
-							return Response{}, err
-						}
-					}
-				}
-			case anthropic.InputJSONDelta:
-				if tc, ok := toolCalls[int(deltaEvent.Index)]; ok {
-					tc.partialInput.WriteString(d.PartialJSON)
-				}
-			}
-
-		case "message_delta":
-			msgDelta := event.AsMessageDelta()
-			if msgDelta.Usage.OutputTokens > 0 {
-				usage.OutputTokens = int(msgDelta.Usage.OutputTokens)
-				usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-			}
-		}
-	}
-
-	if err := stream.Err(); err != nil {
-		return Response{}, err
-	}
-
-	if usage.TotalTokens == 0 {
-		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-	}
-
-	keys := make([]int, 0, len(toolCalls))
-	for k := range toolCalls {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-
-	var pendingCalls []ToolInvocation
-	for _, k := range keys {
-		tc := toolCalls[k]
-		rawInput := tc.partialInput.String()
-		var parsed struct {
-			Input string `json:"input"`
-		}
-		var inputStr string
-		if err := json.Unmarshal([]byte(rawInput), &parsed); err == nil {
-			inputStr = parsed.Input
-		} else {
-			inputStr = rawInput
-		}
-		pendingCalls = append(pendingCalls, ToolInvocation{
-			Kind:      InvokeCustomTool,
-			Name:      strings.TrimSpace(tc.name),
-			Input:     strings.TrimSpace(inputStr),
-			Arguments: json.RawMessage(rawInput),
-			CallID:    strings.TrimSpace(tc.id),
-		})
-	}
-
-	finalText := strings.TrimSpace(raw.String())
-	result := Response{FinalText: finalText, Usage: usage}
-	if finalText != "" {
-		result.OutputItems = []ConversationItem{AssistantText(finalText)}
-	}
-	result.PendingCalls = pendingCalls
-	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, assistantToolCallItems(result.PendingCalls)...)
-		result.FinalText = ""
-	}
-	return result, nil
+	}), nil
 }
 
 func postJSONStream(ctx context.Context, client *http.Client, url string, body any, headers map[string]string, onData func(string) error) error {

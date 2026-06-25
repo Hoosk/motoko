@@ -3,10 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
@@ -25,12 +28,19 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 	priorHistory := []provider.ConversationItem(nil)
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
+		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
+	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.Run(ctx, info, input, priorHistory)
 	if err != nil {
 		return result, err
 	}
 	r.persistTurn(result)
+	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
+		go r.generateTitle(context.Background(), input, result.Assistant)
+	}
 	return result, r.maybeAutoCompact(ctx, nil)
 }
 
@@ -43,10 +53,13 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
-	firstTurn := r.currentSession == nil || len(r.currentSession.History) == 0
 	if r.currentSession != nil {
 		priorHistory = append(priorHistory, r.currentSession.History...)
+		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
 	}
+	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
 			return nil
@@ -62,7 +75,7 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 		return result, err
 	}
 	r.persistTurn(result)
-	if firstTurn {
+	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
 		go r.generateTitle(context.Background(), input, result.Assistant)
 	}
 	if err := r.maybeAutoCompact(ctx, onEvent); err != nil {
@@ -72,17 +85,24 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 }
 
 func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
-	if r.brain != nil {
+	info.ContextWindow = r.contextWindow
+
+	br := tools.GetBrain(ctx)
+	if br == nil {
+		br = r.brain
+	}
+
+	if br != nil {
 		var sb strings.Builder
-		sb.WriteString(r.brain.Summary())
-		if r.brain.Exists("plan") {
-			if plan := r.brain.PlanSummary(); plan != "" {
+		sb.WriteString(br.Summary())
+		if br.Exists("plan") {
+			if plan := br.PlanSummary(); plan != "" {
 				sb.WriteString("\n\n[plan.md]:\n")
 				sb.WriteString(plan)
 			}
 		}
-		if r.brain.Exists("tasks") {
-			if tasks := r.brain.TasksSummary(); tasks != "" {
+		if br.Exists("tasks") {
+			if tasks := br.TasksSummary(); tasks != "" {
 				sb.WriteString("\n\n[tasks.md]:\n")
 				sb.WriteString(tasks)
 			}
@@ -97,6 +117,13 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 				Name:        s.Name,
 				Description: s.Description,
 			}
+		}
+	}
+
+	if len(r.availableAgents) > 0 {
+		info.AvailableAgents = make([]string, len(r.availableAgents))
+		for i, a := range r.availableAgents {
+			info.AvailableAgents[i] = a.Name
 		}
 	}
 
@@ -125,12 +152,15 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		return info
 	}
 
-	relevant := snapshot.RelevantFiles(input, 4)
+	// Dynamic scaling of semantic context injection based on the context window
+	limits := system.GetSemanticLimits(r.contextWindow)
+
+	relevant := snapshot.RelevantFiles(input, limits.NumFiles)
 	info.RelevantFiles = make([]string, 0, len(relevant))
 	for _, file := range relevant {
 		info.RelevantFiles = append(info.RelevantFiles, file.Descriptor())
 	}
-	snippets := snapshot.RelevantSnippets(input, 3, 180)
+	snippets := snapshot.RelevantSnippets(input, limits.NumSnippets, limits.SnippetLines)
 	info.RelevantSnippets = make([]string, 0, len(snippets))
 	for _, snippet := range snippets {
 		info.RelevantSnippets = append(info.RelevantSnippets, snippet.Descriptor())
@@ -147,7 +177,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 			info.RelevantFiles = append([]string{file.Descriptor()}, info.RelevantFiles...)
 			content := string(file.Content)
 			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
-			limit := min(120, len(lines))
+			limit := min(limits.ExplicitLimit, len(lines))
 			var numbered []string
 			for i := 0; i < limit; i++ {
 				numbered = append(numbered, fmt.Sprintf("%d: %s", i+1, lines[i]))
@@ -157,36 +187,34 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 		}
 	}
 	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets))
+	
+	if info.Path != "" {
+		agentsPath := filepath.Join(info.Path, "AGENTS.md")
+		if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
+			info.Guidelines = string(data)
+		}
+
+		designPath := filepath.Join(info.Path, "DESIGN.md")
+		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
+			info.DesignSpec = string(data)
+		}
+		info.ActiveMode = r.currentAgentName
+	}
+	
 	return info
 }
 
-func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
+func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
 	active, ok := r.config.Active()
 	if !ok {
 		return nil, fmt.Errorf("no hay provider activo configurado")
 	}
-	client, err := r.providerClient(active)
-	if err != nil {
-		return nil, err
-	}
 
-	var toolsRegistry *tools.Registry
-	if strings.EqualFold(name, "build") {
-		toolsRegistry = r.tools
-	} else {
-		// Filter out write tools for plan, search, and other subagents
-		toolsRegistry = r.tools.Filter(func(t tools.Tool) bool {
-			return !tools.IsWriteTool(t.Spec().Name)
-		})
-	}
-
-	sub := agent.New(client, toolsRegistry)
-	sub.SetDebug(r.debug)
-
+	var aDef agent.AgentDef
 	found := false
 	for _, a := range r.availableAgents {
 		if strings.EqualFold(a.Name, name) {
-			sub.SetAgentOverride(a.System)
+			aDef = a
 			found = true
 			break
 		}
@@ -195,18 +223,60 @@ func (r *Runtime) createSubagent(name string) (*agent.Agent, error) {
 		return nil, fmt.Errorf("agente desconocido: %s", name)
 	}
 
-	return sub, nil
+	override := r.config.Agents[aDef.Name]
+	
+	hasOverride := true
+	if len(cfg.ToolFilter) > 0 {
+		override.ToolFilter = append(override.ToolFilter, cfg.ToolFilter...)
+	}
+	if !cfg.AllowDelegate {
+		override.ExcludeTools = append(override.ExcludeTools, "delegate")
+	}
+	if cfg.MaxIterations > 0 {
+		override.MaxIterations = &cfg.MaxIterations
+	}
+
+	// AppConfig provider override
+	if hasOverride && override.Provider != "" {
+		if p, ok := r.config.Provider(override.Provider); ok {
+			active = p
+		}
+	}
+	if hasOverride && override.Model != "" {
+		active.Model = override.Model
+	}
+
+	client, err := r.providerClient(active)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildAgentFromDef(client, aDef, override, hasOverride), nil
 }
 
-func (r *Runtime) RunSubagent(ctx context.Context, name, prompt string) (string, error) {
+type subagentDepthKey struct{}
+
+func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
+	currentDepth := 0
+	if v, ok := ctx.Value(subagentDepthKey{}).(int); ok {
+		currentDepth = v
+	}
+	maxDepth := cfg.MaxDepth
+	if maxDepth <= 0 {
+		maxDepth = 2 // default max depth
+	}
+	if currentDepth >= maxDepth {
+		return "", fmt.Errorf("se alcanzó la profundidad máxima de delegación (%d)", maxDepth)
+	}
+
 	r.subagentsMu.Lock()
 	if r.activeSubagents == nil {
 		r.activeSubagents = make(map[string]*SubagentInfo)
 	}
-	id := fmt.Sprintf("%s-%d", name, len(r.activeSubagents)+1)
+	id := fmt.Sprintf("%s-%d", cfg.Mode, len(r.activeSubagents)+1)
 	r.activeSubagents[id] = &SubagentInfo{
-		Name:      name,
-		Prompt:    prompt,
+		Name:      cfg.Mode,
+		Prompt:    cfg.Task,
 		StartedAt: time.Now(),
 	}
 	r.subagentsMu.Unlock()
@@ -217,19 +287,54 @@ func (r *Runtime) RunSubagent(ctx context.Context, name, prompt string) (string,
 		r.subagentsMu.Unlock()
 	}()
 
-	sub, err := r.createSubagent(name)
+	subSessionID := fmt.Sprintf("%s-%s", r.currentSession.ID, id)
+	subBrain, err := brain.New(r.workspaceID, subSessionID)
 	if err != nil {
 		return "", err
 	}
 
+	if cfg.InheritBrain && r.brain != nil {
+		if copyErr := r.brain.CopyTo(subBrain); copyErr != nil {
+			return "", copyErr
+		}
+	}
+
+	sub, err := r.createSubagent(cfg.Mode, cfg)
+	if err != nil {
+		return "", err
+	}
+
+	subCtx := tools.WithBrain(ctx, subBrain)
+	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(r.contextWindow))
+	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
+	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
+	subCtx = provider.WithTelemetry(subCtx, subSessionID, reqID)
+	
 	info := r.GetContextInfo()
-	info = r.enrichContext(ctx, info, prompt)
+	info = r.enrichContext(subCtx, info, cfg.Task)
 
-	res, err := sub.Run(ctx, info, prompt, nil)
+	res, err := sub.RunStream(subCtx, info, cfg.Task, nil, func(event agent.StreamEvent) error {
+		if event.Kind == "tool_start" || event.Kind == "content" {
+			r.subagentsMu.Lock()
+			if subInfo, ok := r.activeSubagents[id]; ok {
+				if event.Title != "" {
+					subInfo.Progress = event.Title
+				}
+			}
+			r.subagentsMu.Unlock()
+			if cfg.ProgressChan != nil && event.Title != "" {
+				select {
+				case cfg.ProgressChan <- fmt.Sprintf("[%s] %s", cfg.Mode, event.Title):
+				default:
+				}
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
 
-	tracelog.Logf("subagent %s finished usage_in=%d usage_out=%d total=%d", name, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens)
+	tracelog.Logf("subagent %s finished usage_in=%d usage_out=%d total=%d", cfg.Mode, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.TotalTokens)
 	return res.Assistant, nil
 }

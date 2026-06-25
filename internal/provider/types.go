@@ -11,6 +11,24 @@ const (
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
 	RoleTool      = "tool"
+
+	schemaInput                = "input"
+	schemaDescription          = "description"
+	schemaObject               = "object"
+	schemaProperties           = "properties"
+	schemaRequired             = "required"
+	schemaAdditionalProperties = "additionalProperties"
+	schemaString               = "string"
+
+	keyRole     = "role"
+	schemaType  = "type"
+	keyModel    = "model"
+	keyContent  = "content"
+	keyFunction = "function"
+	keyName     = "name"
+	valHigh     = "high"
+	valMedium   = "medium"
+	valLow      = "low"
 )
 
 const (
@@ -52,6 +70,10 @@ type Usage struct {
 	InputTokens  int
 	OutputTokens int
 	TotalTokens  int
+
+	ReasoningTokens       int
+	CacheReadInputTokens  int
+	CacheWriteInputTokens int
 }
 
 type Message struct {
@@ -84,7 +106,7 @@ func ToolResultForInvocation(call ToolInvocation, output string) ConversationIte
 	}
 	return ConversationItem{
 		Role:    RoleTool,
-		Content: formatToolResultContent(call, payload),
+		Content: FormatToolResultContent(call, payload),
 	}
 }
 
@@ -123,9 +145,33 @@ type BatchClient interface {
 
 type Client interface {
 	Configured() bool
+	ProviderKind() string
 	Complete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet) (Response, error)
 	StreamComplete(ctx context.Context, systemPrompt string, messages []ConversationItem, tools ToolSet, onDelta func(Delta) error) (Response, error)
 	Summary() string
 	ListModels(ctx context.Context) ([]ModelInfo, error)
 	GetModel(ctx context.Context, model string) (ModelInfo, error)
+}
+
+type telemetryKey string
+
+const (
+	sessionIDKey telemetryKey = "session_id"
+	requestIDKey telemetryKey = "request_id"
+)
+
+func WithTelemetry(ctx context.Context, sessionID, requestID string) context.Context {
+	if sessionID != "" {
+		ctx = context.WithValue(ctx, sessionIDKey, sessionID)
+	}
+	if requestID != "" {
+		ctx = context.WithValue(ctx, requestIDKey, requestID)
+	}
+	return ctx
+}
+
+func GetTelemetry(ctx context.Context) (string, string) {
+	sessionID, _ := ctx.Value(sessionIDKey).(string)
+	requestID, _ := ctx.Value(requestIDKey).(string)
+	return sessionID, requestID
 }

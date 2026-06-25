@@ -26,6 +26,13 @@ type Session struct {
 	UpdatedAt       time.Time                   `json:"updated_at"`
 	History         []provider.ConversationItem `json:"history,omitempty"`
 	LastInputTokens int                         `json:"last_input_tokens,omitempty"`
+	
+	TotalInputTokens      int                         `json:"total_input_tokens,omitempty"`
+	TotalOutputTokens     int                         `json:"total_output_tokens,omitempty"`
+	TotalTokens           int                         `json:"total_tokens,omitempty"`
+	TotalReasoningTokens  int                         `json:"total_reasoning_tokens,omitempty"`
+	TotalCacheReadTokens  int                         `json:"total_cache_read_tokens,omitempty"`
+	TotalCacheWriteTokens int                         `json:"total_cache_write_tokens,omitempty"`
 }
 
 func WorkspaceIDFor(path string) string {
@@ -41,7 +48,7 @@ func New(workspaceID, workspacePath string) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		ID:          newSessionID(now),
-		Title:       "Nueva sesion",
+		Title:       "New session",
 		WorkspaceID: strings.TrimSpace(workspaceID),
 		Workspace:   strings.TrimSpace(workspacePath),
 		CreatedAt:   now,
@@ -57,7 +64,7 @@ func (s *Session) Save() error {
 		s.ID = newSessionID(time.Now().UTC())
 	}
 	if strings.TrimSpace(s.Title) == "" {
-		s.Title = "Nueva sesion"
+		s.Title = "New session"
 	}
 	if strings.TrimSpace(s.WorkspaceID) == "" {
 		return fmt.Errorf("workspace_id vacio")

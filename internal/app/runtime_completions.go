@@ -140,12 +140,12 @@ func (r *Runtime) Completions(input string) []string {
 		return commandCompletions(parts[0])
 	}
 
-	if strings.EqualFold(parts[0], "tool") {
+	if strings.EqualFold(parts[0], cmdTool) {
 		prefix := ""
 		if len(parts) > 1 {
 			prefix = parts[1]
 		}
-		matches := r.tools.Suggestions(prefix)
+		matches := r.ToolSuggestions(prefix)
 		result := make([]string, 0, len(matches))
 		for _, spec := range matches {
 			result = append(result, "/tool "+spec.Usage)
@@ -204,7 +204,7 @@ func (r *Runtime) cacheProviderModels(providerName string, models []string) {
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", "clear", "compact", "mode", "plan", "build", "agent", "shell", "chat", "status", "debug", "trace", "context", "provider", "models", "sessions", "tools", "tool", "approve", "deny"}
+	commands := []string{"help", cmdClear, "compact", "mode", string(ModePlan), string(ModeBuild), "agent", "shell", "chat", cmdStatus, "debug", "trace", "context", "provider", "models", "sessions", "tools", cmdTool, "approve", "deny", "metrics"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {

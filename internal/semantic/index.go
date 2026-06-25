@@ -119,21 +119,21 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		if infoErr != nil || info.Size() > maxIndexedFileSize {
 			return nil
 		}
-		content, err := os.ReadFile(path)
-		if err != nil {
+		fileContent, readErr := os.ReadFile(path)
+		if readErr != nil {
 			return nil
 		}
 		lang, langName := languageForPath(rel)
-		symbols, imports, exports := extractSymbolsAndDeps(content, lang, langName)
+		symbols, imports, exports := extractSymbolsAndDeps(fileContent, lang, langName)
 		summary := FileSummary{
 			Path:     rel,
 			Language: langName,
-			Lines:    strings.Count(string(content), "\n") + 1,
+			Lines:    strings.Count(string(fileContent), "\n") + 1,
 			Changed:  changedMap[rel],
 			Symbols:  symbols,
 			Imports:  imports,
 			Exports:  exports,
-			Content:  content,
+			Content:  fileContent,
 		}
 		snapshot.Files = append(snapshot.Files, summary)
 		snapshot.LanguageCounts[langName]++

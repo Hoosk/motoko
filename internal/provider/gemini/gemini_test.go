@@ -1,16 +1,18 @@
-package provider
+package gemini
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/provider"
 )
 
 func TestToGenAIContentUserAssistantFlow(t *testing.T) {
-	messages := []ConversationItem{
-		UserText("hello"),
-		AssistantText("hi there"),
+	messages := []provider.ConversationItem{
+		provider.UserText("hello"),
+		provider.AssistantText("hi there"),
 	}
 
 	contents := toGenAIContent(messages)
@@ -28,15 +30,13 @@ func TestToGenAIContentUserAssistantFlow(t *testing.T) {
 }
 
 func TestToGenAIContentConsecutiveMessagesAndSnakeCaseSignature(t *testing.T) {
-	// Test consecutive assistant messages are merged
-	messages := []ConversationItem{
-		UserText("hello"),
-		AssistantText("let me think"),
-		// Tool call with snake_case thought_signature
+	messages := []provider.ConversationItem{
+		provider.UserText("hello"),
+		provider.AssistantText("let me think"),
 		{
-			Role: RoleAssistant,
-			Content: formatAssistantToolCallContent(ToolInvocation{
-				Kind:      InvokeCustomTool,
+			Role: provider.RoleAssistant,
+			Content: provider.FormatAssistantToolCallContent(provider.ToolInvocation{
+				Kind:      provider.InvokeCustomTool,
 				Name:      "bash",
 				Arguments: json.RawMessage(`{"input":"ls"}`),
 				CallID:    "call_123",
@@ -50,12 +50,10 @@ func TestToGenAIContentConsecutiveMessagesAndSnakeCaseSignature(t *testing.T) {
 		t.Fatalf("expected 2 content items due to role grouping, got %d", len(contents))
 	}
 
-	// First: user message
 	if contents[0].Role != "user" || len(contents[0].Parts) != 1 || contents[0].Parts[0].Text != "hello" {
 		t.Fatalf("unexpected first user content: %#v", contents[0])
 	}
 
-	// Second: model message (merged assistant text + assistant tool call)
 	modelContent := contents[1]
 	if modelContent.Role != "model" {
 		t.Fatalf("expected role model, got %s", modelContent.Role)
@@ -64,12 +62,10 @@ func TestToGenAIContentConsecutiveMessagesAndSnakeCaseSignature(t *testing.T) {
 		t.Fatalf("expected 2 parts in model content, got %d", len(modelContent.Parts))
 	}
 
-	// Part 0: Text
 	if modelContent.Parts[0].Text != "let me think" {
 		t.Fatalf("expected text part 'let me think', got: %q", modelContent.Parts[0].Text)
 	}
 
-	// Part 1: FunctionCall (with decoded thought signature)
 	fnCallPart := modelContent.Parts[1]
 	if fnCallPart.FunctionCall == nil || fnCallPart.FunctionCall.Name != "bash" {
 		t.Fatalf("expected function call part, got: %#v", fnCallPart)
@@ -81,9 +77,8 @@ func TestToGenAIContentConsecutiveMessagesAndSnakeCaseSignature(t *testing.T) {
 }
 
 func TestToGenAIContentToolCallsAndResponses(t *testing.T) {
-	// 1. Test assistant tool call mapping
-	callItems := assistantToolCallItems([]ToolInvocation{
-		{Kind: InvokeCustomTool, Name: "bash", Arguments: json.RawMessage(`{"input":"ls"}`), CallID: "call_123"},
+	callItems := provider.AssistantToolCallItems([]provider.ToolInvocation{
+		{Kind: provider.InvokeCustomTool, Name: "bash", Arguments: json.RawMessage(`{"input":"ls"}`), CallID: "call_123"},
 	})
 	contents := toGenAIContent(callItems)
 	if len(contents) != 1 {
@@ -98,9 +93,8 @@ func TestToGenAIContentToolCallsAndResponses(t *testing.T) {
 		t.Fatalf("unexpected function call properties: %#v", fnCall)
 	}
 
-	// 2. Test tool response mapping
-	resultItem := ToolResultForInvocation(ToolInvocation{Name: "bash", CallID: "call_123"}, "main.go")
-	contents = toGenAIContent([]ConversationItem{resultItem})
+	resultItem := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "bash", CallID: "call_123"}, "main.go")
+	contents = toGenAIContent([]provider.ConversationItem{resultItem})
 	if len(contents) != 1 {
 		t.Fatalf("expected 1 content item, got %d", len(contents))
 	}
@@ -123,8 +117,8 @@ func TestBuildGenerateContentConfigTools(t *testing.T) {
 		supportsThinking:    true,
 	}
 
-	tools := ToolSet{Local: []LocalToolDefinition{{Name: "bash", Description: "Run command"}}}
-	genaiConfig := client.buildGenerateContentConfig("system instruction", tools)
+	tools := provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run command"}}}
+	genaiConfig := client.buildGenerateContentConfig(context.Background(), "system instruction", tools)
 
 	if genaiConfig.SystemInstruction == nil || genaiConfig.SystemInstruction.Parts[0].Text != "system instruction" {
 		t.Fatalf("unexpected system instruction: %#v", genaiConfig.SystemInstruction)
@@ -140,12 +134,10 @@ func TestBuildGenerateContentConfigTools(t *testing.T) {
 		t.Fatalf("expected ThinkingLevel to be empty, got: %q", genaiConfig.ThinkingConfig.ThinkingLevel)
 	}
 
-	// Should have 3 tools: GoogleSearch, CodeExecution, and the function declarations tool
 	if len(genaiConfig.Tools) != 3 {
 		t.Fatalf("expected 3 tools, got %d", len(genaiConfig.Tools))
 	}
 
-	// Check if GoogleSearch is present
 	var hasSearch, hasCode, hasFunc bool
 	for _, tool := range genaiConfig.Tools {
 		if tool.GoogleSearch != nil {
@@ -174,7 +166,7 @@ func TestNewGeminiClientInitializesFields(t *testing.T) {
 		EnableCodeExecution: true,
 	}
 
-	client := newGeminiClient(cfg)
+	client := NewClient(cfg)
 	gClient, ok := client.(*geminiClient)
 	if !ok {
 		t.Fatalf("expected *geminiClient, got %T", client)
@@ -192,7 +184,7 @@ func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 		supportsThinking: true,
 	}
 
-	genaiConfig := client.buildGenerateContentConfig("instruction", ToolSet{})
+	genaiConfig := client.buildGenerateContentConfig(context.Background(), "instruction", provider.ToolSet{})
 	if genaiConfig.ThinkingConfig == nil {
 		t.Fatalf("expected ThinkingConfig to be set")
 	}
@@ -211,7 +203,7 @@ func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 }
 
 func TestGeminiClientConfiguredWithoutBaseURL(t *testing.T) {
-	client, err := NewClient(config.ProviderConfig{Preset: config.ProviderPresetGemini, APIKey: "k", Model: "gemini-3.5-flash"})
+	client, err := provider.NewClient(config.ProviderConfig{Preset: config.ProviderPresetGemini, APIKey: "k", Model: "gemini-3.5-flash"})
 	if err != nil {
 		t.Fatal(err)
 	}

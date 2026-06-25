@@ -9,7 +9,7 @@ import (
 
 const assistantToolCallPrefix = "__motoko_tool_call__"
 
-func responseFromText(content string, usage Usage) Response {
+func ResponseFromText(content string, usage Usage) Response {
 	message := strings.TrimSpace(content)
 	resp := Response{FinalText: message, Usage: usage}
 	if message != "" {
@@ -18,7 +18,7 @@ func responseFromText(content string, usage Usage) Response {
 	return resp
 }
 
-func normalizeConversationRole(role string) string {
+func NormalizeConversationRole(role string) string {
 	switch strings.TrimSpace(strings.ToLower(role)) {
 	case RoleAssistant:
 		return RoleAssistant
@@ -29,7 +29,7 @@ func normalizeConversationRole(role string) string {
 	}
 }
 
-func formatToolResultContent(call ToolInvocation, output string) string {
+func FormatToolResultContent(call ToolInvocation, output string) string {
 	parts := []string{fmt.Sprintf("tool_name=%s", strings.TrimSpace(call.Name))}
 	if call.CallID != "" {
 		parts = append(parts, fmt.Sprintf("call_id=%s", strings.TrimSpace(call.CallID)))
@@ -112,7 +112,7 @@ func ParseToolResultContent(content string) (ToolInvocation, string) {
 	return parseToolResultContent(content)
 }
 
-func formatAssistantToolCallContent(call ToolInvocation) string {
+func FormatAssistantToolCallContent(call ToolInvocation) string {
 	parts := []string{assistantToolCallPrefix, fmt.Sprintf("tool_name=%s", strings.TrimSpace(call.Name))}
 	if call.CallID != "" {
 		parts = append(parts, fmt.Sprintf("call_id=%s", strings.TrimSpace(call.CallID)))
@@ -166,18 +166,18 @@ func ParseAssistantToolCallContent(content string) (ToolInvocation, bool) {
 	return parseAssistantToolCallContent(content)
 }
 
-func assistantToolCallItems(calls []ToolInvocation) []ConversationItem {
+func AssistantToolCallItems(calls []ToolInvocation) []ConversationItem {
 	if len(calls) == 0 {
 		return nil
 	}
 	items := make([]ConversationItem, 0, len(calls))
 	for _, call := range calls {
-		items = append(items, ConversationItem{Role: RoleAssistant, Content: formatAssistantToolCallContent(call)})
+		items = append(items, ConversationItem{Role: RoleAssistant, Content: FormatAssistantToolCallContent(call)})
 	}
 	return items
 }
 
-func assistantToolCallArguments(call ToolInvocation) string {
+func AssistantToolCallArguments(call ToolInvocation) string {
 	if arguments := strings.TrimSpace(string(call.Arguments)); arguments != "" {
 		return arguments
 	}
@@ -188,4 +188,19 @@ func assistantToolCallArguments(call ToolInvocation) string {
 		return `{}`
 	}
 	return string(payload)
+}
+
+func ToolInputDescription(tool LocalToolDefinition) string {
+	hint := strings.TrimSpace(tool.InputHint)
+	if hint != "" {
+		prefix := tool.Name + " "
+		if strings.HasPrefix(strings.ToLower(hint), strings.ToLower(prefix)) {
+			hint = strings.TrimSpace(hint[len(prefix):])
+		}
+		return hint
+	}
+	if desc := strings.TrimSpace(tool.Description); desc != "" {
+		return desc
+	}
+	return "Raw text input for the tool."
 }

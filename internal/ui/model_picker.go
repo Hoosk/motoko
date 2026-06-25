@@ -28,11 +28,11 @@ func (p *modelPickerState) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "esc":
+		case keyEsc:
 			p.active = false
 			return nil
 
-		case "up", "ctrl+p":
+		case keyUp, keyCtrlP:
 			if len(p.models) > 0 {
 				p.index--
 				if p.index < 0 {
@@ -41,13 +41,13 @@ func (p *modelPickerState) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
-		case "down", "ctrl+n", "tab":
+		case keyDown, keyCtrlN, keyTab:
 			if len(p.models) > 0 {
 				p.index = (p.index + 1) % len(p.models)
 			}
 			return nil
 
-		case "enter":
+		case keyEnter:
 			if len(p.models) == 0 {
 				p.active = false
 				return nil
@@ -119,8 +119,8 @@ func (p modelPickerState) View() string {
 }
 
 type thinkingPickerState struct {
-	model           provider.ModelInfo
 	thinkingBudgets []int
+	model           provider.ModelInfo
 	thinkingIndex   int
 	active          bool
 }

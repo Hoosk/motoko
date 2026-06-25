@@ -14,3 +14,8 @@ func TestMainWiringUsesRuntimeTachikomas(t *testing.T) {
 		t.Fatal("expected init command")
 	}
 }
+
+func TestPrintHelp(t *testing.T) {
+	// Call printHelp to ensure it runs without panicking.
+	printHelp()
+}

@@ -150,7 +150,7 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 			return Result{}, fmt.Errorf("todas las mutaciones AST deben apuntar al mismo archivo en una request")
 		}
 		if request.Action == "" {
-			request.Action = "replace"
+			request.Action = actionReplace
 		}
 		updated, err = applyASTPatch([]byte(updated), relPath, request)
 		if err != nil {
@@ -187,7 +187,7 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return Result{}, readErr
 	}
-	if os.IsNotExist(readErr) && patch.OldPath != "/dev/null" {
+	if os.IsNotExist(readErr) && patch.OldPath != devNull {
 		return Result{}, fmt.Errorf("el archivo %s no existe para aplicar el unified diff", relPath)
 	}
 	updated, err := applyUnifiedPatch(string(content), patch)

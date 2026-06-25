@@ -1,0 +1,1 @@
+[SYSTEM INJECTION: Mode has changed to BUILD MODE. You now have access to write tools. Your immediate next step should be to read the `plan.md` and `tasks.md` files from your brain, and proceed to execute the unchecked tasks.]

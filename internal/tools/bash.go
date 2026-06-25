@@ -25,6 +25,12 @@ func (t *BashTool) Spec() Spec {
 	}
 }
 
+func (t *BashTool) DynamicSpec(ctx ToolContext) Spec {
+	spec := t.Spec()
+	spec.Summary = fmt.Sprintf("Ejecuta un comando shell en el workspace actual (%s). El output maximo esta limitado a %d bytes.", ctx.Workspace, ctx.MaxOutputSize)
+	return spec
+}
+
 func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 	command := strings.TrimSpace(args)
 	if command == "" {

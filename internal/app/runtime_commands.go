@@ -26,8 +26,11 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "help":
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Available commands:",
+			"  /task     Interact with background tasks",
+			"  /brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
+			"  /metrics  Show cumulative token usage metrics for this session",
+			"  /approve  Approve pending tool command execution",
 			"/help     Show this help message",
-			"/brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
 			"/clear    Clear the timeline history",
 			"/compact  Manually compact the active session",
 			"/mode     Open the agent mode selector",
@@ -49,7 +52,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/deny     Cancel the pending shell action",
 			"!<cmd>    Execute an explicit shell command",
 		}, "\n")}}}
-	case "clear":
+	case cmdClear:
 		if r.currentSession != nil {
 			r.currentSession.History = nil
 			r.currentSession.LastInputTokens = 0
@@ -61,8 +64,8 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			Entries: []Entry{{Kind: EntrySystem, Text: "Compacting session..."}},
 			Action:  &Action{Type: ActionCompact},
 		}
-	case "plan":
-		r.SetAgentMode("plan")
+	case string(ModePlan):
+		r.SetAgentMode(string(ModePlan))
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
 	case "build":
 		r.SetAgentMode("build")
@@ -92,7 +95,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "chat":
 		r.inputMode = InputModeChat
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Input mode: chat. Normal input will be treated as a prompt."}}}
-	case "status":
+	case cmdStatus:
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.statusText(info)}}}
 	case "debug":
 		r.debug = !r.debug
@@ -110,22 +113,42 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "sessions":
 		return Response{Signal: "open-sessions-popup"}
 	case "tools":
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.tools.Specs())}}}
-	case "tool":
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: formatToolList(r.ToolSpecs())}}}
+	case cmdTool:
 		if len(parts) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
 		}
 
 		toolName := parts[1]
 		toolArgs := ""
-		if len(parts) > 2 {
-			toolArgs = strings.Join(parts[2:], " ")
+		rawTrimmed := strings.TrimPrefix(input, "/")
+		idx := 0
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
 		}
+		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
+			idx++
+		}
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
+			idx++
+		}
+		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+			idx++
+		}
+		if idx < len(rawTrimmed) {
+			toolArgs = rawTrimmed[idx:]
+		}
+
 		if strings.EqualFold(toolName, "bash") {
 			return r.handleShell(toolArgs)
 		}
 
-		result, err := r.tools.Run(context.Background(), toolName, toolArgs)
+		runCtx := tools.WithBrain(context.Background(), r.brain)
+		runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(r.contextWindow))
+		result, err := r.tools.Run(runCtx, toolName, toolArgs)
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
@@ -185,7 +208,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 
 		subcmd := strings.ToLower(parts[1])
 		switch subcmd {
-		case "list":
+		case cmdList:
 			tasks := r.ListTasks()
 			if len(tasks) == 0 {
 				return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active background tasks."}}}
@@ -210,6 +233,32 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}
 	case "brain":
 		return r.handleBrainCommand(parts[1:])
+	case "metrics":
+		if r.currentSession == nil {
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay una sesión activa."}}}
+		}
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "Métricas de la sesión actual (%s):\n", r.currentSession.ID)
+		fmt.Fprintf(&sb, "- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "- Mensajes en historial: %d\n", len(r.currentSession.History))
+		sb.WriteString("\nUso de Tokens Acumulado:\n")
+		fmt.Fprintf(&sb, "- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens)
+		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
+			fmt.Fprintf(&sb, "  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
+				r.currentSession.TotalCacheReadTokens, 
+				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100)
+		}
+		if r.currentSession.TotalCacheWriteTokens > 0 {
+			fmt.Fprintf(&sb, "  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens)
+		}
+		fmt.Fprintf(&sb, "- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens)
+		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
+			fmt.Fprintf(&sb, "  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
+				r.currentSession.TotalReasoningTokens, 
+				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
+		}
+		fmt.Fprintf(&sb, "- Tokens Totales:    %d\n", r.currentSession.TotalTokens)
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}
@@ -224,7 +273,7 @@ func formatToolList(specs []tools.Spec) string {
 }
 
 func (r *Runtime) statusText(info system.ContextInfo) string {
-	pending := "none"
+	pending := valNone
 	if r.pending != nil {
 		pending = r.pending.Command
 	}
@@ -270,15 +319,35 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 
 	subcommand := strings.ToLower(args[0])
 	switch subcommand {
-	case "list":
+	case cmdList:
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: r.providerListText()}}}
 	case "add":
+		if len(args) >= 5 {
+			name := args[1]
+			preset := config.ProviderPreset(args[2])
+			baseURL := args[3]
+			apiKey := args[4]
+			newProv := config.ProviderConfig{
+				Name:    name,
+				Preset:  preset,
+				BaseURL: baseURL,
+				APIKey:  apiKey,
+			}
+			newProv = config.NormalizeProvider(newProv)
+			r.config.UpsertProvider(newProv)
+			if err := r.config.Save(); err != nil {
+				return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
+			}
+			r.refreshAgent()
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider added and saved: %s", name)}}}
+		}
 		return Response{Signal: "open-provider-popup", Entries: []Entry{{Kind: EntrySystem, Text: "Opening provider configuration form..."}}}
 	case "use":
 		if len(args) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider use <name>"}}}
 		}
-		if err := r.config.SetActive(args[1]); err != nil {
+		name := strings.Join(args[1:], " ")
+		if err := r.config.SetActive(name); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		if err := r.config.Save(); err != nil {
@@ -290,14 +359,15 @@ func (r *Runtime) handleProviderCommand(args []string) Response {
 		if len(args) < 2 {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /provider remove <name>"}}}
 		}
-		if !r.config.RemoveProvider(args[1]) {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider not found: %s", args[1])}}}
+		name := strings.Join(args[1:], " ")
+		if !r.config.RemoveProvider(name) {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Provider not found: %s", name)}}}
 		}
 		if err := r.config.Save(); err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: err.Error()}}}
 		}
 		r.refreshAgent()
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider removed: %s", args[1])}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Provider removed: %s", name)}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown subcommand: %s", subcommand)}}}
 	}
@@ -313,17 +383,21 @@ func (r *Runtime) handleModelsCommand(args []string) Response {
 		return Response{Signal: "open-models-popup"}
 	}
 
+	if len(args) > 1 && strings.EqualFold(args[0], "use") {
+		args = args[1:]
+	}
+
 	model := strings.TrimSpace(strings.Join(args, " "))
 	ctx := context.Background()
 	var supportsThinking bool
 	var contextWindow int
 	if client, err := r.providerClient(active); err == nil {
-		if info, err := client.GetModel(ctx, model); err == nil {
+		if info, modelErr := client.GetModel(ctx, model); modelErr == nil {
 			supportsThinking = info.SupportsThinking
 			contextWindow = info.ContextWindow
 			tracelog.Logf("runtime handleModelsCommand: model %q resolved: supportsThinking=%t contextWindow=%d", model, supportsThinking, contextWindow)
 		} else {
-			tracelog.Logf("runtime handleModelsCommand: failed to resolve model %q: %v", model, err)
+			tracelog.Logf("runtime handleModelsCommand: failed to resolve model %q: %v", model, modelErr)
 		}
 	} else {
 		tracelog.Logf("runtime handleModelsCommand: failed to load provider client: %v", err)
@@ -379,7 +453,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 
 	subcmd := strings.ToLower(parts[0])
 	switch subcmd {
-	case "list":
+	case cmdList:
 		return r.listBrainFiles()
 	case "read":
 		if len(parts) < 2 {
@@ -421,7 +495,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: "--- Session Summary (summary.md) ---"},
 			{Kind: EntrySystem, Text: content},
 		}}
-	case "clear":
+	case cmdClear:
 		files, err := r.brain.List()
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}

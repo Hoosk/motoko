@@ -14,8 +14,9 @@ type fakeLoopProvider struct {
 	count int
 }
 
-func (f *fakeLoopProvider) Configured() bool { return true }
-func (f *fakeLoopProvider) Summary() string  { return "fake:loop" }
+func (f *fakeLoopProvider) Configured() bool     { return true }
+func (f *fakeLoopProvider) ProviderKind() string { return "fake" }
+func (f *fakeLoopProvider) Summary() string      { return "fake:loop" }
 func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "loop"}}, nil
 }
@@ -44,8 +45,9 @@ type fakeMultiProvider struct {
 	count int
 }
 
-func (f *fakeMultiProvider) Configured() bool { return true }
-func (f *fakeMultiProvider) Summary() string  { return "fake:multi" }
+func (f *fakeMultiProvider) Configured() bool     { return true }
+func (f *fakeMultiProvider) ProviderKind() string { return "fake" }
+func (f *fakeMultiProvider) Summary() string      { return "fake:multi" }
 func (f *fakeMultiProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	return []provider.ModelInfo{{ID: "multi"}}, nil
 }
@@ -98,6 +100,23 @@ func TestMaxToolIterationsFallsBackOnInvalidEnv(t *testing.T) {
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "0")
 	if got := maxToolIterations(); got != defaultMaxToolIterations {
 		t.Fatalf("expected non-positive env to fall back, got %d", got)
+	}
+}
+
+func TestRunHonorsMaxToolIterationsOverride(t *testing.T) {
+	t.Setenv("MOTOKO_MAX_ITERATIONS", "1")
+
+	registry := tools.NewRegistry()
+	registry.Register(&fakeLoopTool{})
+	provider := &fakeLoopProvider{}
+	a := New(provider, registry)
+
+	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err == nil {
+		t.Fatal("expected max-iterations error")
+	}
+	if provider.count != 1 {
+		t.Fatalf("expected a single completion attempt, got %d", provider.count)
 	}
 }
 
