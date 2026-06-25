@@ -25,9 +25,17 @@ func Register(kind config.ProviderKind, factory ClientFactory) {
 
 func NewClient(cfg config.ProviderConfig) (Client, error) {
 	cfg = config.NormalizeProvider(cfg)
-	if cfg.BaseURL == "" && cfg.Preset != "" {
-		if catProv, ok := LookupProvider(string(cfg.Preset)); ok && catProv.API != "" {
-			cfg.BaseURL = catProv.API
+	if cfg.Preset != "" {
+		if catProv, ok := LookupProvider(string(cfg.Preset)); ok {
+			if cfg.BaseURL == "" && catProv.API != "" {
+				cfg.BaseURL = catProv.API
+			}
+			switch catProv.NPM {
+			case "@ai-sdk/anthropic":
+				cfg.Kind = config.ProviderKindAnthropic
+			case "@ai-sdk/google":
+				cfg.Kind = config.ProviderKindGemini
+			}
 		}
 	}
 	mu.RLock()

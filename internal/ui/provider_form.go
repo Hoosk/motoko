@@ -72,6 +72,12 @@ func (f *providerForm) isOpenAICompatible(runtime *app.Runtime) bool {
 	case config.ProviderPresetOpenAI, config.ProviderPresetAnthropic, config.ProviderPresetGemini:
 		return false
 	}
+	if cp, ok := runtime.LookupCatalogProvider(string(preset)); ok {
+		switch cp.NPM {
+		case "@ai-sdk/anthropic", "@ai-sdk/google":
+			return false
+		}
+	}
 	return true
 }
 

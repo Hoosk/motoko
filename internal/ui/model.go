@@ -56,10 +56,11 @@ type Model struct {
 	footer           FooterModel
 	width            int
 	height           int
-	notificationShow bool
-	showHelp         bool
-	showTools        bool
-	showSidebar      bool
+	notificationShow      bool
+	showHelp              bool
+	showTools             bool
+	showSidebar           bool
+	sidebarExplicitlyHidden bool
 }
 
 func NewModel(runtime *app.Runtime) Model {
@@ -386,8 +387,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionPicker.Open()
 			cmds = append(cmds, m.listSessions())
 		case "ctrl+s", "alt+s":
-			m.showSidebar = !m.showSidebar
-			m.SyncLayout()
+			if m.width < 100 {
+				m.notificationShow = true
+				m.notificationText = "Sidebar disabled: terminal width too small (min 100)"
+				m.notificationTime = time.Now()
+				cmds = append(cmds, m.hideNotification())
+			} else {
+				m.showSidebar = !m.showSidebar
+				m.sidebarExplicitlyHidden = !m.showSidebar
+				m.SyncLayout()
+			}
 		case "ctrl+a":
 			m.modePopup.Open(m.runtime)
 		case "ctrl+t":
@@ -561,11 +570,17 @@ func (m *Model) SyncLayout() {
 		return
 	}
 
+	if m.width < 100 {
+		m.showSidebar = false
+	} else if !m.sidebarExplicitlyHidden {
+		m.showSidebar = true
+	}
+
 	sidebarWidth := 36
-	if m.width < 110 {
+	if m.width < 120 {
 		sidebarWidth = 28
 	}
-	if m.width < 90 || !m.showSidebar {
+	if !m.showSidebar {
 		sidebarWidth = 0
 	}
 	mainWidth := m.width - sidebarWidth

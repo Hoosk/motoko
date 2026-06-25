@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/tracelog"
@@ -44,6 +45,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			"/context  Show raw system prompt being sent to the agent",
 			"/provider Manage configured LLM providers",
 			"/models   List or select models from the active provider",
+			"/themes   List or switch visual themes",
 			"/sessions List or switch between workspace sessions",
 			"/tools    Show all registered tools",
 			"/tool     Execute a specific runtime tool",
@@ -56,6 +58,24 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}, "\n")}}}
 	case "exit", "quit":
 		return Response{Signal: "quit"}
+	case "themes":
+		if len(parts) < 2 {
+			current := r.config.Theme
+			if current == "" {
+				current = "cyberpunk"
+			}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Tema actual: %s\nTemas disponibles: cyberpunk, nord, dracula, monochrome\nUso: /themes <nombre>", current)}}}
+		}
+		themeName := strings.ToLower(parts[1])
+		switch themeName {
+		case "cyberpunk", "nord", "dracula", "monochrome":
+			r.config.Theme = themeName
+			_ = r.config.Save()
+			styles.SetTheme(themeName)
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Tema cambiado a: %s", themeName)}}}
+		default:
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Tema desconocido: %s. Temas disponibles: cyberpunk, nord, dracula, monochrome", themeName)}}}
+		}
 	case cmdClear:
 		if r.currentSession != nil {
 			r.currentSession.History = nil

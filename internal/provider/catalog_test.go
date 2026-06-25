@@ -281,3 +281,60 @@ func TestNewClientDynamicBaseURL(t *testing.T) {
 		t.Fatalf("expected summary 'my-deepseek-custom:deepseek-chat', got %q", client.Summary())
 	}
 }
+
+func TestNewClientDynamicKind(t *testing.T) {
+	mockData := `{
+		"models": {},
+		"providers": {
+			"custom-anthropic": {
+				"id": "custom-anthropic",
+				"name": "Custom Anthropic",
+				"api": "https://api.anthropic.com/v1",
+				"env": ["ANTHROPIC_API_KEY"],
+				"npm": "@ai-sdk/anthropic"
+			},
+			"custom-google": {
+				"id": "custom-google",
+				"name": "Custom Google",
+				"api": "https://generativelanguage.googleapis.com",
+				"env": ["GEMINI_API_KEY"],
+				"npm": "@ai-sdk/google"
+			}
+		}
+	}`
+
+	err := parseAndPopulate([]byte(mockData))
+	if err != nil {
+		t.Fatalf("unexpected parsing error: %v", err)
+	}
+
+	// 1. Anthropic kind mapping
+	cfgAnt := config.ProviderConfig{
+		Name:   "my-anthropic",
+		Preset: "custom-anthropic",
+		APIKey: "sk-test-key",
+		Model:  "claude-3-5-sonnet",
+	}
+	clientAnt, err := NewClient(cfgAnt)
+	if err != nil {
+		t.Fatalf("NewClient failed for custom anthropic: %v", err)
+	}
+	if clientAnt.ProviderKind() != "my-anthropic" {
+		t.Errorf("expected ProviderKind 'my-anthropic', got %q", clientAnt.ProviderKind())
+	}
+
+	// 2. Google kind mapping
+	cfgGog := config.ProviderConfig{
+		Name:   "my-google",
+		Preset: "custom-google",
+		APIKey: "sk-test-key",
+		Model:  "gemini-2.5-pro",
+	}
+	clientGog, err := NewClient(cfgGog)
+	if err != nil {
+		t.Fatalf("NewClient failed for custom google: %v", err)
+	}
+	if clientGog.ProviderKind() != "my-google" {
+		t.Errorf("expected ProviderKind 'my-google', got %q", clientGog.ProviderKind())
+	}
+}

@@ -10,3 +10,15 @@ func TestStylesRenderNonEmptyOutput(t *testing.T) {
 		t.Fatal("expected assistant block output")
 	}
 }
+
+func TestSetTheme(t *testing.T) {
+	themes := []string{"cyberpunk", "nord", "dracula", "monochrome"}
+	for _, theme := range themes {
+		t.Run(theme, func(t *testing.T) {
+			SetTheme(theme)
+			if got := MainContainerStyle.Render("x"); got == "" {
+				t.Fatal("expected rendered output after setting theme")
+			}
+		})
+	}
+}

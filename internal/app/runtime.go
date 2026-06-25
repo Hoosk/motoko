@@ -17,6 +17,7 @@ import (
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/skills"
+	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
@@ -187,6 +188,10 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		tasks:             NewTaskManager(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
+	}
+
+	if r.config.Theme != "" {
+		styles.SetTheme(r.config.Theme)
 	}
 
 	// Setup default tachikomas
