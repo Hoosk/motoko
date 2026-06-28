@@ -346,11 +346,7 @@ func (m ComposerModel) renderSuggestionsLine() string {
 
 	var status string
 	if showStatus {
-		if m.thinking {
-			status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Right).Render(styles.InputHintStyle.Render("[" + composerActivityLabel(m.runtime.AgentName()) + "]"))
-		} else {
-			status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Right).Render("")
-		}
+		status = lipgloss.NewStyle().Width(statusWidth).Align(lipgloss.Right).Render("")
 	}
 
 	availWidth := chromeWidth
@@ -467,9 +463,6 @@ func shouldApplySuggestionOnEnter(current, suggestion string) bool {
 	return true
 }
 
-func composerActivityLabel(agentName string) string {
-	return agentActivityLabel(agentName)
-}
 
 func (m ComposerModel) Height() int {
 	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)
