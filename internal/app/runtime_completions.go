@@ -1,5 +1,4 @@
 package app
-
 import (
 	"context"
 	"strings"
@@ -192,7 +191,7 @@ func (r *Runtime) Completions(input string) []string {
 		if len(parts) > 1 {
 			prefix = strings.ToLower(parts[1])
 		}
-		allThemes := []string{"cyberpunk", "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
+		allThemes := []string{themeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
 		var result []string
 		for _, t := range allThemes {
 			if prefix == "" || strings.HasPrefix(t, prefix) {

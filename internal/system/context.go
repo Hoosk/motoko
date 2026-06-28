@@ -136,7 +136,7 @@ func (c ContextInfo) CategorizedSignalSummary() string {
 		sb.WriteString("[Background Signals]\n")
 		// Note: In a real production environment, we might want to sort these keys for deterministic output.
 		for name, status := range c.Signals {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", name, status))
+			fmt.Fprintf(&sb, "- %s: %s\n", name, status)
 		}
 	}
 
@@ -146,7 +146,7 @@ func (c ContextInfo) CategorizedSignalSummary() string {
 		}
 		sb.WriteString("[On-Demand Signals]\n")
 		for name, hint := range c.OnDemandSignals {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", name, hint))
+			fmt.Fprintf(&sb, "- %s: %s\n", name, hint)
 		}
 	}
 

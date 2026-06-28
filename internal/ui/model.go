@@ -46,33 +46,32 @@ const (
 )
 
 type Model struct {
-	lastCtrlC               time.Time
-	notificationTime        time.Time
-	agentBuffer             *agentStreamBuffer
-	agentStream             chan app.AgentStreamEvent
-	runtime                 *app.Runtime
-	modelPicker             modelPickerState
-	taskStatus              string
-	notificationText        string
-	sessionPicker           sessionPickerState
-	sidebar                 SidebarModel
-	providerForm            providerForm
-	modePopup               modePopupState
-	thinkingPicker          thinkingPickerState
-	composer                ComposerModel
-	timeline                TimelineModel
-	footer                  FooterModel
-	width                   int
-	height                  int
-	notificationShow        bool
-	showHelp                bool
-	showTools               bool
-	showSidebar             bool
-	sidebarPref             sidebarLayoutState
-	// Sidebar auto-open tracking
-	prevHasPendingApproval  bool
-	prevActiveTasks         int
-	prevActiveSubagents     int
+	lastCtrlC              time.Time
+	notificationTime       time.Time
+	agentBuffer            *agentStreamBuffer
+	agentStream            chan app.AgentStreamEvent
+	runtime                *app.Runtime
+	modelPicker            modelPickerState
+	taskStatus             string
+	notificationText       string
+	sessionPicker          sessionPickerState
+	sidebar                SidebarModel
+	providerForm           providerForm
+	modePopup              modePopupState
+	thinkingPicker         thinkingPickerState
+	composer               ComposerModel
+	timeline               TimelineModel
+	footer                 FooterModel
+	sidebarPref            sidebarLayoutState
+	height                 int
+	width                  int
+	prevActiveTasks        int
+	prevActiveSubagents    int
+	notificationShow       bool
+	showHelp               bool
+	showTools              bool
+	showSidebar            bool
+	prevHasPendingApproval bool
 }
 
 func (m Model) sidebarLayout() (int, bool) {
@@ -91,13 +90,13 @@ func (m Model) sidebarPreferredByWidth() bool {
 
 func NewModel(runtime *app.Runtime) Model {
 	m := Model{
-		runtime:                 runtime,
-		timeline:                NewTimelineModel(),
-		composer:                NewComposerModel(runtime),
-		footer:                  NewFooterModel(runtime),
-		sidebar:                 NewSidebarModel(runtime),
-		showSidebar:             false,
-		sidebarPref:             sidebarDefault,
+		runtime:     runtime,
+		timeline:    NewTimelineModel(),
+		composer:    NewComposerModel(runtime),
+		footer:      NewFooterModel(runtime),
+		sidebar:     NewSidebarModel(runtime),
+		showSidebar: false,
+		sidebarPref: sidebarDefault,
 	}
 
 	m.timeline.version = runtime.Version()
@@ -166,13 +165,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		if m.showSidebar && msg.X >= m.width-m.sidebar.width && msg.Y < m.height-1 {
-			if msg.Button == tea.MouseButtonWheelUp {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
 				if m.sidebar.offset > 0 {
 					m.sidebar.offset = max(0, m.sidebar.offset-3)
 				}
 				m.SyncLayout()
 				return m, nil
-			} else if msg.Button == tea.MouseButtonWheelDown {
+			case tea.MouseButtonWheelDown:
 				m.sidebar.offset += 3
 				m.SyncLayout()
 				return m, nil
@@ -482,16 +482,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	currentActiveTasks := m.runtime.ActiveTasks()
 	currentActiveSubagents := len(m.runtime.ActiveSubagents())
 
-	shouldAutoOpen := false
-	if currentHasPendingApproval && !m.prevHasPendingApproval {
-		shouldAutoOpen = true
-	}
-	if currentActiveTasks > 0 && m.prevActiveTasks == 0 {
-		shouldAutoOpen = true
-	}
-	if currentActiveSubagents > 0 && m.prevActiveSubagents == 0 {
-		shouldAutoOpen = true
-	}
+	shouldAutoOpen := (currentHasPendingApproval && !m.prevHasPendingApproval) ||
+		(currentActiveTasks > 0 && m.prevActiveTasks == 0) ||
+		(currentActiveSubagents > 0 && m.prevActiveSubagents == 0)
 	if shouldAutoOpen && !m.showSidebar && m.sidebarPref != sidebarForceHide {
 		if _, allowed := m.sidebarLayout(); allowed {
 			m.showSidebar = true

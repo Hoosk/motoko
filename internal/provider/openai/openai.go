@@ -1,5 +1,4 @@
 package openai
-
 import (
 	"context"
 	"fmt"
@@ -125,7 +124,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	payload := map[string]interface{}{
 		"model": c.model,
 		"messages": append([]map[string]any{
-			{"role": "system", "content": systemPrompt},
+			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}

@@ -1,5 +1,4 @@
 package openai
-
 import (
 	"encoding/json"
 	"sort"
@@ -171,8 +170,8 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
 					result = append(result, map[string]any{
-						"role":       provider.RoleAssistant,
-						"content":    "",
+						keyRole:       provider.RoleAssistant,
+						keyContent:    "",
 						"tool_calls": []map[string]any{rawToolCall},
 					})
 					continue
@@ -180,13 +179,13 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 			}
 
 			result = append(result, map[string]any{
-				"role":    provider.RoleAssistant,
-				"content": "",
+				keyRole:    provider.RoleAssistant,
+				keyContent: "",
 				"tool_calls": []map[string]any{{
 					"id":         call.CallID,
-					"type":       "function",
-					"function": map[string]any{
-						"name":      call.Name,
+					keyType:       keyFunction,
+					keyFunction: map[string]any{
+						keyName:      call.Name,
 						"arguments": provider.AssistantToolCallArguments(call),
 					},
 				}},
@@ -243,15 +242,15 @@ func responseTools(tools provider.ToolSet) []responses.ToolUnionParam {
 	result := make([]responses.ToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		parameters := map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"input": map[string]any{
-					"type":        "string",
-					"description": provider.ToolInputDescription(tool),
+			keyType: keyObject,
+			keyProperties: map[string]any{
+				keyInput: map[string]any{
+					keyType:        keyString,
+					keyDescription: provider.ToolInputDescription(tool),
 				},
 			},
-			"required":             []string{"input"},
-			"additionalProperties": false,
+			keyRequired:             []string{keyInput},
+			keyAdditionalProperties: false,
 		}
 		result = append(result, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name:        tool.Name,
@@ -270,20 +269,20 @@ func chatCompletionTools(tools provider.ToolSet) []map[string]any {
 	result := make([]map[string]any, 0, len(tools.Local))
 	for _, tool := range tools.Local {
 		result = append(result, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        tool.Name,
-				"description": strings.TrimSpace(tool.Description),
+			keyType: keyFunction,
+			keyFunction: map[string]any{
+				keyName:        tool.Name,
+				keyDescription: strings.TrimSpace(tool.Description),
 				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"input": map[string]any{
-							"type":        "string",
-							"description": provider.ToolInputDescription(tool),
+					keyType: keyObject,
+					keyProperties: map[string]any{
+						keyInput: map[string]any{
+							keyType:        keyString,
+							keyDescription: provider.ToolInputDescription(tool),
 						},
 					},
-					"required":             []string{"input"},
-					"additionalProperties": false,
+					keyRequired:             []string{keyInput},
+					keyAdditionalProperties: false,
 				},
 			},
 		})

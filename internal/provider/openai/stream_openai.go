@@ -1,5 +1,4 @@
 package openai
-
 import (
 	"bufio"
 	"bytes"
@@ -102,7 +101,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	payload := map[string]interface{}{
 		"model": c.model,
 		"messages": append([]map[string]any{
-			{"role": "system", "content": systemPrompt},
+			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 		"stream":      true,

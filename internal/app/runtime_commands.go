@@ -1,5 +1,4 @@
 package app
-
 import (
 	"context"
 	"fmt"
@@ -61,7 +60,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		if len(parts) < 2 {
 			current := r.config.Theme
 			if current == "" {
-				current = "cyberpunk"
+				current = defaultTheme
 			}
 			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf(
 				"Current theme: %s\n" +
@@ -78,7 +77,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		}
 		themeName := strings.ToLower(parts[1])
 		switch themeName {
-		case "cyberpunk", "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
+		case themeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
 			r.config.Theme = themeName
 			_ = r.config.Save()
 			styles.SetTheme(themeName)

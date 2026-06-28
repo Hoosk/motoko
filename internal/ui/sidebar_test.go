@@ -8,8 +8,8 @@ func TestContractPath(t *testing.T) {
 	tests := []struct {
 		name      string
 		path      string
-		maxLength int
 		want      string
+		maxLength int
 	}{
 		{
 			name:      "fits fully",

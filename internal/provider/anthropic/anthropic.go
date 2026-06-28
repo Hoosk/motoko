@@ -14,6 +14,9 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
+const keyInput = "input"
+
+
 func init() {
 	provider.Register(config.ProviderKindAnthropic, NewClient)
 }
@@ -331,7 +334,7 @@ func parseConversationItem(msg provider.ConversationItem) (string, []parsedBlock
 	if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
 		var toolInput map[string]any
 		if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
-			toolInput = map[string]any{"input": call.Input}
+			toolInput = map[string]any{keyInput: call.Input}
 		}
 		blocks = append(blocks, parsedBlock{
 			isToolUse:    true,
@@ -404,7 +407,7 @@ func buildSDKTools[T any](tools provider.ToolSet, buildFn func(t provider.LocalT
 
 func toolProperties(t provider.LocalToolDefinition) map[string]any {
 	return map[string]any{
-		"input": map[string]any{
+		keyInput: map[string]any{
 			"type":        "string",
 			"description": provider.ToolInputDescription(t),
 		},
@@ -418,7 +421,7 @@ func toSDKTools(tools provider.ToolSet) []sdk.ToolUnionParam {
 			Description: sdk.String(strings.TrimSpace(t.Description)),
 			InputSchema: sdk.ToolInputSchemaParam{
 				Properties: toolProperties(t),
-				Required:   []string{"input"},
+				Required:   []string{keyInput},
 			},
 		}
 		if isLast {
@@ -530,7 +533,7 @@ func toSDKBetaTools(tools provider.ToolSet) []sdk.BetaToolUnionParam {
 			Description: sdk.String(strings.TrimSpace(t.Description)),
 			InputSchema: sdk.BetaToolInputSchemaParam{
 				Properties: toolProperties(t),
-				Required:   []string{"input"},
+				Required:   []string{keyInput},
 			},
 		}
 		if isLast {
