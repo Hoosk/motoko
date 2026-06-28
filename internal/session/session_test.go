@@ -35,6 +35,42 @@ func TestSessionSaveLoad(t *testing.T) {
 	}
 }
 
+func TestSessionSaveLoadTokenBreakdown(t *testing.T) {
+	SessionsBaseDir = t.TempDir()
+	t.Cleanup(func() { SessionsBaseDir = "" })
+
+	s := New("abc", "/tmp/work")
+	s.TotalSystemStaticTokens = 100
+	s.TotalSystemDynamicTokens = 200
+	s.TotalToolsTokens = 30
+	s.TotalHistoryTokens = 50
+
+	s.LastSystemStaticTokens = 10
+	s.LastSystemDynamicTokens = 20
+	s.LastToolsTokens = 3
+	s.LastHistoryTokens = 5
+
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load("abc", s.ID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if loaded.TotalSystemStaticTokens != 100 ||
+		loaded.TotalSystemDynamicTokens != 200 ||
+		loaded.TotalToolsTokens != 30 ||
+		loaded.TotalHistoryTokens != 50 ||
+		loaded.LastSystemStaticTokens != 10 ||
+		loaded.LastSystemDynamicTokens != 20 ||
+		loaded.LastToolsTokens != 3 ||
+		loaded.LastHistoryTokens != 5 {
+		t.Fatalf("loaded session fields mismatch = %#v", loaded)
+	}
+}
+
 func TestSessionListAndLast(t *testing.T) {
 	SessionsBaseDir = t.TempDir()
 	t.Cleanup(func() { SessionsBaseDir = "" })

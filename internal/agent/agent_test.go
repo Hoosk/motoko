@@ -41,15 +41,15 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 		t.Errorf("prompt missing the operating rule alignment instruction")
 	}
 
-	if !strings.Contains(prompt, "--- AGENTS GUIDELINES (AGENTS.md) ---") {
-		t.Errorf("prompt missing AGENTS.md section header")
+	if !strings.Contains(prompt, "<agents_guidelines>") {
+		t.Errorf("prompt missing <agents_guidelines> section header")
 	}
 	if !strings.Contains(prompt, agentsContent) {
 		t.Errorf("prompt missing AGENTS.md content")
 	}
 
-	if !strings.Contains(prompt, "--- DESIGN SPECIFICATION (DESIGN.md) ---") {
-		t.Errorf("prompt missing DESIGN.md section header")
+	if !strings.Contains(prompt, "<design_specification>") {
+		t.Errorf("prompt missing <design_specification> section header")
 	}
 	if !strings.Contains(prompt, designContent) {
 		t.Errorf("prompt missing DESIGN.md content")

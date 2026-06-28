@@ -145,6 +145,7 @@ Tachikomas are deterministic background workers that keep local context fresh wi
 - Updates are published to the TUI via Bubble Tea messages
 - Workers use `WatchHelper` for filesystem events with configurable debounce
 - The `inspect` tool allows the agent to query any worker's latest payload on demand
+- **Tactical Prompting:** Tachikoma signals are categorized into "Summary" (direct context) and "On-Demand" (requiring tool usage). The system prompt builder automatically categorizes these signals to guide agent tool usage.
 
 ## 7. Semantic Engine (`internal/semantic`)
 The semantic engine provides language-aware code analysis powered by Tree-sitter.

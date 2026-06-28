@@ -271,26 +271,62 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active session."}}}
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "Current session metrics (%s):\n", r.currentSession.ID)
+		fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", r.currentSession.ID)
 		fmt.Fprintf(&sb, "- Created at: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(&sb, "- History messages: %d\n", len(r.currentSession.History))
-		sb.WriteString("\nAccumulated Token Usage:\n")
-		fmt.Fprintf(&sb, "- Input Tokens: %d\n", r.currentSession.TotalInputTokens)
-		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
-			fmt.Fprintf(&sb, "  * Read from cache: %d (%.1f%% of input)\n", 
+		fmt.Fprintf(&sb, "- History Messages: %d\n", len(r.currentSession.History))
+
+		// Last Turn Breakdown
+		sb.WriteString("\nLast Turn Token Usage:\n")
+		lastInput := r.currentSession.LastInputTokens
+		fmt.Fprintf(&sb, "- Input Tokens: %d\n", lastInput)
+		if lastInput > 0 {
+			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
+				r.currentSession.LastSystemStaticTokens,
+				float64(r.currentSession.LastSystemStaticTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
+				r.currentSession.LastSystemDynamicTokens,
+				float64(r.currentSession.LastSystemDynamicTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
+				r.currentSession.LastToolsTokens,
+				float64(r.currentSession.LastToolsTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
+				r.currentSession.LastHistoryTokens,
+				float64(r.currentSession.LastHistoryTokens)/float64(lastInput)*100)
+		}
+
+		// Cumulative Breakdown
+		sb.WriteString("\nCumulative Token Usage:\n")
+		totalInput := r.currentSession.TotalInputTokens
+		fmt.Fprintf(&sb, "- Input Tokens: %d\n", totalInput)
+		if totalInput > 0 {
+			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
+				r.currentSession.TotalSystemStaticTokens,
+				float64(r.currentSession.TotalSystemStaticTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
+				r.currentSession.TotalSystemDynamicTokens,
+				float64(r.currentSession.TotalSystemDynamicTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
+				r.currentSession.TotalToolsTokens,
+				float64(r.currentSession.TotalToolsTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
+				r.currentSession.TotalHistoryTokens,
+				float64(r.currentSession.TotalHistoryTokens)/float64(totalInput)*100)
+		}
+		if totalInput > 0 && r.currentSession.TotalCacheReadTokens > 0 {
+			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n", 
 				r.currentSession.TotalCacheReadTokens, 
-				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100)
+				float64(r.currentSession.TotalCacheReadTokens)/float64(totalInput)*100)
 		}
 		if r.currentSession.TotalCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Written to cache: %d\n", r.currentSession.TotalCacheWriteTokens)
+			fmt.Fprintf(&sb, "  * Cache Write: %d\n", r.currentSession.TotalCacheWriteTokens)
 		}
-		fmt.Fprintf(&sb, "- Output Tokens:  %d\n", r.currentSession.TotalOutputTokens)
+		fmt.Fprintf(&sb, "- Output Tokens: %d\n", r.currentSession.TotalOutputTokens)
 		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
 			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n", 
 				r.currentSession.TotalReasoningTokens, 
 				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
 		}
-		fmt.Fprintf(&sb, "- Total Tokens:       %d\n", r.currentSession.TotalTokens)
+		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", r.currentSession.TotalTokens)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}

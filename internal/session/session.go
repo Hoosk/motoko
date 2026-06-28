@@ -33,6 +33,18 @@ type Session struct {
 	TotalReasoningTokens  int                         `json:"total_reasoning_tokens,omitempty"`
 	TotalCacheReadTokens  int                         `json:"total_cache_read_tokens,omitempty"`
 	TotalCacheWriteTokens int                         `json:"total_cache_write_tokens,omitempty"`
+
+	// Cumulative estimated token usage per component
+	TotalSystemStaticTokens  int `json:"total_system_static_tokens,omitempty"`
+	TotalSystemDynamicTokens int `json:"total_system_dynamic_tokens,omitempty"`
+	TotalToolsTokens         int `json:"total_tools_tokens,omitempty"`
+	TotalHistoryTokens       int `json:"total_history_tokens,omitempty"`
+
+	// Last turn estimated token usage per component
+	LastSystemStaticTokens  int `json:"last_system_static_tokens,omitempty"`
+	LastSystemDynamicTokens int `json:"last_system_dynamic_tokens,omitempty"`
+	LastToolsTokens         int `json:"last_tools_tokens,omitempty"`
+	LastHistoryTokens       int `json:"last_history_tokens,omitempty"`
 }
 
 func WorkspaceIDFor(path string) string {

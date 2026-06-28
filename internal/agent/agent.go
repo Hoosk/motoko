@@ -302,24 +302,59 @@ func maxToolIterations() int {
 
 func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error) (provider.Response, error) {
 	tCtx := buildToolContext(info)
-	toolSet := toolSet(a.tools.Specs(tCtx))
-	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(tCtx), a.agentSystem)
+	specs := a.tools.Specs(tCtx)
+	toolSet := toolSet(specs)
+	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
+
+	var resp provider.Response
+	var err error
 	if onEvent == nil {
-		return a.provider.Complete(ctx, systemPrompt, messages, toolSet)
+		resp, err = a.provider.Complete(ctx, systemPrompt, messages, toolSet)
+	} else {
+		resp, err = a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
+			if delta.ReasoningContent != "" {
+				if err := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); err != nil {
+					return err
+				}
+			}
+			if delta.Content != "" {
+				if err := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
-	return a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
-		if delta.ReasoningContent != "" {
-			if err := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); err != nil {
-				return err
-			}
-		}
-		if delta.Content != "" {
-			if err := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+
+	if err != nil {
+		return resp, err
+	}
+
+	// Calculate character metrics
+	staticPrompt := systemPrompt
+	dynamicPrompt := ""
+	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
+	if len(parts) == 2 {
+		staticPrompt = parts[0]
+		dynamicPrompt = parts[1]
+	}
+
+	resp.Usage.SystemStaticChars = len(staticPrompt)
+	resp.Usage.SystemDynamicChars = len(dynamicPrompt)
+
+	toolsSize := 0
+	for _, spec := range specs {
+		toolsSize += len(spec.Name) + len(spec.Summary) + len(spec.Usage)
+	}
+	resp.Usage.ToolsChars = toolsSize
+
+	historySize := 0
+	for _, msg := range messages {
+		historySize += len(msg.Role) + len(msg.Content)
+	}
+	resp.Usage.HistoryChars = historySize
+
+	return resp, nil
 }
 
 func toolSet(specs []tools.Spec) provider.ToolSet {

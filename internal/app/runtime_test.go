@@ -846,3 +846,47 @@ func TestHandleInputExitAndQuitCommands(t *testing.T) {
 	}
 }
 
+func TestSlashCommandMetrics(t *testing.T) {
+	withSessionBaseDir(t)
+
+	r := NewRuntime()
+	
+	resp := r.handleSlashCommand("/metrics", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatalf("expected metrics response, got empty")
+	}
+	
+	r.currentSession = session.New(r.workspaceID, "/workspace")
+	r.currentSession.TotalInputTokens = 1000
+	r.currentSession.TotalOutputTokens = 500
+	r.currentSession.TotalTokens = 1500
+	r.currentSession.TotalSystemStaticTokens = 500
+	r.currentSession.TotalSystemDynamicTokens = 300
+	r.currentSession.TotalToolsTokens = 100
+	r.currentSession.TotalHistoryTokens = 100
+
+	r.currentSession.LastInputTokens = 500
+	r.currentSession.LastSystemStaticTokens = 250
+	r.currentSession.LastSystemDynamicTokens = 150
+	r.currentSession.LastToolsTokens = 50
+	r.currentSession.LastHistoryTokens = 50
+
+	resp = r.handleSlashCommand("/metrics", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatalf("expected metrics response")
+	}
+	text := resp.Entries[0].Text
+	if !strings.Contains(text, "Current Session Metrics") {
+		t.Errorf("expected header 'Current Session Metrics', got %q", text)
+	}
+	if !strings.Contains(text, "Last Turn Token Usage") {
+		t.Errorf("expected Last Turn section, got %q", text)
+	}
+	if !strings.Contains(text, "Cumulative Token Usage") {
+		t.Errorf("expected Cumulative section, got %q", text)
+	}
+	if !strings.Contains(text, "System Prompt (Static):  500 (50.0% of input)") {
+		t.Errorf("expected static prompt breakdown, got %q", text)
+	}
+}
+
