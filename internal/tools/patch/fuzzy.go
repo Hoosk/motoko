@@ -64,10 +64,10 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	}
 
 	if len(matchIndices) == 0 {
-		return "", fmt.Errorf("no se encontro el bloque SEARCH ni siquiera ignorando espacios e indentacion. Revisa el contenido actual del archivo")
+		return "", fmt.Errorf("could not find the SEARCH block even when ignoring whitespace and indentation. Please verify the file's current content")
 	}
 	if len(matchIndices) > 1 {
-		return "", fmt.Errorf("el bloque SEARCH coincide en %d lugares ignorando espacios; debe ser unico. Proporciona mas lineas de contexto", len(matchIndices))
+		return "", fmt.Errorf("the SEARCH block matches in %d places when ignoring whitespace; it must be unique. Please provide more context lines", len(matchIndices))
 	}
 
 	startLine := matchIndices[0]

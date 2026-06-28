@@ -332,7 +332,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
 			m.timeline.renderMessages()
 		} else if len(msg.Models) == 0 {
-			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "El provider no devolvio modelos disponibles."})
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "The provider returned no available models."})
 			m.timeline.renderMessages()
 		} else {
 			m.modelPicker.Open(msg.Models)

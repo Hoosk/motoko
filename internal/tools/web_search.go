@@ -31,15 +31,15 @@ func NewWebSearchTool() *WebSearchTool {
 func (t *WebSearchTool) Spec() Spec {
 	return Spec{
 		Name:    "web_search",
-		Summary: "Busca en la web utilizando el motor de búsqueda Mojeek.",
-		Usage:   "web_search <consulta>",
+		Summary: "Searches the web using the Mojeek search engine.",
+		Usage:   "web_search <query>",
 	}
 }
 
 func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
 	query := strings.TrimSpace(args)
 	if query == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	results, err := t.fetchMojeek(ctx, query)
@@ -60,8 +60,8 @@ func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
 	if len(results) == 0 {
 		return Result{
 			Spec:    t.Spec(),
-			Summary: fmt.Sprintf("Búsqueda finalizada para '%s' en %s (0 resultados).", query, engineName),
-			Output:  "No se encontraron resultados para esta consulta.",
+			Summary: fmt.Sprintf("Search finished for '%s' on %s (0 results).", query, engineName),
+			Output:  "No results found for this query.",
 		}, nil
 	}
 
@@ -72,7 +72,7 @@ func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Búsqueda finalizada para '%s' en %s (%d resultados).", query, engineName, len(results)),
+		Summary: fmt.Sprintf("Search finished for '%s' on %s (%d results).", query, engineName, len(results)),
 		Output:  strings.TrimSpace(builder.String()),
 	}, nil
 }

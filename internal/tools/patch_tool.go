@@ -17,8 +17,8 @@ func NewPatchTool() *PatchTool {
 func (t *PatchTool) Spec() Spec {
 	return Spec{
 		Name:    "patch",
-		Summary: "Aplica cambios sobre archivos del workspace con AST patch multi-lenguaje, SEARCH/REPLACE o unified diff.",
-		Usage:   "patch <ruta> + AST/SEARCH/REPLACE o unified diff con ---/+++",
+		Summary: "Applies changes to workspace files with multi-language AST patch, SEARCH/REPLACE, or unified diff.",
+		Usage:   "patch <path> + AST/SEARCH/REPLACE or unified diff with ---/+++",
 	}
 }
 

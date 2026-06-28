@@ -57,17 +57,17 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 
 	return Response{Entries: []Entry{
 		{Kind: EntryUser, Text: trimmed},
-		{Kind: EntryAssistant, Text: "El runtime esta operativo pero el agente no esta listo. Configura un provider con /provider add y luego selecciona modelo con /models <modelo>."},
+		{Kind: EntryAssistant, Text: "The runtime is operational but the agent is not ready. Configure a provider using /provider add and then select a model using /models <model>."},
 	}}
 }
 
 func (r *Runtime) HandleShellResult(result ShellResult) Response {
-	status := fmt.Sprintf("Comando finalizado en %s con salida %d.", result.Duration.Round(10_000_000), result.ExitCode)
+	status := fmt.Sprintf("Command finished in %s with exit code %d.", result.Duration.Round(10_000_000), result.ExitCode)
 	entries := []Entry{{Kind: EntrySystem, Text: status}}
 
 	output := strings.TrimSpace(result.Output)
 	if output == "" {
-		output = "(sin salida)"
+		output = "(no output)"
 	}
 
 	if result.ExitCode == 0 {
@@ -107,7 +107,7 @@ func (r *Runtime) HandleTaskResult(result TaskEvent) Response {
 
 func (r *Runtime) handleShell(command string) Response {
 	if command == "" {
-		return Response{Entries: []Entry{{Kind: EntryError, Text: "Falta el comando despues de !"}}}
+		return Response{Entries: []Entry{{Kind: EntryError, Text: "Missing command after !"}}}
 	}
 
 	decision := classifyShell(r.mode, command)

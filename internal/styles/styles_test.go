@@ -12,7 +12,7 @@ func TestStylesRenderNonEmptyOutput(t *testing.T) {
 }
 
 func TestSetTheme(t *testing.T) {
-	themes := []string{"cyberpunk", "nord", "dracula", "monochrome"}
+	themes := []string{"cyberpunk", "nord", "dracula", "monochrome", "ghost-cyber", "neon-shadow", "black-ice"}
 	for _, theme := range themes {
 		t.Run(theme, func(t *testing.T) {
 			SetTheme(theme)

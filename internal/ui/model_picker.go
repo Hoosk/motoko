@@ -129,14 +129,10 @@ func (p thinkingPickerState) View() string {
 		return ""
 	}
 
-	titleStyle := styles.BoldNeonStyle
-	hintStyle := styles.GrayStyle
-	accentStyle := styles.BlueStyle
-
 	rows := []string{
-		titleStyle.Render("Thinking Budget"),
-		accentStyle.Render("Model: " + p.model.ID),
-		hintStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
+		styles.PopupTitleStyle.Render("Thinking Budget"),
+		styles.PopupFieldLabelStyle.Render("Model: " + p.model.ID),
+		styles.PopupMutedStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
 		"",
 	}
 

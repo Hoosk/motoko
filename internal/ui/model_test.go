@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -177,3 +178,84 @@ func TestModelMediumWidthKeepsSidebarHiddenAutomatically(t *testing.T) {
 		t.Fatal("expected sidebar to stay hidden automatically on medium terminals")
 	}
 }
+
+func TestModelSidebarAutoOpensOnPendingApproval(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	// Resize to supported width
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = resized.(Model)
+
+	// Simulate that the sidebar is closed but not explicitly hidden by user toggle
+	m.sidebarExplicitlyHidden = false
+	m.showSidebar = false
+
+	// Verify pre-condition
+	if m.showSidebar {
+		t.Fatal("expected sidebar to start closed")
+	}
+
+	// Trigger a command that requires approval (in Plan mode, !ls does this)
+	resModel, _ := m.Update(SubmitPromptMsg{Prompt: "!ls"})
+	m = resModel.(Model)
+
+	if !m.showSidebar {
+		t.Fatal("expected sidebar to auto-open when a command requires approval")
+	}
+}
+
+func TestModelSidebarAutoOpensOnActiveTasks(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	// Resize to supported width
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = resized.(Model)
+
+	m.sidebarExplicitlyHidden = false
+	m.showSidebar = false
+
+	// Start a background task (e.g. sleep) so that active tasks increases from 0 to 1
+	_, err := r.StartTask(context.Background(), "sleep 10")
+	if err != nil {
+		t.Skip("skipping task test if start task fails: ", err)
+		return
+	}
+	defer func() {
+		// Clean up tasks if any
+		for _, task := range r.ListTasks() {
+			_ = r.TerminateTask(task.ID)
+		}
+	}()
+
+	// Send an empty key msg to trigger update loop
+	resModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m = resModel.(Model)
+
+	if !m.showSidebar {
+		t.Fatal("expected sidebar to auto-open when a background task starts")
+	}
+}
+
+func TestModelSidebarDoesNotAutoOpenIfExplicitlyHidden(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	// Resize to supported width
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = resized.(Model)
+
+	// Set explicitly hidden to true
+	m.sidebarExplicitlyHidden = true
+	m.showSidebar = false
+
+	// Trigger a command that requires approval
+	resModel, _ := m.Update(SubmitPromptMsg{Prompt: "!ls"})
+	m = resModel.(Model)
+
+	if m.showSidebar {
+		t.Fatal("expected sidebar to remain closed if it was explicitly hidden")
+	}
+}
+

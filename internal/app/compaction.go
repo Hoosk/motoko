@@ -15,7 +15,7 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 	}
 	active, ok := r.config.Active()
 	if !ok {
-		return fmt.Errorf("no hay provider activo")
+		return fmt.Errorf("no active provider")
 	}
 	client, err := r.providerClient(active)
 	if err != nil {

@@ -25,7 +25,7 @@ func (s sessionFilterItem) Render(active bool) string {
 		cursor = styles.BoldNeonStyle.Render("> ")
 		style = styles.PopupSelectionStyle
 	}
-	line := fmt.Sprintf("%s  %s  (%d mensajes)", s.session.Title, s.session.UpdatedAt.Format("2006-01-02 15:04"), len(s.session.History))
+	line := fmt.Sprintf("%s  %s  (%d messages)", s.session.Title, s.session.UpdatedAt.Format("2006-01-02 15:04"), len(s.session.History))
 	return cursor + style.Render(line)
 }
 
@@ -91,6 +91,7 @@ func (p sessionPickerState) View() string {
 	if p.loading && (p.list == nil || len(p.list.Items) == 0) {
 		rows := []string{
 			styles.PopupTitleStyle.Render("Sessions"),
+			styles.PopupMutedStyle.Render("Esc cancel"),
 			"",
 			styles.PopupMutedStyle.Render("Loading sessions..."),
 		}
@@ -99,6 +100,7 @@ func (p sessionPickerState) View() string {
 	if p.list == nil || len(p.list.Items) == 0 {
 		rows := []string{
 			styles.PopupTitleStyle.Render("Sessions"),
+			styles.PopupMutedStyle.Render("Esc cancel"),
 			"",
 			styles.PopupMutedStyle.Render("No sessions saved for this workspace."),
 		}

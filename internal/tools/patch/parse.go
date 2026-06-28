@@ -10,7 +10,7 @@ func parsePatchRequest(input string) (request, error) {
 	input = strings.ReplaceAll(input, "\r\n", "\n")
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
-		return request{}, fmt.Errorf("uso: primera linea con la ruta seguida del bloque SEARCH/REPLACE o un unified diff")
+		return request{}, fmt.Errorf("usage: first line with the path followed by the SEARCH/REPLACE block or a unified diff")
 	}
 	if strings.HasPrefix(trimmed, "--- ") || strings.HasPrefix(trimmed, "diff --git ") {
 		patch, err := parseUnifiedPatch(trimmed)
@@ -40,12 +40,12 @@ func parsePatchRequest(input string) (request, error) {
 func splitPatchPathAndBody(input string) (string, string, error) {
 	newline := strings.Index(input, "\n")
 	if newline == -1 {
-		return "", "", fmt.Errorf("falta el bloque de patch")
+		return "", "", fmt.Errorf("missing patch block")
 	}
 	path := strings.TrimSpace(input[:newline])
 	body := strings.TrimSpace(input[newline+1:])
 	if path == "" || body == "" {
-		return "", "", fmt.Errorf("formato invalido; falta ruta o bloque de patch")
+		return "", "", fmt.Errorf("invalid format; missing path or patch block")
 	}
 	return path, body, nil
 }
@@ -54,12 +54,12 @@ func parsePatchInput(input string) (string, string, string, error) {
 	input = strings.ReplaceAll(input, "\r\n", "\n")
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return "", "", "", fmt.Errorf("uso: primera linea con la ruta seguida del bloque SEARCH/REPLACE")
+		return "", "", "", fmt.Errorf("usage: first line with the path followed by the SEARCH/REPLACE block")
 	}
 
 	newline := strings.Index(input, "\n")
 	if newline == -1 {
-		return "", "", "", fmt.Errorf("falta el bloque SEARCH/REPLACE")
+		return "", "", "", fmt.Errorf("missing SEARCH/REPLACE block")
 	}
 
 	path := strings.TrimSpace(input[:newline])
@@ -69,7 +69,7 @@ func parsePatchInput(input string) (string, string, string, error) {
 	dividerIndex := strings.Index(body, dividerMarker)
 	replaceIndex := strings.Index(body, replaceMarker)
 	if searchIndex != 0 || dividerIndex == -1 || replaceIndex == -1 || dividerIndex > replaceIndex {
-		return "", "", "", fmt.Errorf("formato invalido; usa SEARCH/REPLACE con este esquema:\n%s\n<old>\n%s\n<new>\n%s", searchMarker, dividerMarker, replaceMarker)
+		return "", "", "", fmt.Errorf("invalid format; use SEARCH/REPLACE with this scheme:\n%s\n<old>\n%s\n<new>\n%s", searchMarker, dividerMarker, replaceMarker)
 	}
 
 	search := strings.TrimPrefix(body[:dividerIndex], searchMarker)
@@ -80,7 +80,7 @@ func parsePatchInput(input string) (string, string, string, error) {
 
 	trailer := strings.TrimSpace(body[replaceIndex+len(replaceMarker):])
 	if trailer != "" {
-		return "", "", "", fmt.Errorf("contenido inesperado despues del bloque REPLACE")
+		return "", "", "", fmt.Errorf("unexpected content after REPLACE block")
 	}
 
 	return path, search, replace, nil
@@ -95,7 +95,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 			continue
 		}
 		if lines[i] != astMarker {
-			return nil, fmt.Errorf("formato AST invalido; se esperaba %s y se encontro: %s", astMarker, lines[i])
+			return nil, fmt.Errorf("invalid AST format; expected %s and found: %s", astMarker, lines[i])
 		}
 		dividerIndex := -1
 		replaceIndex := -1
@@ -106,7 +106,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 			}
 		}
 		if dividerIndex == -1 {
-			return nil, fmt.Errorf("formato AST invalido; falta marcador %s", dividerMarker)
+			return nil, fmt.Errorf("invalid AST format; missing marker %s", dividerMarker)
 		}
 		for j := dividerIndex + 1; j < len(lines); j++ {
 			if lines[j] == replaceMarker {
@@ -115,7 +115,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 			}
 		}
 		if replaceIndex == -1 {
-			return nil, fmt.Errorf("formato AST invalido; falta marcador %s", replaceMarker)
+			return nil, fmt.Errorf("invalid AST format; missing marker %s", replaceMarker)
 		}
 		selectorBlock := strings.Join(lines[i+1:dividerIndex], "\n")
 		replace := strings.Join(lines[dividerIndex+1:replaceIndex], "\n")
@@ -128,7 +128,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 		i = replaceIndex + 1
 	}
 	if len(patches) == 0 {
-		return nil, fmt.Errorf("formato AST invalido; no contiene mutaciones")
+		return nil, fmt.Errorf("invalid AST format; contains no mutations")
 	}
 	return patches, nil
 }
@@ -153,7 +153,7 @@ func parseASTSelector(block string) (astSelector, error) {
 				queryLines = append(queryLines, rawLine)
 				continue
 			}
-			return astSelector{}, fmt.Errorf("linea AST invalida: %s", rawLine)
+			return astSelector{}, fmt.Errorf("invalid AST line: %s", rawLine)
 		}
 		key := strings.ToLower(strings.TrimSpace(parts[0]))
 		value := strings.TrimSpace(parts[1])
@@ -169,7 +169,7 @@ func parseASTSelector(block string) (astSelector, error) {
 			selector.Capture = value
 		case "action":
 			if normalizeASTAction(value) == "" {
-				return astSelector{}, fmt.Errorf("accion AST no soportada: %s", value)
+				return astSelector{}, fmt.Errorf("unsupported AST action: %s", value)
 			}
 		case "type":
 			selector.Type = value
@@ -180,11 +180,11 @@ func parseASTSelector(block string) (astSelector, error) {
 		case "index":
 			index, err := strconv.Atoi(value)
 			if err != nil || index < 1 {
-				return astSelector{}, fmt.Errorf("index AST invalido: %s", value)
+				return astSelector{}, fmt.Errorf("invalid AST index: %s", value)
 			}
 			selector.Index = index
 		default:
-			return astSelector{}, fmt.Errorf("clave AST no soportada: %s", key)
+			return astSelector{}, fmt.Errorf("unsupported AST key: %s", key)
 		}
 	}
 	if queryMode {
@@ -197,7 +197,7 @@ func parseASTSelector(block string) (astSelector, error) {
 		return selector, nil
 	}
 	if strings.TrimSpace(selector.Type) == "" {
-		return astSelector{}, fmt.Errorf("el bloque AST requiere 'query:' o 'type: <node_type>'")
+		return astSelector{}, fmt.Errorf("AST block requires 'query:' or 'type: <node_type>'")
 	}
 	return selector, nil
 }

@@ -73,13 +73,13 @@ func (c baseClient) Configured() bool {
 
 func (c baseClient) ConfigurationError() error {
 	if c.baseURL == "" {
-		return fmt.Errorf("provider no configurado: URL base vacía")
+		return fmt.Errorf("provider not configured: empty base URL")
 	}
 	if c.apiKey == "" {
-		return fmt.Errorf("provider no configurado: API Key vacía")
+		return fmt.Errorf("provider not configured: empty API Key")
 	}
 	if c.model == "" {
-		return fmt.Errorf("provider no configurado: modelo no especificado")
+		return fmt.Errorf("provider not configured: model not specified")
 	}
 	return nil
 }

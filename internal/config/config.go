@@ -157,7 +157,7 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	} else {
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("error al decodificar la configuracion: %w", err)
+			return nil, fmt.Errorf("failed to decode config: %w", err)
 		}
 		// Decrypt API keys
 		for i, p := range cfg.Providers {

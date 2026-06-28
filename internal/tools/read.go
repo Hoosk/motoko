@@ -27,8 +27,8 @@ func NewReadTool() *ReadTool {
 func (t *ReadTool) Spec() Spec {
 	return Spec{
 		Name:    "read",
-		Summary: "Lee un archivo o lista un directorio del workspace.",
-		Usage:   "read <ruta> [offset] [limit]",
+		Summary: "Reads a file or lists a directory in the workspace.",
+		Usage:   "read <path> [offset] [limit]",
 	}
 }
 
@@ -36,7 +36,7 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	offset := 1
@@ -44,14 +44,14 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	if len(parts) >= 2 {
 		value, err := strconv.Atoi(parts[1])
 		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("offset invalido: %s", parts[1])
+			return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
 		}
 		offset = value
 	}
 	if len(parts) >= 3 {
 		value, err := strconv.Atoi(parts[2])
 		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("limit invalido: %s", parts[2])
+			return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
 		}
 		limit = value
 	}
@@ -85,7 +85,7 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 
 		return Result{
 			Spec:    t.Spec(),
-			Summary: fmt.Sprintf("Directorio %s con %d entradas.", relPath, len(lines)),
+			Summary: fmt.Sprintf("Directory %s with %d entries.", relPath, len(lines)),
 			Output:  strings.Join(lines, "\n") + injected,
 		}, nil
 	}
@@ -116,12 +116,12 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	if len(lines) == 0 {
-		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin contenido visible en %s desde la linea %d.", relPath, offset), Output: injected}, nil
+		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("No visible content in %s from line %d.", relPath, offset), Output: injected}, nil
 	}
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Archivo %s leido desde linea %d (%d lineas).", filepath.ToSlash(relPath), offset, len(lines)),
+		Summary: fmt.Sprintf("File %s read from line %d (%d lines).", filepath.ToSlash(relPath), offset, len(lines)),
 		Output:  strings.Join(lines, "\n") + injected,
 	}, nil
 }

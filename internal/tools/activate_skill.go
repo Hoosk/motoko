@@ -20,8 +20,8 @@ func NewActivateSkillTool(available []skills.Skill) *ActivateSkillTool {
 func (t *ActivateSkillTool) Spec() Spec {
 	return Spec{
 		Name:    "activate_skill",
-		Summary: "Activa y carga las instrucciones detalladas de una habilidad (skill) del catalogo.",
-		Usage:   "activate_skill <nombre>",
+		Summary: "Activates and loads detailed instructions of a skill from the catalog.",
+		Usage:   "activate_skill <name>",
 	}
 }
 
@@ -29,7 +29,7 @@ func (t *ActivateSkillTool) DynamicSpec(ctx ToolContext) Spec {
 	spec := t.Spec()
 	if len(ctx.AvailableSkills) > 0 {
 		var xmlBuilder strings.Builder
-		xmlBuilder.WriteString("Activa y carga las instrucciones de un skill. Skills disponibles:\n<available-skills>\n")
+		xmlBuilder.WriteString("Activates and loads the instructions of a skill. Available skills:\n<available-skills>\n")
 		for _, s := range ctx.AvailableSkills {
 			fmt.Fprintf(&xmlBuilder, "  <skill name=\"%s\" />\n", s)
 		}
@@ -44,7 +44,7 @@ func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error
 	_ = ctx
 	args = strings.TrimSpace(args)
 	if args == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	// Case-insensitive lookup
@@ -57,7 +57,7 @@ func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error
 	}
 
 	if found == nil {
-		return Result{}, fmt.Errorf("habilidad desconocida: %s", args)
+		return Result{}, fmt.Errorf("unknown skill: %s", args)
 	}
 
 	// Structured Wrapping as described in the specification:
@@ -74,7 +74,7 @@ func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Habilidad %s activada exitosamente.", found.Name),
+		Summary: fmt.Sprintf("Skill %s activated successfully.", found.Name),
 		Output:  outputBuilder.String(),
 	}, nil
 }

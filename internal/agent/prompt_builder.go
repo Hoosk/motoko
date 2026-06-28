@@ -28,6 +28,7 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"--- TACHIKOMA & SUBAGENT PROTOCOLS ---",
 		"- TACHIKOMA FIRST: Always check '[Background Signals]' and '[Context]' sections before using any tool. Tachikomas are background workers that gather codebase context dynamically to minimize token consumption and keep your context window high-signal.",
 		"- ON-DEMAND SIGNALS: If a signal mentions 'available on-demand', use the 'inspect' tool for that worker before running expensive grep/search tools.",
+		"- TACHIKOMA TACTICS: Use the specific tactical instructions provided in your mode-specific prompt to leverage Git, Code, Diff, Search, and Dependency signals effectively.",
 		"- DELEGATE SUBTASKS: You have a 'delegate' tool. If a task contains independent research or sub-problems, delegate them to subagents (like 'search' or 'plan') to run in parallel in the background, rather than doing everything sequentially yourself.",
 		"",
 		"--- OPERATING RULES ---",
@@ -150,8 +151,14 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"",
 		fmt.Sprintf("[Workspace]: %s (%s)", info.Workspace, info.Path),
 		fmt.Sprintf("[Git Status]: %s", info.GitSummary()),
-		fmt.Sprintf("[Background Signals]: %s", info.SignalSummary()),
-		"",
+	)
+
+	// Categorize Background Signals
+	if len(info.Signals) > 0 || len(info.OnDemandSignals) > 0 {
+		lines = append(lines, info.CategorizedSignalSummary(), "")
+	}
+
+	lines = append(lines,
 		"[Project Semantic Summary]:",
 		info.SemanticSummary,
 		"",

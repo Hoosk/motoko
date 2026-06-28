@@ -188,7 +188,7 @@ func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for write to unsafe path: %s", unsafePath)
 			}
-			if !strings.Contains(err.Error(), "escritura bloqueada") {
+			if !strings.Contains(err.Error(), "write blocked") {
 				t.Fatalf("expected sandbox error, got: %v", err)
 			}
 		})

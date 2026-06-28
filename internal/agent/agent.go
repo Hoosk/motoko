@@ -103,7 +103,7 @@ func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInpu
 
 func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, onEvent func(StreamEvent) error) (Result, error) {
 	if !a.Configured() {
-		return Result{}, fmt.Errorf("agente no configurado")
+		return Result{}, fmt.Errorf("agent not configured")
 	}
 	startedAt := time.Now()
 
@@ -168,7 +168,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		if len(pending) == 0 {
 			message := strings.TrimSpace(resp.FinalText)
 			if message == "" {
-				message = "No tengo una respuesta util todavia."
+				message = "No useful response yet."
 			}
 			if len(resp.OutputItems) > 0 {
 				history = append(history, resp.OutputItems...)
@@ -215,7 +215,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			mu.Lock()
 			if _, seen := seenToolCalls[toolKey]; seen {
 				mu.Unlock()
-				return Result{}, fmt.Errorf("ciclo de tool detectado: %s %s", toolName, toolInput)
+				return Result{}, fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
 			}
 			seenToolCalls[toolKey] = struct{}{}
 			mu.Unlock()
@@ -285,7 +285,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		}
 	}
 
-	return Result{}, fmt.Errorf("se alcanzo el maximo de iteraciones de tools")
+	return Result{}, fmt.Errorf("maximum tool iterations reached")
 }
 
 func maxToolIterations() int {

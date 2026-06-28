@@ -73,7 +73,7 @@ func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected loop detection error")
 	}
-	if !strings.Contains(err.Error(), "ciclo de tool detectado") {
+	if !strings.Contains(err.Error(), "tool cycle detected") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

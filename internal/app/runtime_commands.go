@@ -106,7 +106,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
 	case "agent":
 		if len(parts) < 2 {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente activo: %s. Agentes disponibles: %s", r.AgentName(), strings.Join(r.AgentNames(), ", "))}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Active agent: %s. Available agents: %s", r.AgentName(), strings.Join(r.AgentNames(), ", "))}}}
 		}
 		agentName := parts[1]
 		found := false
@@ -118,9 +118,9 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			}
 		}
 		if !found {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Agente desconocido: %s", agentName)}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown agent: %s", agentName)}}}
 		}
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente cambiado a: %s", r.AgentName())}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agent switched to: %s", r.AgentName())}}}
 	case "mode":
 		return Response{Signal: "open-mode-popup"}
 	case "shell":
@@ -269,29 +269,29 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return r.handleBrainCommand(parts[1:])
 	case "metrics":
 		if r.currentSession == nil {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay una sesión activa."}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active session."}}}
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "Métricas de la sesión actual (%s):\n", r.currentSession.ID)
-		fmt.Fprintf(&sb, "- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(&sb, "- Mensajes en historial: %d\n", len(r.currentSession.History))
-		sb.WriteString("\nUso de Tokens Acumulado:\n")
-		fmt.Fprintf(&sb, "- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens)
+		fmt.Fprintf(&sb, "Current session metrics (%s):\n", r.currentSession.ID)
+		fmt.Fprintf(&sb, "- Created at: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "- History messages: %d\n", len(r.currentSession.History))
+		sb.WriteString("\nAccumulated Token Usage:\n")
+		fmt.Fprintf(&sb, "- Input Tokens: %d\n", r.currentSession.TotalInputTokens)
 		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
-			fmt.Fprintf(&sb, "  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
+			fmt.Fprintf(&sb, "  * Read from cache: %d (%.1f%% of input)\n", 
 				r.currentSession.TotalCacheReadTokens, 
 				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100)
 		}
 		if r.currentSession.TotalCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens)
+			fmt.Fprintf(&sb, "  * Written to cache: %d\n", r.currentSession.TotalCacheWriteTokens)
 		}
-		fmt.Fprintf(&sb, "- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens)
+		fmt.Fprintf(&sb, "- Output Tokens:  %d\n", r.currentSession.TotalOutputTokens)
 		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
-			fmt.Fprintf(&sb, "  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
+			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n", 
 				r.currentSession.TotalReasoningTokens, 
 				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
 		}
-		fmt.Fprintf(&sb, "- Tokens Totales:    %d\n", r.currentSession.TotalTokens)
+		fmt.Fprintf(&sb, "- Total Tokens:       %d\n", r.currentSession.TotalTokens)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}

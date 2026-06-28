@@ -128,6 +128,33 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 	}
 }
 
+func TestCompletionsThemesKeepsTrailingSpaceContext(t *testing.T) {
+	r := NewRuntime()
+	got := r.Completions("/themes ")
+	want := []string{
+		"/themes cyberpunk",
+		"/themes ghost-cyber",
+		"/themes neon-shadow",
+		"/themes black-ice",
+		"/themes nord",
+		"/themes dracula",
+		"/themes monochrome",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Completions(/themes space) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCompletionsThemesFiltersPrefix(t *testing.T) {
+	r := NewRuntime()
+	got := r.Completions("/themes g")
+	want := []string{"/themes ghost-cyber"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Completions(/themes prefix) = %#v, want %#v", got, want)
+	}
+}
+
+
 func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 	r := NewRuntime(RuntimeOptions{})
 	snapshot := semantic.Snapshot{
@@ -465,7 +492,7 @@ func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *tes
 	if len(resp.Entries) != 1 || resp.Entries[0].Kind != EntryError {
 		t.Fatalf("expected compact error response, got %#v", resp)
 	}
-	if !strings.Contains(resp.Entries[0].Text, "no hay provider activo") {
+	if !strings.Contains(resp.Entries[0].Text, "no active provider") {
 		t.Fatalf("unexpected compact error %q", resp.Entries[0].Text)
 	}
 }

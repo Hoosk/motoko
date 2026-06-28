@@ -73,7 +73,7 @@ func classifyShell(mode Mode, command string) ShellDecision {
 	}
 
 	if mode == ModePlan {
-		return ShellDecision{RequiresApproval: true, Reason: "El modo plan requiere aprobacion para comandos shell."}
+		return ShellDecision{RequiresApproval: true, Reason: "Plan mode requires approval for shell commands."}
 	}
 
 	return ShellDecision{}
@@ -86,7 +86,7 @@ func RunShellCommand(parent context.Context, command string) ShellResult {
 
 	wd, err := os.Getwd()
 	if err != nil {
-		return ShellResult{Command: command, Output: "No se pudo resolver el workspace actual.", ExitCode: -1, Duration: time.Since(start)}
+		return ShellResult{Command: command, Output: "Could not resolve the current workspace.", ExitCode: -1, Duration: time.Since(start)}
 	}
 
 	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
@@ -105,7 +105,7 @@ func RunShellCommand(parent context.Context, command string) ShellResult {
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		result.Output = trimOutput(result.Output + "\nComando cancelado por timeout.")
+		result.Output = trimOutput(result.Output + "\nCommand cancelled due to timeout.")
 		result.ExitCode = 124
 		return result
 	}
