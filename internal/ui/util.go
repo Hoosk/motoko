@@ -112,10 +112,11 @@ func formatShortcut(key, desc string) string {
 
 func helpView() string {
 	rows := [][]string{
-		{formatShortcut("enter", "send"), formatShortcut("tab", "focus shell")},
+		{formatShortcut("enter", "send"), formatShortcut("tab", "next suggestion")},
 		{formatShortcut("ctrl+p", "providers"), formatShortcut("ctrl+m", "models")},
 		{formatShortcut("ctrl+o", "sessions"), formatShortcut("ctrl+s", "sidebar")},
-		{formatShortcut("ctrl+l", "clear"), formatShortcut("ctrl+r", "reset session")},
+		{formatShortcut("ctrl+a", "modes"), formatShortcut("ctrl+r", "toggle reasoning")},
+		{formatShortcut("ctrl+t", "tools"), formatShortcut("ctrl+h", "this help")},
 		{formatShortcut("/", "commands"), formatShortcut("@", "mention file")},
 	}
 
@@ -237,8 +238,22 @@ func overlayBase(base, overlay string, width, height int) string {
 	return strings.Join(res, "\n")
 }
 
+// dimBackground strips ANSI styling from all lines and renders them in muted
+// gray. Used to visually de-emphasise the main UI when a modal popup is open.
+func dimBackground(base string) string {
+	lines := strings.Split(base, "\n")
+	for i, line := range lines {
+		plain := ansiPattern.ReplaceAllString(line, "")
+		lines[i] = styles.GrayStyle.Render(plain)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // overlayCenter superimposes an overlay string (popup modal) centered vertically and horizontally over a base string.
 func overlayCenter(base, overlay string, width, height int) string {
+	// Dim background when a modal is shown.
+	base = dimBackground(base)
+
 	baseLines := strings.Split(base, "\n")
 	overlayLines := strings.Split(overlay, "\n")
 

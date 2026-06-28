@@ -27,34 +27,33 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "help":
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Available commands:",
-			"  /task     Interact with background tasks",
-			"  /brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
-			"  /metrics  Show cumulative token usage metrics for this session",
-			"  /approve  Approve pending tool command execution",
-			"/help     Show this help message",
-			"/clear    Clear the timeline history",
-			"/compact  Manually compact the active session",
-			"/mode     Open the agent mode selector",
-			"/plan     Activate read-only plan mode",
-			"/build    Activate active build mode",
-			"/agent    Switch or show active agent mode",
-			"/shell    Activate direct shell execution mode",
-			"/chat     Return to normal chat mode",
-			"/status   Summarize mode, permissions, and approvals",
-			"/trace    Toggle trace logging to file (if compiled with -tags motoko_trace)",
-			"/context  Show raw system prompt being sent to the agent",
-			"/provider Manage configured LLM providers",
-			"/models   List or select models from the active provider",
-			"/themes   List or switch visual themes",
-			"/sessions List or switch between workspace sessions",
-			"/tools    Show all registered tools",
-			"/tool     Execute a specific runtime tool",
-			"/task     Manage running background tasks",
-			"/approve  Execute the pending shell action",
-			"/deny     Cancel the pending shell action",
-			"/exit     Exit the application",
-			"/quit     Exit the application",
-			"!<cmd>    Execute an explicit shell command",
+			"/help                   Show this help message",
+			"/clear                  Clear the timeline history",
+			"/compact                Manually compact the active session",
+			"/mode                   Open the agent mode selector",
+			"/plan                   Activate read-only plan mode",
+			"/build                  Activate active build mode",
+			"/agent <name>           Switch or show active agent mode",
+			"/shell                  Activate direct shell execution mode",
+			"/chat                   Return to normal chat mode",
+			"/status                 Summarize mode, permissions, and approvals",
+			"/context                Show raw system prompt sent to the agent",
+			"/provider               Manage configured LLM providers",
+			"/models [model]         List or select models from the active provider",
+			"/themes [theme]         List or switch visual themes (cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome)",
+			"/sessions               List or switch between workspace sessions",
+			"/tools                  Show all registered tools",
+			"/tool <name> [args]     Execute a specific runtime tool",
+			"/task                   Interact with background tasks",
+			"/approve                Execute the pending tool command",
+			"/deny                   Cancel the pending tool command",
+			"/brain                  Interact with the session brain (list, read, plan, tasks, summary, clear)",
+			"/metrics                Show cumulative token usage for this session",
+			"/trace                  Toggle trace logging (requires -tags motoko_trace)",
+			"/exit                   Exit the application",
+			"/quit                   Exit the application",
+			"!<cmd>                  Execute an explicit shell command",
+			"@<file|agent>           Mention a file or agent in the prompt",
 		}, "\n")}}}
 	case "exit", "quit":
 		return Response{Signal: "quit"}
@@ -64,17 +63,28 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			if current == "" {
 				current = "cyberpunk"
 			}
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Tema actual: %s\nTemas disponibles: cyberpunk, nord, dracula, monochrome\nUso: /themes <nombre>", current)}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf(
+				"Current theme: %s\n" +
+				"Available themes:\n" +
+				"  cyberpunk    Default dark neon green (default)\n" +
+				"  ghost-cyber  Restrained dark cyberpunk with precise accents\n" +
+				"  neon-shadow  Dramatic high-contrast magenta and cyan\n" +
+				"  black-ice    Cold technical with ice-blue accents\n" +
+				"  nord         Arctic blue palette\n" +
+				"  dracula      Classic purple and green\n" +
+				"  monochrome   Pure green-on-black terminal\n" +
+				"Usage: /themes <name>",
+				current)}}}
 		}
 		themeName := strings.ToLower(parts[1])
 		switch themeName {
-		case "cyberpunk", "nord", "dracula", "monochrome":
+		case "cyberpunk", "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
 			r.config.Theme = themeName
 			_ = r.config.Save()
 			styles.SetTheme(themeName)
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Tema cambiado a: %s", themeName)}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Theme changed to: " + themeName}}}
 		default:
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Tema desconocido: %s. Temas disponibles: cyberpunk, nord, dracula, monochrome", themeName)}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown theme: %s. Available: cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome", themeName)}}}
 		}
 	case cmdClear:
 		if r.currentSession != nil {

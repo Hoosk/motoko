@@ -125,6 +125,34 @@ func (c ContextInfo) SignalSummary() string {
 	return strings.Join(parts, " | ")
 }
 
+func (c ContextInfo) CategorizedSignalSummary() string {
+	if len(c.Signals) == 0 && len(c.OnDemandSignals) == 0 {
+		return "no extra signals"
+	}
+
+	var sb strings.Builder
+
+	if len(c.Signals) > 0 {
+		sb.WriteString("[Background Signals]\n")
+		// Note: In a real production environment, we might want to sort these keys for deterministic output.
+		for name, status := range c.Signals {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", name, status))
+		}
+	}
+
+	if len(c.OnDemandSignals) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("[On-Demand Signals]\n")
+		for name, hint := range c.OnDemandSignals {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", name, hint))
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
 func (c ContextInfo) RelevantFilesSummary() string {
 	if len(c.RelevantFiles) == 0 {
 		return "no suggested relevant files"

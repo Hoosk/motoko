@@ -17,6 +17,7 @@ func TestEntriesRendering(t *testing.T) {
 		want string
 	}{
 		{app.EntryUser, "hello", ">"},
+		{app.EntryAssistant, "hello", "▎"},
 		{app.EntrySystem, "ready", "ready"},
 		{app.EntryError, "fail", "fail"},
 	}

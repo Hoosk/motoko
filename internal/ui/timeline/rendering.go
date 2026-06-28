@@ -6,6 +6,8 @@ import (
 	"github.com/Hoosk/motoko/internal/app"
 )
 
+const startupMessageCount = 3
+
 // VisibleEntries returns the subset of entries to display.
 func (m *Model) VisibleEntries() []app.Entry {
 	if m.ShowReasoning {
@@ -53,7 +55,7 @@ func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer 
 }
 
 func (m *Model) RenderLineMetadata(idx int) []RenderLine {
-	if idx < 2 {
+	if idx < startupMessageCount {
 		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
 		meta := make([]RenderLine, 0, len(plainLines))
 		for _, line := range plainLines {
@@ -61,7 +63,7 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 		}
 		return meta
 	}
-	entryIdx := idx - 2
+	entryIdx := idx - startupMessageCount
 	visible := m.VisibleEntries()
 	if entryIdx < 0 || entryIdx >= len(visible) {
 		return nil
@@ -71,23 +73,18 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 	case app.EntryAssistant, app.EntryReasoning:
 		wrapped := strings.Split(WrapText(entry.Text, m.AssistantInnerWidth()), "\n")
 		meta := make([]RenderLine, 0, len(wrapped))
+		contentX := AssistantContentX
+		if entry.Kind == app.EntryReasoning {
+			contentX = ReasoningContentX
+		}
 		for _, line := range wrapped {
-			meta = append(meta, RenderLine{Content: line, ContentX: AssistantContentX, Selectable: true})
+			meta = append(meta, RenderLine{Content: line, ContentX: contentX, Selectable: true})
 		}
 		return meta
 	case app.EntryUser:
 		w := max(20, m.Viewport.Width)
-		ruleWidth := w - 2
-		if ruleWidth < 10 {
-			ruleWidth = 10
-		}
-		ruleStr := strings.Repeat("─", ruleWidth)
-
 		wrapped := strings.Split(WrapText(entry.Text, w-5), "\n")
-		meta := make([]RenderLine, 0, len(wrapped)+2)
-
-		// Top rule
-		meta = append(meta, RenderLine{Content: ruleStr, Selectable: false})
+		meta := make([]RenderLine, 0, len(wrapped))
 		// Body lines
 		for i, line := range wrapped {
 			var bodyLine string
@@ -98,8 +95,6 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 			}
 			meta = append(meta, RenderLine{Content: bodyLine, ContentX: UserContentX, Selectable: true})
 		}
-		// Bottom rule
-		meta = append(meta, RenderLine{Content: ruleStr, Selectable: false})
 		return meta
 	case app.EntryCommand, app.EntryOutput, app.EntryError, app.EntrySystem, app.EntryHelp:
 		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
@@ -129,14 +124,14 @@ func (m *Model) MessageAtY(y int) int {
 	if y >= currentY && y < currentY+logoHeight {
 		return -1
 	}
-	currentY += logoHeight + 2
+	currentY += logoHeight + 1
 
-	welcomeMsg := "Motoko online. /provider add opens the configuration form; /models lists or selects models."
+	welcomeMsg := "Inspect code, edit files, run tools, or ask for a focused review."
 	welcomeHeight := strings.Count(WrapText(welcomeMsg, m.Viewport.Width), "\n") + 1
 	if y >= currentY && y < currentY+welcomeHeight {
 		return -1
 	}
-	currentY += welcomeHeight + 2
+	currentY += welcomeHeight + 1
 
 	visible := m.VisibleEntries()
 	for i, entry := range visible {
@@ -156,10 +151,10 @@ func (m *Model) MessageAtY(y int) int {
 			if !copyable {
 				return -1
 			}
-			return i + 2
+			return i + startupMessageCount
 		}
 
-		currentY += height + 2
+		currentY += height + 1
 	}
 
 	return -1

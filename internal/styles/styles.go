@@ -124,20 +124,62 @@ func SetTheme(name string) {
 		WarmGold = lipgloss.Color("#A0FFA0")
 		BorderColor = lipgloss.Color("#333333")
 		SelectionHighlight = lipgloss.Color("#222222")
+	case "ghost-cyber":
+		Background = lipgloss.Color("#070D14")
+		Surface = lipgloss.Color("#0B1520")
+		SurfaceSoft = lipgloss.Color("#091219")
+		MainNeon = lipgloss.Color("#45D19A")
+		AccentBlue = lipgloss.Color("#4BA8D8")
+		AccentViolet = lipgloss.Color("#8B6FD4")
+		Gray = lipgloss.Color("#556677")
+		White = lipgloss.Color("#D0DCE8")
+		SoftBlue = lipgloss.Color("#7DC4F0")
+		AlertPink = lipgloss.Color("#D4607A")
+		WarmGold = lipgloss.Color("#C9A855")
+		BorderColor = lipgloss.Color("#142030")
+		SelectionHighlight = lipgloss.Color("#0F2D40")
+	case "neon-shadow":
+		Background = lipgloss.Color("#080510")
+		Surface = lipgloss.Color("#100C1E")
+		SurfaceSoft = lipgloss.Color("#0C0916")
+		MainNeon = lipgloss.Color("#E040FB")
+		AccentBlue = lipgloss.Color("#00E5FF")
+		AccentViolet = lipgloss.Color("#7C4DFF")
+		Gray = lipgloss.Color("#6B5F80")
+		White = lipgloss.Color("#EDE8F8")
+		SoftBlue = lipgloss.Color("#80DEEA")
+		AlertPink = lipgloss.Color("#FF4081")
+		WarmGold = lipgloss.Color("#FFD740")
+		BorderColor = lipgloss.Color("#1E1530")
+		SelectionHighlight = lipgloss.Color("#1A0F38")
+	case "black-ice":
+		Background = lipgloss.Color("#050A10")
+		Surface = lipgloss.Color("#0A1520")
+		SurfaceSoft = lipgloss.Color("#071018")
+		MainNeon = lipgloss.Color("#00D4FF")
+		AccentBlue = lipgloss.Color("#0088CC")
+		AccentViolet = lipgloss.Color("#4488BB")
+		Gray = lipgloss.Color("#3D6070")
+		White = lipgloss.Color("#C8E8F5")
+		SoftBlue = lipgloss.Color("#66CCEE")
+		AlertPink = lipgloss.Color("#FF4455")
+		WarmGold = lipgloss.Color("#88CCDD")
+		BorderColor = lipgloss.Color("#0D2030")
+		SelectionHighlight = lipgloss.Color("#0A2535")
 	default: // "cyberpunk"
-		Background = lipgloss.Color("#0B121C")
-		Surface = lipgloss.Color("#10161E")
-		SurfaceSoft = lipgloss.Color("#0E141B")
-		MainNeon = lipgloss.Color("#71F7A5")
-		AccentBlue = lipgloss.Color("#74C7FF")
-		AccentViolet = lipgloss.Color("#B18CFF")
-		Gray = lipgloss.Color("#6080A0")
-		White = lipgloss.Color("#E6EDF3")
-		SoftBlue = lipgloss.Color("#A9D8FF")
-		AlertPink = lipgloss.Color("#FF7BCB")
-		WarmGold = lipgloss.Color("#F4C96B")
-		BorderColor = lipgloss.Color("#22303D")
-		SelectionHighlight = lipgloss.Color("#1E3D58")
+		Background = lipgloss.Color("#09111A")
+		Surface = lipgloss.Color("#0E1823")
+		SurfaceSoft = lipgloss.Color("#0B141D")
+		MainNeon = lipgloss.Color("#63F5B0")
+		AccentBlue = lipgloss.Color("#6EC8FF")
+		AccentViolet = lipgloss.Color("#A987FF")
+		Gray = lipgloss.Color("#7A91A8")
+		White = lipgloss.Color("#EDF4FA")
+		SoftBlue = lipgloss.Color("#9DD8FF")
+		AlertPink = lipgloss.Color("#FF79C6")
+		WarmGold = lipgloss.Color("#E8C56A")
+		BorderColor = lipgloss.Color("#1B3444")
+		SelectionHighlight = lipgloss.Color("#16354D")
 	}
 
 	// Reinitialize all style instances with the updated colors
@@ -151,14 +193,10 @@ func SetTheme(name string) {
 		Foreground(Gray)
 
 	TimelineStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(BorderColor).
-		Padding(1, 2)
+		Padding(0, 1)
 
 	InputChromeStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(BorderColor).
-		Padding(1, 1)
+		Padding(0, 1)
 
 	InputStyle = lipgloss.NewStyle().
 		Foreground(White)
@@ -174,24 +212,10 @@ func SetTheme(name string) {
 		Padding(0, 1)
 
 	AssistantBlockStyle = lipgloss.NewStyle().
-		Foreground(White).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderLeft(true).
-		BorderRight(false).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderForeground(MainNeon).
-		PaddingLeft(2)
+		Foreground(White)
 
 	ReasoningBlockStyle = lipgloss.NewStyle().
-		Foreground(Gray).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderLeft(true).
-		BorderRight(false).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderForeground(Gray).
-		PaddingLeft(2)
+		Foreground(Gray)
 
 	AssistantLabelStyle = lipgloss.NewStyle().
 		Foreground(MainNeon).
@@ -218,10 +242,8 @@ func SetTheme(name string) {
 		Foreground(Gray)
 
 	FooterStyle = lipgloss.NewStyle().
+		Foreground(Gray).
 		Padding(0, 1)
-
-	SuggestionStyle = lipgloss.NewStyle().
-		Foreground(Gray)
 
 	SelectionStyle = lipgloss.NewStyle().
 		Foreground(MainNeon).
@@ -233,6 +255,9 @@ func SetTheme(name string) {
 		BorderForeground(MainNeon).
 		Background(Surface).
 		Padding(1, 2)
+
+	SuggestionStyle = lipgloss.NewStyle().
+		Foreground(SoftBlue)
 
 	PopupTitleStyle = lipgloss.NewStyle().
 		Foreground(MainNeon).
@@ -260,13 +285,7 @@ func SetTheme(name string) {
 		Foreground(Gray)
 
 	SelectedMessageStyle = lipgloss.NewStyle().
-		BorderLeft(true).
-		BorderRight(false).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderStyle(lipgloss.ThickBorder()).
-		BorderForeground(MainNeon).
-		PaddingLeft(1)
+		Foreground(White)
 
 	DiffAddStyle = lipgloss.NewStyle().
 		Foreground(AccentBlue)

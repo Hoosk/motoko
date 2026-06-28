@@ -64,6 +64,7 @@ type AppConfig struct {
 	Agents         map[string]AgentOverride `json:"agents,omitempty"`
 	ActiveProvider string                   `json:"active_provider"`
 	Theme          string                   `json:"theme,omitempty"`
+	Density        string                   `json:"density,omitempty"`
 	Providers      []ProviderConfig         `json:"providers"`
 	Search         SearchConfig             `json:"search,omitempty"`
 }
@@ -77,6 +78,9 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if other.Theme != "" {
 		c.Theme = other.Theme
+	}
+	if other.Density != "" {
+		c.Density = other.Density
 	}
 	for _, op := range other.Providers {
 		op = NormalizeProvider(op)
@@ -204,6 +208,7 @@ func (c *AppConfig) Save() error {
 	encryptedCfg.Search = c.Search
 	encryptedCfg.Agents = c.Agents
 	encryptedCfg.Theme = c.Theme
+	encryptedCfg.Density = c.Density
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p

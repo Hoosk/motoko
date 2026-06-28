@@ -182,7 +182,7 @@ func (m ComposerModel) View() string {
 	promptBlock := lipgloss.NewStyle().Width(3).Render(strings.Join(promptLines, "\n"))
 	mentionDropdown := m.renderMentionDropdownBlock()
 	suggestions := m.renderSuggestionsLine()
-	suggestionsBlock := lipgloss.NewStyle().MarginTop(1).Render(suggestions)
+	suggestionsBlock := suggestions
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, promptBlock, styles.InputStyle.Render(m.textarea.View()))
 
@@ -199,9 +199,11 @@ func (m ComposerModel) View() string {
 	if chromeWidth < 0 {
 		chromeWidth = 0
 	}
-	return styles.InputChromeStyle.Width(chromeWidth).Render(
+	separator := styles.GrayStyle.Width(chromeWidth).Render(strings.Repeat("─", chromeWidth))
+	content := styles.InputChromeStyle.Width(chromeWidth).Render(
 		lipgloss.JoinVertical(lipgloss.Left, blocks...),
 	)
+	return lipgloss.JoinVertical(lipgloss.Left, separator, content)
 }
 
 func (m *ComposerModel) SetWidth(width int) {
@@ -219,8 +221,8 @@ func (m *ComposerModel) syncLayout() {
 	if m.width <= 0 {
 		return
 	}
-	// Overhead: Chrome (4) + promptBlock (3) = 7
-	textareaWidth := max(16, m.width-7)
+	// Overhead: Chrome (2) + promptBlock (3) = 5
+	textareaWidth := max(16, m.width-5)
 	m.textarea.SetWidth(textareaWidth)
 	m.textarea.SetHeight(2)
 }

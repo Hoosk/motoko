@@ -99,3 +99,81 @@ func TestModelDoubleCtrlC(t *testing.T) {
 	}
 }
 
+func TestModelStartsWithSidebarHidden(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	if m.showSidebar {
+		t.Fatal("expected sidebar to be hidden by default")
+	}
+	if !m.sidebarExplicitlyHidden {
+		t.Fatal("expected sidebar to be marked explicitly hidden by default")
+	}
+}
+
+func TestModelSidebarToggleWorksOnSupportedWidth(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = resized.(Model)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	if !m.showSidebar {
+		t.Fatal("expected sidebar to open on supported width")
+	}
+	if m.sidebarExplicitlyHidden {
+		t.Fatal("expected sidebar hidden flag to clear when opened")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	if m.showSidebar {
+		t.Fatal("expected sidebar to close on second toggle")
+	}
+	if !m.sidebarExplicitlyHidden {
+		t.Fatal("expected sidebar hidden flag to be restored when closed")
+	}
+}
+
+func TestModelSidebarToggleWarnsOnSmallWidth(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = resized.(Model)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+	if m.showSidebar {
+		t.Fatal("expected sidebar to remain hidden on small width")
+	}
+	if !strings.Contains(m.notificationText, "min 84") {
+		t.Fatalf("expected small-width warning, got %q", m.notificationText)
+	}
+}
+
+func TestModelLargeWidthShowsSidebarAutomatically(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 32})
+	m = resized.(Model)
+
+	if !m.showSidebar {
+		t.Fatal("expected sidebar to show automatically on large terminals")
+	}
+}
+
+func TestModelMediumWidthKeepsSidebarHiddenAutomatically(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	m = resized.(Model)
+
+	if m.showSidebar {
+		t.Fatal("expected sidebar to stay hidden automatically on medium terminals")
+	}
+}

@@ -38,39 +38,61 @@ type agentStreamBuffer struct {
 }
 
 type Model struct {
-	lastCtrlC        time.Time
-	notificationTime time.Time
-	agentBuffer      *agentStreamBuffer
-	agentStream      chan app.AgentStreamEvent
-	runtime          *app.Runtime
-	modelPicker      modelPickerState
-	taskStatus       string
-	notificationText string
-	sessionPicker    sessionPickerState
-	sidebar          SidebarModel
-	providerForm     providerForm
-	modePopup        modePopupState
-	thinkingPicker   thinkingPickerState
-	composer         ComposerModel
-	timeline         TimelineModel
-	footer           FooterModel
-	width            int
-	height           int
-	notificationShow      bool
-	showHelp              bool
-	showTools             bool
-	showSidebar           bool
+	lastCtrlC               time.Time
+	notificationTime        time.Time
+	agentBuffer             *agentStreamBuffer
+	agentStream             chan app.AgentStreamEvent
+	runtime                 *app.Runtime
+	modelPicker             modelPickerState
+	taskStatus              string
+	notificationText        string
+	sessionPicker           sessionPickerState
+	sidebar                 SidebarModel
+	providerForm            providerForm
+	modePopup               modePopupState
+	thinkingPicker          thinkingPickerState
+	composer                ComposerModel
+	timeline                TimelineModel
+	footer                  FooterModel
+	width                   int
+	height                  int
+	notificationShow        bool
+	showHelp                bool
+	showTools               bool
+	showSidebar             bool
 	sidebarExplicitlyHidden bool
+	// Sidebar auto-open tracking
+	prevHasPendingApproval  bool
+	prevActiveTasks         int
+	prevActiveSubagents     int
+}
+
+func (m Model) sidebarLayout() (int, bool) {
+	if m.width < 84 {
+		return 0, false
+	}
+	if m.width < 110 {
+		return 24, true
+	}
+	if m.width < 140 {
+		return 28, true
+	}
+	return 32, true
+}
+
+func (m Model) sidebarPreferredByWidth() bool {
+	return m.width >= 140
 }
 
 func NewModel(runtime *app.Runtime) Model {
 	m := Model{
-		runtime:     runtime,
-		timeline:    NewTimelineModel(),
-		composer:    NewComposerModel(runtime),
-		footer:      NewFooterModel(runtime),
-		sidebar:     NewSidebarModel(runtime),
-		showSidebar: true,
+		runtime:                 runtime,
+		timeline:                NewTimelineModel(),
+		composer:                NewComposerModel(runtime),
+		footer:                  NewFooterModel(runtime),
+		sidebar:                 NewSidebarModel(runtime),
+		showSidebar:             false,
+		sidebarExplicitlyHidden: true,
 	}
 
 	m.timeline.version = runtime.Version()
@@ -387,9 +409,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionPicker.Open()
 			cmds = append(cmds, m.listSessions())
 		case "ctrl+s", "alt+s":
-			if m.width < 100 {
+			if _, allowed := m.sidebarLayout(); !allowed {
 				m.notificationShow = true
-				m.notificationText = "Sidebar disabled: terminal width too small (min 100)"
+				m.notificationText = "Sidebar disabled: terminal width too small (min 84)"
 				m.notificationTime = time.Now()
 				cmds = append(cmds, m.hideNotification())
 			} else {
@@ -430,6 +452,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.sidebar, cmd = m.sidebar.Update(msg)
 	cmds = append(cmds, cmd)
 
+	// 5. Sidebar contextual auto-open
+	currentHasPendingApproval := m.runtime.PendingApproval() != ""
+	currentActiveTasks := m.runtime.ActiveTasks()
+	currentActiveSubagents := len(m.runtime.ActiveSubagents())
+
+	shouldAutoOpen := false
+	if currentHasPendingApproval && !m.prevHasPendingApproval {
+		shouldAutoOpen = true
+	}
+	if currentActiveTasks > 0 && m.prevActiveTasks == 0 {
+		shouldAutoOpen = true
+	}
+	if currentActiveSubagents > 0 && m.prevActiveSubagents == 0 {
+		shouldAutoOpen = true
+	}
+	if shouldAutoOpen && !m.showSidebar && !m.sidebarExplicitlyHidden {
+		if _, allowed := m.sidebarLayout(); allowed {
+			m.showSidebar = true
+		}
+	}
+	m.prevHasPendingApproval = currentHasPendingApproval
+	m.prevActiveTasks = currentActiveTasks
+	m.prevActiveSubagents = currentActiveSubagents
+
 	m.SyncLayout()
 
 	return m, tea.Batch(cmds...)
@@ -440,34 +486,34 @@ func (m Model) renderComposerToolbar(width int) string {
 	var modeIndicator string
 	switch agentName {
 	case "plan":
-		modeIndicator = styles.BoldVioletStyle.Render("● plan")
+		modeIndicator = styles.BoldVioletStyle.Render("[plan]")
 	case "build":
-		modeIndicator = styles.BoldNeonStyle.Render("● build")
+		modeIndicator = styles.BoldNeonStyle.Render("[build]")
 	default:
-		modeIndicator = styles.WarmGoldStyle.Render("● " + agentName)
+		modeIndicator = styles.WarmGoldStyle.Render("[" + agentName + "]")
 	}
 
 	var statusStr string
 	if m.timeline.model.Thinking || m.footer.thinking {
 		frame := thinkingFrames[m.footer.thinkingFrame]
-		statusStr = "  " + styles.BoldNeonStyle.Render(frame) + " " + styles.BlueStyle.Render(agentActivityLabel(agentName)+"...")
+		statusStr = styles.BoldNeonStyle.Render(frame) + " " + styles.BlueStyle.Render(agentActivityLabel(agentName)+"...")
 	} else {
-		statusStr = "  " + styles.GrayStyle.Render("idle")
+		statusStr = styles.GrayStyle.Render("idle")
 	}
 
-	left := modeIndicator + statusStr
+	left := " " + modeIndicator + "  " + statusStr
 
 	var subagentsStr string
 	activeSubagents := m.runtime.ActiveSubagents()
 	if len(activeSubagents) > 0 {
-		subagentsStr = "  " + styles.BoldBlueStyle.Render("Subagents: ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
+		subagentsStr = styles.BoldBlueStyle.Render("subagents ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
 	}
 
 	helpHint := styles.GrayStyle.Render("Ctrl+H help • Ctrl+A modes • Ctrl+T tools • Ctrl+R reasoning")
 
-	leftContent := "  " + left
+	leftContent := left
 	if subagentsStr != "" {
-		leftContent += "   " + subagentsStr
+		leftContent += "  " + subagentsStr
 	}
 
 	leftLen := lipgloss.Width(leftContent)
@@ -478,7 +524,7 @@ func (m Model) renderComposerToolbar(width int) string {
 	}
 
 	toolbarContent := leftContent + strings.Repeat(" ", paddingLen) + helpHint
-	return toolbarContent
+	return styles.SystemStyle.Width(width).Render(toolbarContent)
 }
 
 func (m Model) View() string {
@@ -570,16 +616,16 @@ func (m *Model) SyncLayout() {
 		return
 	}
 
-	if m.width < 100 {
+	sidebarWidth, sidebarAllowed := m.sidebarLayout()
+	if !sidebarAllowed {
 		m.showSidebar = false
+		m.sidebarExplicitlyHidden = true
 	} else if !m.sidebarExplicitlyHidden {
 		m.showSidebar = true
+	} else {
+		m.showSidebar = m.sidebarPreferredByWidth()
 	}
 
-	sidebarWidth := 36
-	if m.width < 120 {
-		sidebarWidth = 28
-	}
 	if !m.showSidebar {
 		sidebarWidth = 0
 	}

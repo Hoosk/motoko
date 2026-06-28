@@ -52,18 +52,24 @@ func (m SidebarModel) View() string {
 	info := m.runtime.GetContextInfo()
 	contentWidth := m.width - 3 // Account for left border (1) and padding (2)
 
-	// Top Title Card
-	sidebarHeader := []string{
-		styles.BoldNeonStyle.Render("❖  MONITOR PROFILE"),
-		styles.GrayStyle.Render(strings.Repeat("━", contentWidth)),
-		"",
+	var content []string
+	if pending := strings.TrimSpace(m.runtime.PendingApproval()); pending != "" {
+		content = append(content,
+			renderHeader("APPROVAL", styles.BoldNeonStyle, contentWidth),
+			styles.ErrorStyle.Render(truncate("  "+pending, contentWidth)),
+			"",
+		)
+	}
+	if tasks := m.runtime.ActiveTasks(); tasks > 0 {
+		content = append(content,
+			renderHeader("TASKS", styles.BoldBlueStyle, contentWidth),
+			styles.WhiteStyle.Render(fmt.Sprintf("%d active", tasks)),
+			"",
+		)
 	}
 
-	// Section 1: Relevant Files
-	fileLines := []string{
-		renderHeader("RELEVANT FILES", styles.BoldBlueStyle, contentWidth),
-	}
 	if len(info.RelevantFiles) > 0 {
+		fileLines := []string{renderHeader("FILES", styles.BoldBlueStyle, contentWidth)}
 		limit := 5
 		for i, file := range info.RelevantFiles {
 			if i >= limit {
@@ -79,16 +85,11 @@ func (m SidebarModel) View() string {
 			}
 			fileLines = append(fileLines, styles.WhiteStyle.Render("▫  ")+name)
 		}
-	} else {
-		fileLines = append(fileLines, styles.GrayStyle.Render(truncate("  none detected", contentWidth)))
+		content = append(content, fileLines...)
 	}
 
-	// Section 2: Git Status
-	gitLines := []string{
-		"",
-		renderHeader("GIT STATUS", styles.BoldVioletStyle, contentWidth),
-	}
 	if info.HasGit {
+		gitLines := []string{"", renderHeader("GIT", styles.BoldVioletStyle, contentWidth)}
 		gitLines = append(gitLines, fmt.Sprintf("⎇  %s", styles.VioletStyle.Render(info.GitBranch)))
 		if info.GitDirty {
 			var statusParts []string
@@ -107,37 +108,29 @@ func (m SidebarModel) View() string {
 		} else {
 			gitLines = append(gitLines, "  "+styles.GrayStyle.Render("✔ clean"))
 		}
-	} else {
-		gitLines = append(gitLines, styles.GrayStyle.Render("  no repository"))
+		content = append(content, gitLines...)
 	}
 
-	// Section 3: Subagents
-	subagentLines := []string{
-		"",
-		renderHeader("SUBAGENTS", styles.BoldBlueStyle, contentWidth),
-	}
 	activeSubagents := m.runtime.ActiveSubagents()
 	if len(activeSubagents) > 0 {
+		subagentLines := []string{"", renderHeader("SUBAGENTS", styles.BoldBlueStyle, contentWidth)}
 		for _, name := range activeSubagents {
 			subagentLines = append(subagentLines, fmt.Sprintf("%s %s", styles.BlueStyle.Render("✦"), styles.WhiteStyle.Render(name)))
 		}
-	} else {
-		subagentLines = append(subagentLines, styles.GrayStyle.Render(truncate("  none active", contentWidth)))
-	}
-
-	// Section 4: Tachikomas
-	tachikomaLines := []string{
-		"",
-		renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth),
+		content = append(content, subagentLines...)
 	}
 
 	var hasTachikomas bool
+	var tachikomaLines []string
 	var names []string
 	if info.Signals != nil {
 		for name := range info.Signals {
 			names = append(names, name)
 		}
 		sort.Strings(names)
+		if len(names) > 0 {
+			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
+		}
 		for _, name := range names {
 			status := info.Signals[name]
 			maxStatusLen := contentWidth - 17
@@ -164,6 +157,9 @@ func (m SidebarModel) View() string {
 			onDemandNames = append(onDemandNames, name)
 		}
 		sort.Strings(onDemandNames)
+		if len(onDemandNames) > 0 && len(tachikomaLines) == 0 {
+			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
+		}
 		for _, name := range onDemandNames {
 			status := truncate("on-demand", contentWidth-17)
 			tachikomaLines = append(tachikomaLines, fmt.Sprintf("%s %-12s %s", styles.BlueStyle.Render("⬡"), name, styles.GrayStyle.Render(status)))
@@ -171,14 +167,17 @@ func (m SidebarModel) View() string {
 		}
 	}
 
-	if !hasTachikomas {
-		tachikomaLines = append(tachikomaLines, styles.GrayStyle.Render("  none active"))
+	if hasTachikomas {
+		content = append(content, tachikomaLines...)
 	}
 
-	content := append(sidebarHeader, fileLines...)
-	content = append(content, gitLines...)
-	content = append(content, subagentLines...)
-	content = append(content, tachikomaLines...)
+	if len(content) == 0 {
+		content = append(content,
+			styles.GrayStyle.Render("Sidebar idle."),
+			styles.GrayStyle.Render("Open files, run tasks,"),
+			styles.GrayStyle.Render("or inspect code to see live context."),
+		)
+	}
 
 	if len(content) > m.height {
 		content = content[:m.height]
@@ -186,7 +185,7 @@ func (m SidebarModel) View() string {
 
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(styles.BorderColor).
+		BorderForeground(styles.Gray).
 		Padding(0, 1).
 		Width(contentWidth).
 		Height(m.height).

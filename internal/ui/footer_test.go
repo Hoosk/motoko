@@ -52,8 +52,7 @@ func TestFooterThinkingState(t *testing.T) {
 	f, _ = f.Update(ThinkingTickMsg{})
 	view := f.View()
 
-	// New logic uses planning/building labels
-	if !strings.Contains(view, "planning") && !strings.Contains(view, "building") && !strings.Contains(view, "processing") {
-		t.Errorf("expected activity label in footer, got %q", view)
+	if strings.Contains(view, "planning") || strings.Contains(view, "building") || strings.Contains(view, "processing") {
+		t.Errorf("expected footer to stay compact without activity label, got %q", view)
 	}
 }

@@ -187,6 +187,23 @@ func (r *Runtime) Completions(input string) []string {
 		}
 	}
 
+	if strings.EqualFold(parts[0], "themes") {
+		prefix := ""
+		if len(parts) > 1 {
+			prefix = strings.ToLower(parts[1])
+		}
+		allThemes := []string{"cyberpunk", "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
+		var result []string
+		for _, t := range allThemes {
+			if prefix == "" || strings.HasPrefix(t, prefix) {
+				result = append(result, "/themes "+t)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+
 	return nil
 }
 
@@ -204,7 +221,7 @@ func (r *Runtime) cacheProviderModels(providerName string, models []string) {
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", cmdClear, "compact", "mode", string(ModePlan), string(ModeBuild), "agent", "shell", "chat", cmdStatus, "debug", "trace", "context", "provider", "models", "sessions", "tools", cmdTool, "approve", "deny", "metrics"}
+	commands := []string{"help", cmdClear, "compact", "mode", string(ModePlan), string(ModeBuild), "agent", "shell", "chat", cmdStatus, "debug", "trace", "context", "provider", "models", "themes", "sessions", "tools", cmdTool, "approve", "deny", "metrics"}
 	prefix = strings.ToLower(prefix)
 	var result []string
 	for _, command := range commands {

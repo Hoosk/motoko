@@ -108,3 +108,14 @@ func TestComposerHistoryNavigationPreservesPartialInput(t *testing.T) {
 		t.Fatalf("expected partial restored, got %q", m.textarea.Value())
 	}
 }
+
+func TestComposerViewUsesTopSeparatorInsteadOfBox(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewComposerModel(r)
+	m.SetWidth(80)
+
+	view := m.View()
+	if !strings.Contains(view, "─") {
+		t.Fatalf("expected top separator in composer view, got %q", view)
+	}
+}

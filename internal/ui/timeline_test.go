@@ -30,6 +30,15 @@ func longestRuleLen(text string) int {
 	return maxLen
 }
 
+func lineWithSubstring(lines []timeline.RenderLine, needle string) int {
+	for i, line := range lines {
+		if strings.Contains(line.Plain, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestTimelineStreamingAppendsAssistantDeltas(t *testing.T) {
 	m := NewTimelineModel()
 	m.SyncLayout(80, 20)
@@ -110,19 +119,16 @@ func TestTimelineUserDelimitersRerenderOnResize(t *testing.T) {
 
 	before := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
 	beforeLen := longestRuleLen(before)
-	if beforeLen < 40 {
-		t.Fatalf("expected wide delimiter before resize, got %q", before)
+	if beforeLen != 0 {
+		t.Fatalf("expected compact user rendering without delimiters, got %q", before)
 	}
 
 	m.SyncLayout(40, 20)
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
 	after := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
 	afterLen := longestRuleLen(after)
-	if afterLen >= beforeLen {
-		t.Fatalf("expected delimiters to rerender after resize, got %q", after)
-	}
-	if afterLen < 20 {
-		t.Fatalf("expected narrow delimiter after resize, got %q", after)
+	if afterLen != 0 {
+		t.Fatalf("expected compact user rendering after resize, got %q", after)
 	}
 }
 
@@ -208,7 +214,7 @@ func TestTimelineMouseContentCoordsRespectFrameOffsets(t *testing.T) {
 	if _, _, ok := m.MouseContentCoords(0, 0); ok {
 		t.Fatalf("expected border area to be outside content")
 	}
-	x, y, ok := m.MouseContentCoords(4, 2)
+	x, y, ok := m.MouseContentCoords(2, 1)
 	if !ok {
 		t.Fatalf("expected first content cell to be addressable")
 	}
@@ -216,4 +222,53 @@ func TestTimelineMouseContentCoordsRespectFrameOffsets(t *testing.T) {
 		t.Fatalf("unexpected content coords (%d,%d)", x, y)
 	}
 
+}
+
+func TestTimelineStartupUsesAsciiArt(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+
+	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
+	if !strings.Contains(got, "███╗   ███╗") {
+		t.Fatalf("expected ascii logo, got %q", got)
+	}
+	if !strings.Contains(got, "// vdev") {
+		t.Fatalf("expected version next to logo, got %q", got)
+	}
+	if !strings.Contains(got, "Inspect code, edit files") {
+		t.Fatalf("expected startup guidance, got %q", got)
+	}
+	if strings.Contains(got, "Motoko online.") {
+		t.Fatalf("expected legacy startup copy to be removed, got %q", got)
+	}
+}
+
+func TestTimelineSelectionStartsAfterCompactStartup(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(60, 16)
+	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryAssistant, Text: "texto util"}}}})
+
+	assistantLine := lineWithSubstring(m.model.RenderLines, "texto util")
+	if assistantLine < 0 {
+		t.Fatalf("expected assistant line in render map")
+	}
+
+	y := assistantLine - int(m.model.Viewport.YOffset)
+	if !m.BeginSelection(0, y) {
+		t.Fatalf("expected selection to start after compact startup block")
+	}
+}
+
+func TestTimelineReasoningRendersIndentedWithoutRail(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryReasoning, Text: "thinking trace"}}}})
+
+	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
+	if !strings.Contains(got, "  thinking trace") {
+		t.Fatalf("expected indented reasoning, got %q", got)
+	}
+	if strings.Contains(got, "▎ thinking trace") {
+		t.Fatalf("expected reasoning without assistant rail, got %q", got)
+	}
 }
