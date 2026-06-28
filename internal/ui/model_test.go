@@ -107,8 +107,8 @@ func TestModelStartsWithSidebarHidden(t *testing.T) {
 	if m.showSidebar {
 		t.Fatal("expected sidebar to be hidden by default")
 	}
-	if !m.sidebarExplicitlyHidden {
-		t.Fatal("expected sidebar to be marked explicitly hidden by default")
+	if m.sidebarPref != sidebarDefault {
+		t.Fatal("expected sidebar preference to be default")
 	}
 }
 
@@ -124,8 +124,8 @@ func TestModelSidebarToggleWorksOnSupportedWidth(t *testing.T) {
 	if !m.showSidebar {
 		t.Fatal("expected sidebar to open on supported width")
 	}
-	if m.sidebarExplicitlyHidden {
-		t.Fatal("expected sidebar hidden flag to clear when opened")
+	if m.sidebarPref != sidebarForceShow {
+		t.Fatal("expected sidebar preference to be forceShow when opened")
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -133,8 +133,8 @@ func TestModelSidebarToggleWorksOnSupportedWidth(t *testing.T) {
 	if m.showSidebar {
 		t.Fatal("expected sidebar to close on second toggle")
 	}
-	if !m.sidebarExplicitlyHidden {
-		t.Fatal("expected sidebar hidden flag to be restored when closed")
+	if m.sidebarPref != sidebarForceHide {
+		t.Fatal("expected sidebar preference to be forceHide when closed")
 	}
 }
 
@@ -142,7 +142,7 @@ func TestModelSidebarToggleWarnsOnSmallWidth(t *testing.T) {
 	r := app.NewRuntime()
 	m := NewModel(r)
 
-	resized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
 	m = resized.(Model)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -150,7 +150,7 @@ func TestModelSidebarToggleWarnsOnSmallWidth(t *testing.T) {
 	if m.showSidebar {
 		t.Fatal("expected sidebar to remain hidden on small width")
 	}
-	if !strings.Contains(m.notificationText, "min 84") {
+	if !strings.Contains(m.notificationText, "min 40") {
 		t.Fatalf("expected small-width warning, got %q", m.notificationText)
 	}
 }
@@ -188,7 +188,7 @@ func TestModelSidebarAutoOpensOnPendingApproval(t *testing.T) {
 	m = resized.(Model)
 
 	// Simulate that the sidebar is closed but not explicitly hidden by user toggle
-	m.sidebarExplicitlyHidden = false
+	m.sidebarPref = sidebarDefault
 	m.showSidebar = false
 
 	// Verify pre-condition
@@ -213,7 +213,7 @@ func TestModelSidebarAutoOpensOnActiveTasks(t *testing.T) {
 	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = resized.(Model)
 
-	m.sidebarExplicitlyHidden = false
+	m.sidebarPref = sidebarDefault
 	m.showSidebar = false
 
 	// Start a background task (e.g. sleep) so that active tasks increases from 0 to 1
@@ -246,8 +246,8 @@ func TestModelSidebarDoesNotAutoOpenIfExplicitlyHidden(t *testing.T) {
 	resized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = resized.(Model)
 
-	// Set explicitly hidden to true
-	m.sidebarExplicitlyHidden = true
+	// Set preference to forceHide
+	m.sidebarPref = sidebarForceHide
 	m.showSidebar = false
 
 	// Trigger a command that requires approval
@@ -258,4 +258,59 @@ func TestModelSidebarDoesNotAutoOpenIfExplicitlyHidden(t *testing.T) {
 		t.Fatal("expected sidebar to remain closed if it was explicitly hidden")
 	}
 }
+
+func TestModelSidebarCanBeClosedOnWideScreen(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	// Resize to wide screen (>= 140)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 150, Height: 32})
+	m = resized.(Model)
+
+	if !m.showSidebar {
+		t.Fatal("expected sidebar to auto-open on wide screens by default")
+	}
+
+	// Toggle it closed using Ctrl+S
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+
+	if m.showSidebar {
+		t.Fatal("expected sidebar to close after toggling Ctrl+S on wide screens")
+	}
+	if m.sidebarPref != sidebarForceHide {
+		t.Fatal("expected sidebar preference to be forceHide")
+	}
+
+	// Resize window again at wide width, it must REMAIN closed!
+	resized2, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 32})
+	m = resized2.(Model)
+
+	if m.showSidebar {
+		t.Fatal("expected sidebar to remain closed on resize if user explicitly closed it")
+	}
+}
+
+func TestModelSidebarDualWidthLayout(t *testing.T) {
+	r := app.NewRuntime()
+	m := NewModel(r)
+
+	// Case 1: width 60 (should be width 20)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	m = resized.(Model)
+	w, ok := m.sidebarLayout()
+	if !ok || w != 20 {
+		t.Fatalf("expected sidebar layout of 20 columns on narrow width 60, got width=%d ok=%t", w, ok)
+	}
+
+	// Case 2: width 100 (should be width 36)
+	resized2, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = resized2.(Model)
+	w2, ok2 := m.sidebarLayout()
+	if !ok2 || w2 != 36 {
+		t.Fatalf("expected sidebar layout of 36 columns on normal width 100, got width=%d ok=%t", w2, ok2)
+	}
+}
+
+
 

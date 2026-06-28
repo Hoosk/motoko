@@ -37,6 +37,14 @@ type agentStreamBuffer struct {
 	done bool
 }
 
+type sidebarLayoutState int
+
+const (
+	sidebarDefault sidebarLayoutState = iota
+	sidebarForceShow
+	sidebarForceHide
+)
+
 type Model struct {
 	lastCtrlC               time.Time
 	notificationTime        time.Time
@@ -60,7 +68,7 @@ type Model struct {
 	showHelp                bool
 	showTools               bool
 	showSidebar             bool
-	sidebarExplicitlyHidden bool
+	sidebarPref             sidebarLayoutState
 	// Sidebar auto-open tracking
 	prevHasPendingApproval  bool
 	prevActiveTasks         int
@@ -68,16 +76,13 @@ type Model struct {
 }
 
 func (m Model) sidebarLayout() (int, bool) {
-	if m.width < 84 {
+	if m.width < 40 {
 		return 0, false
 	}
-	if m.width < 110 {
-		return 24, true
+	if m.width < 84 {
+		return 20, true
 	}
-	if m.width < 140 {
-		return 28, true
-	}
-	return 32, true
+	return 36, true
 }
 
 func (m Model) sidebarPreferredByWidth() bool {
@@ -92,7 +97,7 @@ func NewModel(runtime *app.Runtime) Model {
 		footer:                  NewFooterModel(runtime),
 		sidebar:                 NewSidebarModel(runtime),
 		showSidebar:             false,
-		sidebarExplicitlyHidden: true,
+		sidebarPref:             sidebarDefault,
 	}
 
 	m.timeline.version = runtime.Version()
@@ -159,6 +164,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// 3. Global Message Handling
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if m.showSidebar && msg.X >= m.width-m.sidebar.width && msg.Y < m.height-1 {
+			if msg.Button == tea.MouseButtonWheelUp {
+				if m.sidebar.offset > 0 {
+					m.sidebar.offset = max(0, m.sidebar.offset-3)
+				}
+				m.SyncLayout()
+				return m, nil
+			} else if msg.Button == tea.MouseButtonWheelDown {
+				m.sidebar.offset += 3
+				m.SyncLayout()
+				return m, nil
+			}
+		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -411,12 +431,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+s", "alt+s":
 			if _, allowed := m.sidebarLayout(); !allowed {
 				m.notificationShow = true
-				m.notificationText = "Sidebar disabled: terminal width too small (min 84)"
+				m.notificationText = "Sidebar disabled: terminal width too small (min 40)"
 				m.notificationTime = time.Now()
 				cmds = append(cmds, m.hideNotification())
 			} else {
-				m.showSidebar = !m.showSidebar
-				m.sidebarExplicitlyHidden = !m.showSidebar
+				if m.showSidebar {
+					m.sidebarPref = sidebarForceHide
+					m.showSidebar = false
+				} else {
+					m.sidebarPref = sidebarForceShow
+					m.showSidebar = true
+				}
 				m.SyncLayout()
 			}
 		case "ctrl+a":
@@ -467,9 +492,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if currentActiveSubagents > 0 && m.prevActiveSubagents == 0 {
 		shouldAutoOpen = true
 	}
-	if shouldAutoOpen && !m.showSidebar && !m.sidebarExplicitlyHidden {
+	if shouldAutoOpen && !m.showSidebar && m.sidebarPref != sidebarForceHide {
 		if _, allowed := m.sidebarLayout(); allowed {
 			m.showSidebar = true
+			m.sidebarPref = sidebarForceShow
 		}
 	}
 	m.prevHasPendingApproval = currentHasPendingApproval
@@ -619,11 +645,15 @@ func (m *Model) SyncLayout() {
 	sidebarWidth, sidebarAllowed := m.sidebarLayout()
 	if !sidebarAllowed {
 		m.showSidebar = false
-		m.sidebarExplicitlyHidden = true
-	} else if !m.sidebarExplicitlyHidden {
-		m.showSidebar = true
 	} else {
-		m.showSidebar = m.sidebarPreferredByWidth()
+		switch m.sidebarPref {
+		case sidebarForceShow:
+			m.showSidebar = true
+		case sidebarForceHide:
+			m.showSidebar = false
+		default: // sidebarDefault
+			m.showSidebar = m.sidebarPreferredByWidth()
+		}
 	}
 
 	if !m.showSidebar {

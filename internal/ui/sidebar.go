@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,6 +16,7 @@ type SidebarModel struct {
 	runtime *app.Runtime
 	width   int
 	height  int
+	offset  int
 }
 
 func NewSidebarModel(runtime *app.Runtime) SidebarModel {
@@ -51,6 +53,7 @@ func (m SidebarModel) View() string {
 
 	info := m.runtime.GetContextInfo()
 	contentWidth := m.width - 3 // Account for left border (1) and padding (2)
+	usableWidth := contentWidth - 2 // Usable text width inside padding (1 on each side)
 
 	var content []string
 	if pending := strings.TrimSpace(m.runtime.PendingApproval()); pending != "" {
@@ -70,7 +73,7 @@ func (m SidebarModel) View() string {
 
 	if len(info.RelevantFiles) > 0 {
 		fileLines := []string{renderHeader("FILES", styles.BoldBlueStyle, contentWidth)}
-		limit := 5
+		limit := 50
 		for i, file := range info.RelevantFiles {
 			if i >= limit {
 				remaining := len(info.RelevantFiles) - limit
@@ -79,13 +82,32 @@ func (m SidebarModel) View() string {
 			}
 			parts := strings.Split(file, " | ")
 			name := parts[0]
-			maxNameLen := contentWidth - 3 // "▫ " is 2 chars + space
-			if maxNameLen > 0 && len(name) > maxNameLen {
-				name = "…" + name[len(name)-(maxNameLen-1):]
+			maxNameLen := usableWidth - 3 // "▫  " is 3 chars
+			if maxNameLen > 0 {
+				name = contractPath(name, maxNameLen)
 			}
 			fileLines = append(fileLines, styles.WhiteStyle.Render("▫  ")+name)
 		}
 		content = append(content, fileLines...)
+	}
+
+	if len(info.ModifiedFiles) > 0 {
+		modLines := []string{"", renderHeader("MODIFIED", styles.BoldVioletStyle, contentWidth)}
+		limit := 50
+		for i, file := range info.ModifiedFiles {
+			if i >= limit {
+				remaining := len(info.ModifiedFiles) - limit
+				modLines = append(modLines, styles.GrayStyle.Render(fmt.Sprintf("  … and %d more", remaining)))
+				break
+			}
+			maxNameLen := usableWidth - 3 // "✎  " is 3 chars
+			name := file
+			if maxNameLen > 0 {
+				name = contractPath(name, maxNameLen)
+			}
+			modLines = append(modLines, styles.PinkStyle.Render("✎  ")+name)
+		}
+		content = append(content, modLines...)
 	}
 
 	if info.HasGit {
@@ -179,9 +201,20 @@ func (m SidebarModel) View() string {
 		)
 	}
 
-	if len(content) > m.height {
-		content = content[:m.height]
+	totalLines := len(content)
+	maxOffset := totalLines - m.height
+	if maxOffset < 0 {
+		maxOffset = 0
 	}
+	if m.offset > maxOffset {
+		m.offset = maxOffset
+	}
+
+	end := m.offset + m.height
+	if end > totalLines {
+		end = totalLines
+	}
+	content = content[m.offset:end]
 
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
@@ -192,4 +225,51 @@ func (m SidebarModel) View() string {
 		MaxHeight(m.height)
 
 	return style.Render(strings.Join(content, "\n"))
+}
+
+func contractPath(path string, maxLength int) string {
+	path = filepath.ToSlash(path)
+	if len(path) <= maxLength {
+		return path
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) <= 1 {
+		if len(path) > maxLength {
+			if maxLength > 3 {
+				return "..." + path[len(path)-maxLength+3:]
+			}
+			return path[:maxLength]
+		}
+		return path
+	}
+
+	dirs := make([]string, len(parts)-1)
+	for i := 0; i < len(parts)-1; i++ {
+		dirs[i] = parts[i]
+	}
+	filename := parts[len(parts)-1]
+
+	for i := 0; i < len(dirs); i++ {
+		if len(dirs[i]) <= 1 {
+			continue
+		}
+		runes := []rune(dirs[i])
+		if len(runes) > 0 {
+			dirs[i] = string(runes[0])
+		}
+
+		reconstructed := strings.Join(dirs, "/") + "/" + filename
+		if len(reconstructed) <= maxLength {
+			return reconstructed
+		}
+	}
+
+	finalPath := strings.Join(dirs, "/") + "/" + filename
+	if len(finalPath) > maxLength {
+		if maxLength > 3 {
+			return "..." + finalPath[len(finalPath)-maxLength+3:]
+		}
+		return finalPath[:maxLength]
+	}
+	return finalPath
 }
