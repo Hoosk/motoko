@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
@@ -39,6 +40,29 @@ func (m *TimelineModel) getLogo() string {
 		return timeline.LogoArt
 	}
 	lines[len(lines)-1] += "  " + "// v" + m.version
+
+	// Calculate max width of any line
+	maxW := 0
+	for _, line := range lines {
+		w := utf8.RuneCountInString(line)
+		if w > maxW {
+			maxW = w
+		}
+	}
+
+	// Pad lines to center the logo based on model width
+	padding := 0
+	if m.model.Width > maxW {
+		padding = (m.model.Width - maxW) / 2
+	}
+
+	if padding > 0 {
+		padStr := strings.Repeat(" ", padding)
+		for i, line := range lines {
+			lines[i] = padStr + line
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 
