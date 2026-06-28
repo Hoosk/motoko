@@ -74,6 +74,12 @@ type Usage struct {
 	ReasoningTokens       int
 	CacheReadInputTokens  int
 	CacheWriteInputTokens int
+
+	// Character counts for breakdown estimation
+	SystemStaticChars  int
+	SystemDynamicChars int
+	ToolsChars         int
+	HistoryChars       int
 }
 
 type Message struct {

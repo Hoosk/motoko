@@ -17,8 +17,8 @@ func NewGlobTool() *GlobTool {
 func (t *GlobTool) Spec() Spec {
 	return Spec{
 		Name:    "glob",
-		Summary: "Busca rutas por patron dentro del workspace.",
-		Usage:   "glob <patron>",
+		Summary: "Finds file paths by pattern in the workspace.",
+		Usage:   "glob <pattern>",
 	}
 }
 
@@ -26,7 +26,7 @@ func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
 	pattern := strings.TrimSpace(args)
 	if pattern == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	matcher, err := compileGlob(pattern)

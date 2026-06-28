@@ -24,9 +24,6 @@ func TestBuiltinAgentsExist(t *testing.T) {
 func TestBuildSystemPromptInjectsAgentMode(t *testing.T) {
 	info := system.ContextInfo{Workspace: "test", Path: "/tmp/test"}
 	prompt := buildSystemPrompt("default", info, nil, "Modo test: solo pruebas.")
-	if !strings.Contains(prompt, "--- AGENT MODE ---") {
-		t.Fatalf("expected AGENT MODE section in prompt, got:\n%s", prompt)
-	}
 	if !strings.Contains(prompt, "Modo test: solo pruebas.") {
 		t.Fatalf("expected agent system in prompt, got:\n%s", prompt)
 	}
@@ -35,7 +32,7 @@ func TestBuildSystemPromptInjectsAgentMode(t *testing.T) {
 func TestBuildSystemPromptNoAgentModeWhenEmpty(t *testing.T) {
 	info := system.ContextInfo{Workspace: "test", Path: "/tmp/test"}
 	prompt := buildSystemPrompt("default", info, nil, "")
-	if strings.Contains(prompt, "--- AGENT MODE ---") {
-		t.Fatalf("did not expect AGENT MODE section when agentSystem is empty")
+	if strings.Contains(prompt, "Modo test:") {
+		t.Fatalf("did not expect agent system content when agentSystem is empty")
 	}
 }

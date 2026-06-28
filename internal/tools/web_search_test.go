@@ -58,8 +58,8 @@ func TestWebSearchToolRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(result.Summary, "2 resultados") {
-		t.Errorf("expected summary to contain '2 resultados', got '%s'", result.Summary)
+	if !strings.Contains(result.Summary, "2 results") {
+		t.Errorf("expected summary to contain '2 results', got '%s'", result.Summary)
 	}
 
 	expectedOutput := "1. Go Programming Language\n   URL: https://golang.org\n   Go is an open source programming language that makes it easy to build simple, reliable, and efficient software.\n\n2. GitHub - golang/go\n   URL: https://github.com/golang/go\n   The Go programming language source code. Contribute to golang/go development by creating an account on GitHub."

@@ -23,21 +23,21 @@ func NewBashTool() *BashTool {
 func (t *BashTool) Spec() Spec {
 	return Spec{
 		Name:    toolNameBash,
-		Summary: "Ejecuta un comando shell en el workspace actual.",
-		Usage:   "bash <comando>",
+		Summary: "Runs a shell command in the current workspace.",
+		Usage:   "bash <command>",
 	}
 }
 
 func (t *BashTool) DynamicSpec(ctx ToolContext) Spec {
 	spec := t.Spec()
-	spec.Summary = fmt.Sprintf("Ejecuta un comando shell en el workspace actual (%s). El output maximo esta limitado a %d bytes.", ctx.Workspace, ctx.MaxOutputSize)
+	spec.Summary = fmt.Sprintf("Runs a shell command in the current workspace (%s). The maximum output is limited to %d bytes.", ctx.Workspace, ctx.MaxOutputSize)
 	return spec
 }
 
 func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 	command := strings.TrimSpace(args)
 	if command == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	if ctx == nil {

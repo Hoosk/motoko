@@ -9,19 +9,20 @@ import (
 )
 
 const (
-	TimelineMouseOffsetX = 4
-	TimelineMouseOffsetY = 2
-	AssistantContentX    = 3
+	TimelineMouseOffsetX = 2
+	TimelineMouseOffsetY = 1
+	AssistantContentX    = 2
+	ReasoningContentX    = 2
 	UserContentX         = 4
 )
 
 var ThinkingFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-var LogoArt = "  __  __  ____ _____ ____  _  _____\n" +
-	" |  \\/  |/ __ \\_   _/ __ \\| |/ / _ \\\n" +
-	" | \\  / | |  | || || |  | | ' / | | |\n" +
-	" | |\\/| | |  | || || |  | |  <| | | |\n" +
-	" | |  | | |__| || || |__| | . \\ |_| |\n" +
-	" |_|  |_|\\____/ |_| \\____/|_|\\_\\___/"
+var LogoArt = "███╗   ███╗ ██████╗ ████████╗ ██████╗ ██╗  ██╗ ██████╗\n" +
+	"████╗ ████║██╔═══██╗╚══██╔══╝██╔═══██╗██║ ██╔╝██╔═══██╗\n" +
+	"██╔████╔██║██║   ██║   ██║   ██║   ██║█████╔╝ ██║   ██║\n" +
+	"██║╚██╔╝██║██║   ██║   ██║   ██║   ██║██╔═██╗ ██║   ██║\n" +
+	"██║ ╚═╝ ██║╚██████╔╝   ██║   ╚██████╔╝██║  ██╗╚██████╔╝\n" +
+	"╚═╝     ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ "
 
 func (m *Model) RenderEntry(entry app.Entry) string {
 	switch entry.Kind {
@@ -29,10 +30,10 @@ func (m *Model) RenderEntry(entry app.Entry) string {
 		return RenderUserMessage(entry.Text, max(20, m.Viewport.Width))
 	case app.EntryAssistant:
 		wrapped := WrapText(entry.Text, m.AssistantInnerWidth())
-		return styles.AssistantBlockStyle.Render(wrapped)
+		return renderAssistantMessage(wrapped)
 	case app.EntryReasoning:
 		wrapped := WrapText(entry.Text, m.AssistantInnerWidth())
-		return styles.ReasoningBlockStyle.Render(wrapped)
+		return renderReasoningMessage(wrapped)
 	case app.EntrySystem:
 		return styles.SystemStyle.Render(entry.Text)
 	case app.EntryCommand:
@@ -58,9 +59,6 @@ func (m *Model) AssistantInnerWidth() int {
 
 func RenderUserMessage(text string, width int) string {
 	w := max(20, width)
-	ruleWidth := w - 5
-
-	rule := styles.VioletStyle.Render(strings.Repeat("─", ruleWidth))
 
 	wrapped := WrapText(text, w-5)
 	lines := strings.Split(wrapped, "\n")
@@ -71,8 +69,23 @@ func RenderUserMessage(text string, width int) string {
 			lines[i] = "    " + styles.WhiteStyle.Render(line)
 		}
 	}
-	body := strings.Join(lines, "\n")
-	return strings.Join([]string{rule, body, rule}, "\n")
+	return strings.Join(lines, "\n")
+}
+
+func renderAssistantMessage(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = styles.NeonStyle.Render("▎") + " " + styles.AssistantBlockStyle.Render(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderReasoningMessage(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = "  " + styles.ReasoningBlockStyle.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func RenderHelpEntry(text string) string {

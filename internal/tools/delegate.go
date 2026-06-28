@@ -33,22 +33,22 @@ func NewDelegateTool(runner AgentRunner) *DelegateTool {
 func (t *DelegateTool) Spec() Spec {
 	return Spec{
 		Name:    "delegate",
-		Summary: "Delegar una sub-tarea a otro agente en segundo plano. Los agentes disponibles son: plan, search.",
-		Usage:   "delegate <nombre_agente>: <instruccion> [|| <json_config>]",
+		Summary: "Delegate a sub-task to another agent in the background. Available agents: plan, search.",
+		Usage:   "delegate <agent_name>: <instruction> [|| <json_config>]",
 	}
 }
 
 func (t *DelegateTool) DynamicSpec(ctx ToolContext) Spec {
 	spec := t.Spec()
 	if len(ctx.AvailableAgents) > 0 {
-		spec.Summary = fmt.Sprintf("Delegar una sub-tarea a otro agente en segundo plano. Agentes disponibles: %s. Uso: delegate <nombre_agente>: <instruccion> [|| {\"allow_delegate\": true, \"inherit_brain\": true, \"max_iterations\": 10}]", strings.Join(ctx.AvailableAgents, ", "))
+		spec.Summary = fmt.Sprintf("Delegate a sub-task to another agent in the background. Available agents: %s. Usage: delegate <agent_name>: <instruction> [|| {\"allow_delegate\": true, \"inherit_brain\": true, \"max_iterations\": 10}]", strings.Join(ctx.AvailableAgents, ", "))
 	}
 	return spec
 }
 
 func (t *DelegateTool) Run(ctx context.Context, args string) (Result, error) {
 	if t.runner == nil {
-		return Result{}, fmt.Errorf("agent runner no inicializado")
+		return Result{}, fmt.Errorf("agent runner not initialized")
 	}
 
 	parts := strings.SplitN(args, "||", 2)
@@ -56,7 +56,7 @@ func (t *DelegateTool) Run(ctx context.Context, args string) (Result, error) {
 
 	argsParts := strings.SplitN(mainArgs, ":", 2)
 	if len(argsParts) < 2 {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	agentName := strings.TrimSpace(argsParts[0])

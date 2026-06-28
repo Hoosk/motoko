@@ -28,7 +28,7 @@ func resolveWorkspacePath(target string) (string, string, error) {
 		return "", "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("ruta fuera del workspace: %s", target)
+		return "", "", fmt.Errorf("path outside workspace: %s", target)
 	}
 	if rel == "." {
 		return path, rel, nil
@@ -48,13 +48,13 @@ func ValidateWritePath(target string) error {
 
 	// Block any write to .git directory (hooks, config, objects, etc.)
 	if lowerRel == ".git" || strings.HasPrefix(lowerRel, ".git/") {
-		return fmt.Errorf("escritura bloqueada: ruta dentro de infraestructura git (.git) no permitida")
+		return fmt.Errorf("write blocked: path inside git infrastructure (.git) not allowed")
 	}
 
 	// Block any environment configuration files (.env, .env.local, .env.development, etc.)
 	baseName := strings.ToLower(filepath.Base(relPath))
 	if strings.HasPrefix(baseName, ".env") {
-		return fmt.Errorf("escritura bloqueada: modificacion de archivos de variables de entorno (.env) no permitida")
+		return fmt.Errorf("write blocked: modification of environment variable files (.env) not allowed")
 	}
 
 	// Block SSH directories or private keys
@@ -62,12 +62,12 @@ func ValidateWritePath(target string) error {
 		strings.HasPrefix(baseName, "id_rsa") || strings.HasPrefix(baseName, "id_dsa") ||
 		strings.HasPrefix(baseName, "id_ecdsa") || strings.HasPrefix(baseName, "id_ed25519") ||
 		baseName == "authorized_keys" || baseName == "known_hosts" {
-		return fmt.Errorf("escritura bloqueada: modificacion de claves SSH o credenciales del sistema no permitida")
+		return fmt.Errorf("write blocked: modification of SSH keys or system credentials not allowed")
 	}
 
 	// Block Motoko agent settings
 	if lowerRel == ".antigravitycli" || strings.HasPrefix(lowerRel, ".antigravitycli/") {
-		return fmt.Errorf("escritura bloqueada: modificacion de configuracion del agente no permitida")
+		return fmt.Errorf("write blocked: modification of agent configuration not allowed")
 	}
 
 	return nil

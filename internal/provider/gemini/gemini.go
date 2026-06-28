@@ -14,6 +14,9 @@ import (
 	"google.golang.org/genai"
 )
 
+const keyInput = "input"
+
+
 func init() {
 	provider.Register(config.ProviderKindGemini, NewClient)
 }
@@ -249,12 +252,12 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 			parameters := map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"input": map[string]any{
+					keyInput: map[string]any{
 						"type":        "string",
 						"description": provider.ToolInputDescription(tool),
 					},
 				},
-				"required":             []string{"input"},
+				"required":             []string{keyInput},
 				"additionalProperties": false,
 			}
 			decls = append(decls, &genai.FunctionDeclaration{
@@ -308,7 +311,7 @@ func toGenAIContent(messages []provider.ConversationItem) []*genai.Content {
 							_ = json.Unmarshal(call.Arguments, &args)
 						}
 						if args == nil && call.Input != "" {
-							args = map[string]any{"input": call.Input}
+							args = map[string]any{keyInput: call.Input}
 						}
 						sdkPart.FunctionCall = &genai.FunctionCall{
 							ID:   call.CallID,
@@ -328,7 +331,7 @@ func toGenAIContent(messages []provider.ConversationItem) []*genai.Content {
 					_ = json.Unmarshal(call.Arguments, &args)
 				}
 				if args == nil && call.Input != "" {
-					args = map[string]any{"input": call.Input}
+					args = map[string]any{keyInput: call.Input}
 				}
 				msgParts = append(msgParts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{

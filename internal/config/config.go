@@ -27,13 +27,13 @@ const (
 )
 
 type ProviderConfig struct {
-	Name           string         `json:"name"`
-	Preset         ProviderPreset `json:"preset,omitempty"`
-	Kind           ProviderKind   `json:"kind"`
-	BaseURL        string         `json:"base_url"`
-	APIKey         string         `json:"api_key"`
-	Model          string         `json:"model"`
-	Models         []string       `json:"models,omitempty"`
+	Name                string         `json:"name"`
+	Preset              ProviderPreset `json:"preset,omitempty"`
+	Kind                ProviderKind   `json:"kind"`
+	BaseURL             string         `json:"base_url"`
+	APIKey              string         `json:"api_key"`
+	Model               string         `json:"model"`
+	Models              []string       `json:"models,omitempty"`
 	ContextWindow       int            `json:"context_window,omitempty"`
 	ThinkingBudget      int            `json:"thinking_budget,omitempty"`
 	UseSDK              bool           `json:"use_sdk,omitempty"`
@@ -62,8 +62,10 @@ type AgentOverride struct {
 
 type AppConfig struct {
 	Agents         map[string]AgentOverride `json:"agents,omitempty"`
-	Providers      []ProviderConfig         `json:"providers"`
 	ActiveProvider string                   `json:"active_provider"`
+	Theme          string                   `json:"theme,omitempty"`
+	Density        string                   `json:"density,omitempty"`
+	Providers      []ProviderConfig         `json:"providers"`
 	Search         SearchConfig             `json:"search,omitempty"`
 }
 
@@ -73,6 +75,12 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if other.ActiveProvider != "" {
 		c.ActiveProvider = other.ActiveProvider
+	}
+	if other.Theme != "" {
+		c.Theme = other.Theme
+	}
+	if other.Density != "" {
+		c.Density = other.Density
 	}
 	for _, op := range other.Providers {
 		op = NormalizeProvider(op)
@@ -149,42 +157,30 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	} else {
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decode config: %w", err)
+		}
+		// Decrypt API keys
+		for i, p := range cfg.Providers {
+			if strings.HasPrefix(p.APIKey, "enc:") {
+				decKey, decErr := Decrypt(p.APIKey)
+				if decErr == nil {
+					cfg.Providers[i].APIKey = decKey
+				}
+			}
 		}
 	}
 
-	// Merge workspace-level config if provided and exists
+	// Load project-scoped config if exists
 	if len(workspacePath) > 0 && workspacePath[0] != "" {
-		wsPath := filepath.Join(workspacePath[0], ".agents", "config.json")
-		if wsData, err := os.ReadFile(wsPath); err == nil {
-			var wsCfg AppConfig
-			if err := json.Unmarshal(wsData, &wsCfg); err == nil {
-				cfg.Merge(&wsCfg)
+		localPath := filepath.Join(workspacePath[0], ".agents", "config.json")
+		if localData, err := os.ReadFile(localPath); err == nil {
+			var localCfg AppConfig
+			if err := json.Unmarshal(localData, &localCfg); err == nil {
+				cfg.Merge(&localCfg)
 			}
 		}
 	}
 
-	if cfg.Search.MaxResults <= 0 {
-		cfg.Search.MaxResults = 100
-	}
-	if len(cfg.Search.ExcludePatterns) == 0 {
-		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
-	}
-
-	for i, p := range cfg.Providers {
-		if strings.HasPrefix(p.APIKey, "enc:") {
-			dec, err := Decrypt(p.APIKey)
-			if err != nil {
-				return nil, fmt.Errorf("error al descifrar API key para %s: %w", p.Name, err)
-			}
-			cfg.Providers[i].APIKey = dec
-		}
-	}
-
-	for i := range cfg.Providers {
-		cfg.Providers[i] = NormalizeProvider(cfg.Providers[i])
-	}
-	cfg.sortProviders()
 	return &cfg, nil
 }
 
@@ -211,6 +207,8 @@ func (c *AppConfig) Save() error {
 	encryptedCfg.ActiveProvider = c.ActiveProvider
 	encryptedCfg.Search = c.Search
 	encryptedCfg.Agents = c.Agents
+	encryptedCfg.Theme = c.Theme
+	encryptedCfg.Density = c.Density
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p

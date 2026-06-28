@@ -19,7 +19,7 @@ import (
 
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
 	if r.agent == nil || !r.agent.Configured() {
-		return agent.Result{}, fmt.Errorf("agente no configurado")
+		return agent.Result{}, fmt.Errorf("agent not configured")
 	}
 	if info.Path == "" {
 		info = r.GetContextInfo()
@@ -46,7 +46,7 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
 	if r.agent == nil || !r.agent.Configured() {
-		return agent.Result{}, fmt.Errorf("agente no configurado")
+		return agent.Result{}, fmt.Errorf("agent not configured")
 	}
 	if info.Path == "" {
 		info = r.GetContextInfo()
@@ -207,7 +207,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
 	active, ok := r.config.Active()
 	if !ok {
-		return nil, fmt.Errorf("no hay provider activo configurado")
+		return nil, fmt.Errorf("no active provider configured")
 	}
 
 	var aDef agent.AgentDef
@@ -220,7 +220,7 @@ func (r *Runtime) createSubagent(name string, cfg tools.SubagentConfig) (*agent.
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("agente desconocido: %s", name)
+		return nil, fmt.Errorf("unknown agent: %s", name)
 	}
 
 	override := r.config.Agents[aDef.Name]
@@ -266,7 +266,7 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 		maxDepth = 2 // default max depth
 	}
 	if currentDepth >= maxDepth {
-		return "", fmt.Errorf("se alcanzó la profundidad máxima de delegación (%d)", maxDepth)
+		return "", fmt.Errorf("maximum delegation depth reached (%d)", maxDepth)
 	}
 
 	r.subagentsMu.Lock()

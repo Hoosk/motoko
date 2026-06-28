@@ -25,7 +25,7 @@ func NewWebFetchTool() *WebFetchTool {
 func (t *WebFetchTool) Spec() Spec {
 	return Spec{
 		Name:    "web_fetch",
-		Summary: "Descarga el contenido de una URL y extrae el texto legible limpio de código HTML.",
+		Summary: "Downloads the content of a URL and extracts clean readable text without HTML tags.",
 		Usage:   "web_fetch <url>",
 	}
 }
@@ -33,7 +33,7 @@ func (t *WebFetchTool) Spec() Spec {
 func (t *WebFetchTool) Run(ctx context.Context, args string) (Result, error) {
 	targetURL := strings.TrimSpace(args)
 	if targetURL == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
@@ -48,24 +48,24 @@ func (t *WebFetchTool) Run(ctx context.Context, args string) (Result, error) {
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		return Result{}, fmt.Errorf("error de red al descargar URL: %w", err)
+		return Result{}, fmt.Errorf("network error downloading URL: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("el servidor respondió con código de estado: %d", resp.StatusCode)
+		return Result{}, fmt.Errorf("server responded with status code: %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Result{}, fmt.Errorf("error al leer contenido de la página: %w", err)
+		return Result{}, fmt.Errorf("error reading page content: %w", err)
 	}
 
 	baseURL, _ := url.Parse(targetURL)
 	cleanedText := cleanHTML(string(bodyBytes), baseURL)
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("URL %s leída correctamente (%d caracteres extraídos).", targetURL, len(cleanedText)),
+		Summary: fmt.Sprintf("URL %s fetched successfully (%d characters extracted).", targetURL, len(cleanedText)),
 		Output:  cleanedText,
 	}, nil
 }

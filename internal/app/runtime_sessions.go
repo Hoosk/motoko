@@ -77,6 +77,35 @@ func (r *Runtime) persistTurn(result agent.Result) {
 	r.currentSession.TotalCacheReadTokens += result.Usage.CacheReadInputTokens
 	r.currentSession.TotalCacheWriteTokens += result.Usage.CacheWriteInputTokens
 
+	// Calculate proportional token usage for the components based on character weight
+	totalChars := result.Usage.SystemStaticChars + result.Usage.SystemDynamicChars + result.Usage.ToolsChars + result.Usage.HistoryChars
+	if totalChars > 0 && result.Usage.InputTokens > 0 {
+		inputTokens := result.Usage.InputTokens
+
+		r.currentSession.LastSystemStaticTokens = int(float64(result.Usage.SystemStaticChars) / float64(totalChars) * float64(inputTokens))
+		r.currentSession.LastSystemDynamicTokens = int(float64(result.Usage.SystemDynamicChars) / float64(totalChars) * float64(inputTokens))
+		r.currentSession.LastToolsTokens = int(float64(result.Usage.ToolsChars) / float64(totalChars) * float64(inputTokens))
+		r.currentSession.LastHistoryTokens = int(float64(result.Usage.HistoryChars) / float64(totalChars) * float64(inputTokens))
+
+		// Adjust potential rounding errors to sum exactly to inputTokens
+		sumEst := r.currentSession.LastSystemStaticTokens + r.currentSession.LastSystemDynamicTokens + r.currentSession.LastToolsTokens + r.currentSession.LastHistoryTokens
+		diff := inputTokens - sumEst
+		if diff != 0 {
+			r.currentSession.LastSystemStaticTokens += diff
+		}
+
+		// Accumulate
+		r.currentSession.TotalSystemStaticTokens += r.currentSession.LastSystemStaticTokens
+		r.currentSession.TotalSystemDynamicTokens += r.currentSession.LastSystemDynamicTokens
+		r.currentSession.TotalToolsTokens += r.currentSession.LastToolsTokens
+		r.currentSession.TotalHistoryTokens += r.currentSession.LastHistoryTokens
+	} else {
+		r.currentSession.LastSystemStaticTokens = 0
+		r.currentSession.LastSystemDynamicTokens = 0
+		r.currentSession.LastToolsTokens = 0
+		r.currentSession.LastHistoryTokens = 0
+	}
+
 	_ = r.currentSession.Save()
 }
 

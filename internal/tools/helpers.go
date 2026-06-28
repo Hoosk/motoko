@@ -34,7 +34,7 @@ func resolveWorkspacePath(target string) (string, string, error) {
 		return "", "", err
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("ruta fuera del workspace: %s", target)
+		return "", "", fmt.Errorf("path outside workspace: %s", target)
 	}
 	if rel == "." {
 		return path, rel, nil
@@ -100,7 +100,7 @@ func walkWorkspace(ctx context.Context, fn func(relPath, absPath string, entry f
 func compileGlob(pattern string) (*regexp.Regexp, error) {
 	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
 	if pattern == "" {
-		return nil, fmt.Errorf("patron vacio")
+		return nil, fmt.Errorf("empty pattern")
 	}
 
 	var out strings.Builder

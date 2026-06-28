@@ -128,6 +128,33 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 	}
 }
 
+func TestCompletionsThemesKeepsTrailingSpaceContext(t *testing.T) {
+	r := NewRuntime()
+	got := r.Completions("/themes ")
+	want := []string{
+		"/themes cyberpunk",
+		"/themes ghost-cyber",
+		"/themes neon-shadow",
+		"/themes black-ice",
+		"/themes nord",
+		"/themes dracula",
+		"/themes monochrome",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Completions(/themes space) = %#v, want %#v", got, want)
+	}
+}
+
+func TestCompletionsThemesFiltersPrefix(t *testing.T) {
+	r := NewRuntime()
+	got := r.Completions("/themes g")
+	want := []string{"/themes ghost-cyber"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Completions(/themes prefix) = %#v, want %#v", got, want)
+	}
+}
+
+
 func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 	r := NewRuntime(RuntimeOptions{})
 	snapshot := semantic.Snapshot{
@@ -465,7 +492,7 @@ func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *tes
 	if len(resp.Entries) != 1 || resp.Entries[0].Kind != EntryError {
 		t.Fatalf("expected compact error response, got %#v", resp)
 	}
-	if !strings.Contains(resp.Entries[0].Text, "no hay provider activo") {
+	if !strings.Contains(resp.Entries[0].Text, "no active provider") {
 		t.Fatalf("unexpected compact error %q", resp.Entries[0].Text)
 	}
 }
@@ -816,6 +843,50 @@ func TestHandleInputExitAndQuitCommands(t *testing.T) {
 		if resp.Signal != "quit" {
 			t.Errorf("expected Signal to be 'quit' for command %q, got %q", cmd, resp.Signal)
 		}
+	}
+}
+
+func TestSlashCommandMetrics(t *testing.T) {
+	withSessionBaseDir(t)
+
+	r := NewRuntime()
+	
+	resp := r.handleSlashCommand("/metrics", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatalf("expected metrics response, got empty")
+	}
+	
+	r.currentSession = session.New(r.workspaceID, "/workspace")
+	r.currentSession.TotalInputTokens = 1000
+	r.currentSession.TotalOutputTokens = 500
+	r.currentSession.TotalTokens = 1500
+	r.currentSession.TotalSystemStaticTokens = 500
+	r.currentSession.TotalSystemDynamicTokens = 300
+	r.currentSession.TotalToolsTokens = 100
+	r.currentSession.TotalHistoryTokens = 100
+
+	r.currentSession.LastInputTokens = 500
+	r.currentSession.LastSystemStaticTokens = 250
+	r.currentSession.LastSystemDynamicTokens = 150
+	r.currentSession.LastToolsTokens = 50
+	r.currentSession.LastHistoryTokens = 50
+
+	resp = r.handleSlashCommand("/metrics", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatalf("expected metrics response")
+	}
+	text := resp.Entries[0].Text
+	if !strings.Contains(text, "Current Session Metrics") {
+		t.Errorf("expected header 'Current Session Metrics', got %q", text)
+	}
+	if !strings.Contains(text, "Last Turn Token Usage") {
+		t.Errorf("expected Last Turn section, got %q", text)
+	}
+	if !strings.Contains(text, "Cumulative Token Usage") {
+		t.Errorf("expected Cumulative section, got %q", text)
+	}
+	if !strings.Contains(text, "System Prompt (Static):  500 (50.0% of input)") {
+		t.Errorf("expected static prompt breakdown, got %q", text)
 	}
 }
 

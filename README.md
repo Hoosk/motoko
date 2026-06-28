@@ -86,7 +86,7 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **Alt + C** | Copy selected message contents |
 | **Esc** | Close popups / Cancel action |
 | **Ctrl + C** | Exit Motoko |
-| **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility |
+| **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility (only available when terminal width >= 100) |
 | **Ctrl + T** | Toggle Tool Catalog overlay |
 | **Ctrl + H** | Toggle Help overlay |
 | **Ctrl + R** | Toggle Reasoning/Thinking output visibility |
@@ -113,6 +113,7 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **`/tools`** | List all available developer tools |
 | **`/provider`** | Manage configurations (`list`, `add`, `use`, `remove`) |
 | **`/models`** | List and select LLM models |
+| **`/themes [name]`** | List available visual themes or switch themes (`cyberpunk`, `nord`, `dracula`, `monochrome`) |
 | **`/sessions`** | Open the session switcher |
 | **`/brain`** | Manage session brain files (`list`, `read`, `plan`, `tasks`, `summary`, `clear`) |
 | **`/context`** | View raw system prompt generated for the next turn |
@@ -127,7 +128,19 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 
 ### Configuration
 
-Motoko reads its configuration from `~/.config/motoko/config.toml`. You can configure API keys and providers interactively using `/provider add` or edit the file manually.
+Motoko reads its configuration from `~/.config/motoko/config.json`. You can configure API keys and providers interactively using `/provider add` or edit the file manually.
+
+#### Themes & Visual Settings
+Use the `/themes` slash command in Motoko to dynamically switch visual themes. The current configuration is stored in the `theme` field inside `~/.config/motoko/config.json`.
+
+Available themes:
+*   **cyberpunk** (Default) - Neon green, purple, and gold cyberpunk details.
+*   **nord** - Cool frosted blues and snow accents.
+*   **dracula** - High-contrast purple and pink classic theme.
+*   **monochrome** - Matrix green on black look.
+
+#### Sidebar Behavior
+The sidebar is automatically enabled on large terminals (width >= 100 columns) and automatically hidden on small terminals (width < 100 columns) to prevent overlapping layout and maintain spacing. When resizing terminal width from below 100 back to 100 or wider, the sidebar is automatically restored unless it was explicitly hidden by the user.
 
 #### Managing Providers
 ```bash

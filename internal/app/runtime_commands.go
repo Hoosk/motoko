@@ -1,5 +1,4 @@
 package app
-
 import (
 	"context"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/tracelog"
@@ -26,36 +26,65 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "help":
 		return Response{Entries: []Entry{{Kind: EntryHelp, Text: strings.Join([]string{
 			"Available commands:",
-			"  /task     Interact with background tasks",
-			"  /brain    Interact with the session brain (list, read, plan, tasks, summary, clear)",
-			"  /metrics  Show cumulative token usage metrics for this session",
-			"  /approve  Approve pending tool command execution",
-			"/help     Show this help message",
-			"/clear    Clear the timeline history",
-			"/compact  Manually compact the active session",
-			"/mode     Open the agent mode selector",
-			"/plan     Activate read-only plan mode",
-			"/build    Activate active build mode",
-			"/agent    Switch or show active agent mode",
-			"/shell    Activate direct shell execution mode",
-			"/chat     Return to normal chat mode",
-			"/status   Summarize mode, permissions, and approvals",
-			"/trace    Toggle trace logging to file (if compiled with -tags motoko_trace)",
-			"/context  Show raw system prompt being sent to the agent",
-			"/provider Manage configured LLM providers",
-			"/models   List or select models from the active provider",
-			"/sessions List or switch between workspace sessions",
-			"/tools    Show all registered tools",
-			"/tool     Execute a specific runtime tool",
-			"/task     Manage running background tasks",
-			"/approve  Execute the pending shell action",
-			"/deny     Cancel the pending shell action",
-			"/exit     Exit the application",
-			"/quit     Exit the application",
-			"!<cmd>    Execute an explicit shell command",
+			"/help                   Show this help message",
+			"/clear                  Clear the timeline history",
+			"/compact                Manually compact the active session",
+			"/mode                   Open the agent mode selector",
+			"/plan                   Activate read-only plan mode",
+			"/build                  Activate active build mode",
+			"/agent <name>           Switch or show active agent mode",
+			"/shell                  Activate direct shell execution mode",
+			"/chat                   Return to normal chat mode",
+			"/status                 Summarize mode, permissions, and approvals",
+			"/context                Show raw system prompt sent to the agent",
+			"/provider               Manage configured LLM providers",
+			"/models [model]         List or select models from the active provider",
+			"/themes [theme]         List or switch visual themes (cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome)",
+			"/sessions               List or switch between workspace sessions",
+			"/tools                  Show all registered tools",
+			"/tool <name> [args]     Execute a specific runtime tool",
+			"/task                   Interact with background tasks",
+			"/approve                Execute the pending tool command",
+			"/deny                   Cancel the pending tool command",
+			"/brain                  Interact with the session brain (list, read, plan, tasks, summary, clear)",
+			"/metrics                Show cumulative token usage for this session",
+			"/trace                  Toggle trace logging (requires -tags motoko_trace)",
+			"/exit                   Exit the application",
+			"/quit                   Exit the application",
+			"!<cmd>                  Execute an explicit shell command",
+			"@<file|agent>           Mention a file or agent in the prompt",
 		}, "\n")}}}
 	case "exit", "quit":
 		return Response{Signal: "quit"}
+	case "themes":
+		if len(parts) < 2 {
+			current := r.config.Theme
+			if current == "" {
+				current = defaultTheme
+			}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf(
+				"Current theme: %s\n" +
+				"Available themes:\n" +
+				"  cyberpunk    Default dark neon green (default)\n" +
+				"  ghost-cyber  Restrained dark cyberpunk with precise accents\n" +
+				"  neon-shadow  Dramatic high-contrast magenta and cyan\n" +
+				"  black-ice    Cold technical with ice-blue accents\n" +
+				"  nord         Arctic blue palette\n" +
+				"  dracula      Classic purple and green\n" +
+				"  monochrome   Pure green-on-black terminal\n" +
+				"Usage: /themes <name>",
+				current)}}}
+		}
+		themeName := strings.ToLower(parts[1])
+		switch themeName {
+		case themeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
+			r.config.Theme = themeName
+			_ = r.config.Save()
+			styles.SetTheme(themeName)
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Theme changed to: " + themeName}}}
+		default:
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown theme: %s. Available: cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome", themeName)}}}
+		}
 	case cmdClear:
 		if r.currentSession != nil {
 			r.currentSession.History = nil
@@ -76,7 +105,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
 	case "agent":
 		if len(parts) < 2 {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente activo: %s. Agentes disponibles: %s", r.AgentName(), strings.Join(r.AgentNames(), ", "))}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Active agent: %s. Available agents: %s", r.AgentName(), strings.Join(r.AgentNames(), ", "))}}}
 		}
 		agentName := parts[1]
 		found := false
@@ -88,9 +117,9 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			}
 		}
 		if !found {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Agente desconocido: %s", agentName)}}}
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown agent: %s", agentName)}}}
 		}
-		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agente cambiado a: %s", r.AgentName())}}}
+		return Response{Entries: []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Agent switched to: %s", r.AgentName())}}}
 	case "mode":
 		return Response{Signal: "open-mode-popup"}
 	case "shell":
@@ -239,29 +268,65 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 		return r.handleBrainCommand(parts[1:])
 	case "metrics":
 		if r.currentSession == nil {
-			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No hay una sesión activa."}}}
+			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active session."}}}
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "Métricas de la sesión actual (%s):\n", r.currentSession.ID)
-		fmt.Fprintf(&sb, "- Creada el: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(&sb, "- Mensajes en historial: %d\n", len(r.currentSession.History))
-		sb.WriteString("\nUso de Tokens Acumulado:\n")
-		fmt.Fprintf(&sb, "- Tokens de Entrada: %d\n", r.currentSession.TotalInputTokens)
-		if r.currentSession.TotalInputTokens > 0 && r.currentSession.TotalCacheReadTokens > 0 {
-			fmt.Fprintf(&sb, "  * Leídos de caché: %d (%.1f%% de la entrada)\n", 
+		fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", r.currentSession.ID)
+		fmt.Fprintf(&sb, "- Created at: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "- History Messages: %d\n", len(r.currentSession.History))
+
+		// Last Turn Breakdown
+		sb.WriteString("\nLast Turn Token Usage:\n")
+		lastInput := r.currentSession.LastInputTokens
+		fmt.Fprintf(&sb, "- Input Tokens: %d\n", lastInput)
+		if lastInput > 0 {
+			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
+				r.currentSession.LastSystemStaticTokens,
+				float64(r.currentSession.LastSystemStaticTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
+				r.currentSession.LastSystemDynamicTokens,
+				float64(r.currentSession.LastSystemDynamicTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
+				r.currentSession.LastToolsTokens,
+				float64(r.currentSession.LastToolsTokens)/float64(lastInput)*100)
+			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
+				r.currentSession.LastHistoryTokens,
+				float64(r.currentSession.LastHistoryTokens)/float64(lastInput)*100)
+		}
+
+		// Cumulative Breakdown
+		sb.WriteString("\nCumulative Token Usage:\n")
+		totalInput := r.currentSession.TotalInputTokens
+		fmt.Fprintf(&sb, "- Input Tokens: %d\n", totalInput)
+		if totalInput > 0 {
+			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
+				r.currentSession.TotalSystemStaticTokens,
+				float64(r.currentSession.TotalSystemStaticTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
+				r.currentSession.TotalSystemDynamicTokens,
+				float64(r.currentSession.TotalSystemDynamicTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
+				r.currentSession.TotalToolsTokens,
+				float64(r.currentSession.TotalToolsTokens)/float64(totalInput)*100)
+			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
+				r.currentSession.TotalHistoryTokens,
+				float64(r.currentSession.TotalHistoryTokens)/float64(totalInput)*100)
+		}
+		if totalInput > 0 && r.currentSession.TotalCacheReadTokens > 0 {
+			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n", 
 				r.currentSession.TotalCacheReadTokens, 
-				float64(r.currentSession.TotalCacheReadTokens)/float64(r.currentSession.TotalInputTokens)*100)
+				float64(r.currentSession.TotalCacheReadTokens)/float64(totalInput)*100)
 		}
 		if r.currentSession.TotalCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Escritos en caché: %d\n", r.currentSession.TotalCacheWriteTokens)
+			fmt.Fprintf(&sb, "  * Cache Write: %d\n", r.currentSession.TotalCacheWriteTokens)
 		}
-		fmt.Fprintf(&sb, "- Tokens de Salida:  %d\n", r.currentSession.TotalOutputTokens)
+		fmt.Fprintf(&sb, "- Output Tokens: %d\n", r.currentSession.TotalOutputTokens)
 		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
-			fmt.Fprintf(&sb, "  * Tokens de Razonamiento (Pensamiento): %d (%.1f%% de la salida)\n", 
+			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n", 
 				r.currentSession.TotalReasoningTokens, 
 				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
 		}
-		fmt.Fprintf(&sb, "- Tokens Totales:    %d\n", r.currentSession.TotalTokens)
+		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", r.currentSession.TotalTokens)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}

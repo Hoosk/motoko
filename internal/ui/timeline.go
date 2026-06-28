@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
@@ -13,6 +14,15 @@ import (
 type TimelineModel struct {
 	version string
 	model   timeline.Model
+}
+
+func (m *TimelineModel) startupMessages() []string {
+	messages := []string{
+		styles.BoldNeonStyle.Render(m.getLogo()),
+		styles.SystemStyle.Render("Inspect code, edit files, run tools, or ask for a focused review."),
+		styles.GrayStyle.Render("Try: /help  /models  /sessions  /provider add"),
+	}
+	return messages
 }
 
 func NewTimelineModel() TimelineModel {
@@ -26,9 +36,33 @@ func NewTimelineModel() TimelineModel {
 
 func (m *TimelineModel) getLogo() string {
 	lines := strings.Split(timeline.LogoArt, "\n")
-	if len(lines) > 0 {
-		lines[len(lines)-1] += "  " + m.version
+	if len(lines) == 0 {
+		return timeline.LogoArt
 	}
+	lines[len(lines)-1] += "  " + "// v" + m.version
+
+	// Calculate max width of any line
+	maxW := 0
+	for _, line := range lines {
+		w := utf8.RuneCountInString(line)
+		if w > maxW {
+			maxW = w
+		}
+	}
+
+	// Pad lines to center the logo based on model width
+	padding := 0
+	if m.model.Width > maxW {
+		padding = (m.model.Width - maxW) / 2
+	}
+
+	if padding > 0 {
+		padStr := strings.Repeat(" ", padding)
+		for i, line := range lines {
+			lines[i] = padStr + line
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -188,11 +222,11 @@ func (m TimelineModel) View() string {
 	if m.model.Width <= 0 || m.model.Height <= 0 {
 		return ""
 	}
-	vpWidth := m.model.Width - 6
+	vpWidth := m.model.Width - 2
 	if vpWidth < 0 {
 		vpWidth = 0
 	}
-	vpHeight := m.model.Height - 4
+	vpHeight := m.model.Height - 2
 	if vpHeight < 0 {
 		vpHeight = 0
 	}
@@ -210,13 +244,13 @@ func (m *TimelineModel) SyncLayout(width, height int) {
 	m.model.Width = width
 	m.model.Height = height
 
-	vpWidth := width - 6
+	vpWidth := width - 2
 	if vpWidth < 0 {
 		vpWidth = 0
 	}
 	m.model.Viewport.Width = vpWidth
 
-	vpHeight := height - 4
+	vpHeight := height - 2
 	if vpHeight < 0 {
 		vpHeight = 0
 	}
@@ -230,11 +264,7 @@ func (m *TimelineModel) SyncLayout(width, height int) {
 }
 
 func (m *TimelineModel) resetMessages() {
-	styledLogo := styles.BoldNeonStyle.Render("\n" + m.getLogo())
-	m.model.Messages = []string{
-		styledLogo,
-		styles.SystemStyle.Render("Motoko online. /provider add opens the configuration form; /models lists or selects models."),
-	}
+	m.model.Messages = m.startupMessages()
 	m.model.Entries = nil
 	m.model.SelectedMessage = -1
 	m.model.AutoScroll = true
@@ -256,11 +286,7 @@ func (m *TimelineModel) renderMessages() {
 	selectedIdx := -1
 	m.model.RenderLines = m.model.RenderLines[:0]
 	m.model.Messages = m.model.Messages[:0]
-	styledLogo := styles.BoldNeonStyle.Render("\n" + m.getLogo())
-	m.model.Messages = append(m.model.Messages,
-		styledLogo,
-		styles.SystemStyle.Render("Motoko online. /provider add opens the configuration form; /models lists or selects models."),
-	)
+	m.model.Messages = append(m.model.Messages, m.startupMessages()...)
 	for _, entry := range m.model.VisibleEntries() {
 		m.model.Messages = append(m.model.Messages, m.model.RenderEntry(entry))
 	}

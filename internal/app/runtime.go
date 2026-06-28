@@ -17,6 +17,7 @@ import (
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/skills"
+	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tachikoma"
 	"github.com/Hoosk/motoko/internal/tools"
@@ -189,6 +190,10 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		version:           runtimeOpts.Version,
 	}
 
+	if r.config.Theme != "" {
+		styles.SetTheme(r.config.Theme)
+	}
+
 	// Setup default tachikomas
 	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
 	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
@@ -317,7 +322,7 @@ func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
 
 func (r *Runtime) StartTask(ctx context.Context, command string) (string, error) {
 	if r.tasks == nil {
-		return "", fmt.Errorf("task manager no inicializado")
+		return "", fmt.Errorf("task manager not initialized")
 	}
 	if r.backgroundCtx != nil {
 		ctx = r.backgroundCtx
@@ -327,7 +332,7 @@ func (r *Runtime) StartTask(ctx context.Context, command string) (string, error)
 
 func (r *Runtime) TerminateTask(id string) error {
 	if r.tasks == nil {
-		return fmt.Errorf("task manager no inicializado")
+		return fmt.Errorf("task manager not initialized")
 	}
 	return r.tasks.Terminate(id)
 }
@@ -411,11 +416,11 @@ func (r *Runtime) GetActiveProviderConfig() (config.ProviderConfig, bool) {
 // SetActiveModelInfo updates the model field for the active provider and saves.
 func (r *Runtime) SetActiveModelInfo(model provider.ModelInfo) error {
 	if r.config == nil {
-		return fmt.Errorf("no hay configuracion")
+		return fmt.Errorf("no configuration")
 	}
 	active, ok := r.config.Active()
 	if !ok {
-		return fmt.Errorf("no hay provider activo")
+		return fmt.Errorf("no active provider")
 	}
 	active.Model = model.ID
 	active.Models = config.UniqueSortedKeep(active.Models, model.ID)
@@ -433,7 +438,7 @@ func (r *Runtime) SetActiveModelInfo(model provider.ModelInfo) error {
 func (r *Runtime) GetModelInfoForActiveProvider(ctx context.Context, modelID string) (provider.ModelInfo, error) {
 	active, ok := r.config.Active()
 	if !ok {
-		return provider.ModelInfo{}, fmt.Errorf("no hay provider activo")
+		return provider.ModelInfo{}, fmt.Errorf("no active provider")
 	}
 	client, err := r.providerClient(active)
 	if err != nil {
@@ -446,11 +451,11 @@ func (r *Runtime) GetModelInfoForActiveProvider(ctx context.Context, modelID str
 // level: 0=off, 1=low(1024), 2=medium(4096), 3=high(16000).
 func (r *Runtime) SetThinkingBudget(budget int) error {
 	if r.config == nil {
-		return fmt.Errorf("no hay configuracion")
+		return fmt.Errorf("no configuration")
 	}
 	active, ok := r.config.Active()
 	if !ok {
-		return fmt.Errorf("no hay provider activo")
+		return fmt.Errorf("no active provider")
 	}
 	if active.ContextWindow > 0 {
 		maxAllowed := active.ContextWindow / 2

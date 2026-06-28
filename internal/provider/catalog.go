@@ -30,6 +30,7 @@ type CatalogProvider struct {
 	ID   string   `json:"id"`
 	Name string   `json:"name"`
 	API  string   `json:"api"`
+	NPM  string   `json:"npm"`
 	Env  []string `json:"env"`
 }
 

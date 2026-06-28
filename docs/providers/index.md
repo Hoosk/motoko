@@ -38,6 +38,18 @@ Click on a provider below to view its configuration guide:
 
 ---
 
+## Dynamic Catalog-based Providers (models.dev)
+
+Motoko dynamically queries the `models.dev` catalog to discover and configure providers. When you add a provider using the interactive TUI:
+1. Run `/provider add` in the CLI to open the configuration form.
+2. Select the provider preset by highlighting the **Provider** field and pressing **Enter**. This opens an interactive, searchable provider picker listing all catalog-defined providers (such as DeepSeek, Mistral, xAI, etc.).
+3. Choose your provider from the list. Motoko will automatically pre-populate the **Name** and **Base URL** using the catalog values.
+4. Input your **API Key** and select **Save** to activate it.
+
+Catalog providers behave as `openai-compatible` endpoints under the hood, but preserve their custom preset names for automatic model lookup and base URL resolution.
+
+---
+
 ## Configuration Commands Quick Reference
 
 ### List Configured Providers

@@ -65,13 +65,11 @@ func (m FooterModel) View() string {
 	}
 
 	ws := styles.BoldVioletStyle.Render("⬡ " + m.sysInfo.Workspace)
-	agent := styles.VioletStyle.Render("● " + m.runtime.AgentName())
 
 	parts := []string{ws}
 	if m.sysInfo.HasGit && m.sysInfo.GitBranch != "" {
 		parts = append(parts, styles.GitStyle.Render("⎇ "+m.sysInfo.GitBranch))
 	}
-	parts = append(parts, agent)
 
 	parts = append(parts, styles.SystemStyle.Render(m.runtime.ProviderSummary()))
 	if m.contextWindow > 0 {
@@ -81,12 +79,6 @@ func (m FooterModel) View() string {
 	}
 	if title := strings.TrimSpace(m.runtime.SessionTitle()); title != "" {
 		parts = append(parts, styles.SystemStyle.Render("» "+title))
-	}
-
-	if m.thinking {
-		spinner := styles.BoldNeonStyle.Render(thinkingFrames[m.thinkingFrame])
-		label := styles.BlueStyle.Render(agentActivityLabel(m.runtime.AgentName()))
-		parts = append(parts, spinner+" "+label)
 	}
 
 	if pending := m.runtime.PendingApproval(); pending != "" {
