@@ -86,10 +86,10 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown theme: %s. Available: cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome", themeName)}}}
 		}
 	case cmdClear:
-		if r.currentSession != nil {
-			r.currentSession.History = nil
-			r.currentSession.LastInputTokens = 0
-			_ = r.currentSession.Save()
+		if r.sesMgr.CurrentSession() != nil {
+			r.sesMgr.CurrentSession().History = nil
+			r.sesMgr.CurrentSession().LastInputTokens = 0
+			_ = r.sesMgr.CurrentSession().Save()
 		}
 		return Response{Clear: true, Entries: []Entry{{Kind: EntrySystem, Text: "Timeline reset."}}}
 	case "compact":
@@ -179,7 +179,7 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 			return r.handleShell(toolArgs)
 		}
 
-		runCtx := tools.WithBrain(context.Background(), r.brain)
+		runCtx := tools.WithBrain(context.Background(), r.sesMgr.Brain())
 		runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(r.contextWindow))
 		result, err := r.tools.Run(runCtx, toolName, toolArgs)
 		if err != nil {
@@ -267,66 +267,66 @@ func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Resp
 	case "brain":
 		return r.handleBrainCommand(parts[1:])
 	case "metrics":
-		if r.currentSession == nil {
+		if r.sesMgr.CurrentSession() == nil {
 			return Response{Entries: []Entry{{Kind: EntrySystem, Text: "No active session."}}}
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", r.currentSession.ID)
-		fmt.Fprintf(&sb, "- Created at: %s\n", r.currentSession.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(&sb, "- History Messages: %d\n", len(r.currentSession.History))
+		fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", r.sesMgr.CurrentSession().ID)
+		fmt.Fprintf(&sb, "- Created at: %s\n", r.sesMgr.CurrentSession().CreatedAt.Local().Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&sb, "- History Messages: %d\n", len(r.sesMgr.CurrentSession().History))
 
 		// Last Turn Breakdown
 		sb.WriteString("\nLast Turn Token Usage:\n")
-		lastInput := r.currentSession.LastInputTokens
+		lastInput := r.sesMgr.CurrentSession().LastInputTokens
 		fmt.Fprintf(&sb, "- Input Tokens: %d\n", lastInput)
 		if lastInput > 0 {
 			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
-				r.currentSession.LastSystemStaticTokens,
-				float64(r.currentSession.LastSystemStaticTokens)/float64(lastInput)*100)
+				r.sesMgr.CurrentSession().LastSystemStaticTokens,
+				float64(r.sesMgr.CurrentSession().LastSystemStaticTokens)/float64(lastInput)*100)
 			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
-				r.currentSession.LastSystemDynamicTokens,
-				float64(r.currentSession.LastSystemDynamicTokens)/float64(lastInput)*100)
+				r.sesMgr.CurrentSession().LastSystemDynamicTokens,
+				float64(r.sesMgr.CurrentSession().LastSystemDynamicTokens)/float64(lastInput)*100)
 			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
-				r.currentSession.LastToolsTokens,
-				float64(r.currentSession.LastToolsTokens)/float64(lastInput)*100)
+				r.sesMgr.CurrentSession().LastToolsTokens,
+				float64(r.sesMgr.CurrentSession().LastToolsTokens)/float64(lastInput)*100)
 			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
-				r.currentSession.LastHistoryTokens,
-				float64(r.currentSession.LastHistoryTokens)/float64(lastInput)*100)
+				r.sesMgr.CurrentSession().LastHistoryTokens,
+				float64(r.sesMgr.CurrentSession().LastHistoryTokens)/float64(lastInput)*100)
 		}
 
 		// Cumulative Breakdown
 		sb.WriteString("\nCumulative Token Usage:\n")
-		totalInput := r.currentSession.TotalInputTokens
+		totalInput := r.sesMgr.CurrentSession().TotalInputTokens
 		fmt.Fprintf(&sb, "- Input Tokens: %d\n", totalInput)
 		if totalInput > 0 {
 			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
-				r.currentSession.TotalSystemStaticTokens,
-				float64(r.currentSession.TotalSystemStaticTokens)/float64(totalInput)*100)
+				r.sesMgr.CurrentSession().TotalSystemStaticTokens,
+				float64(r.sesMgr.CurrentSession().TotalSystemStaticTokens)/float64(totalInput)*100)
 			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
-				r.currentSession.TotalSystemDynamicTokens,
-				float64(r.currentSession.TotalSystemDynamicTokens)/float64(totalInput)*100)
+				r.sesMgr.CurrentSession().TotalSystemDynamicTokens,
+				float64(r.sesMgr.CurrentSession().TotalSystemDynamicTokens)/float64(totalInput)*100)
 			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
-				r.currentSession.TotalToolsTokens,
-				float64(r.currentSession.TotalToolsTokens)/float64(totalInput)*100)
+				r.sesMgr.CurrentSession().TotalToolsTokens,
+				float64(r.sesMgr.CurrentSession().TotalToolsTokens)/float64(totalInput)*100)
 			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
-				r.currentSession.TotalHistoryTokens,
-				float64(r.currentSession.TotalHistoryTokens)/float64(totalInput)*100)
+				r.sesMgr.CurrentSession().TotalHistoryTokens,
+				float64(r.sesMgr.CurrentSession().TotalHistoryTokens)/float64(totalInput)*100)
 		}
-		if totalInput > 0 && r.currentSession.TotalCacheReadTokens > 0 {
+		if totalInput > 0 && r.sesMgr.CurrentSession().TotalCacheReadTokens > 0 {
 			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n", 
-				r.currentSession.TotalCacheReadTokens, 
-				float64(r.currentSession.TotalCacheReadTokens)/float64(totalInput)*100)
+				r.sesMgr.CurrentSession().TotalCacheReadTokens, 
+				float64(r.sesMgr.CurrentSession().TotalCacheReadTokens)/float64(totalInput)*100)
 		}
-		if r.currentSession.TotalCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Cache Write: %d\n", r.currentSession.TotalCacheWriteTokens)
+		if r.sesMgr.CurrentSession().TotalCacheWriteTokens > 0 {
+			fmt.Fprintf(&sb, "  * Cache Write: %d\n", r.sesMgr.CurrentSession().TotalCacheWriteTokens)
 		}
-		fmt.Fprintf(&sb, "- Output Tokens: %d\n", r.currentSession.TotalOutputTokens)
-		if r.currentSession.TotalOutputTokens > 0 && r.currentSession.TotalReasoningTokens > 0 {
+		fmt.Fprintf(&sb, "- Output Tokens: %d\n", r.sesMgr.CurrentSession().TotalOutputTokens)
+		if r.sesMgr.CurrentSession().TotalOutputTokens > 0 && r.sesMgr.CurrentSession().TotalReasoningTokens > 0 {
 			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n", 
-				r.currentSession.TotalReasoningTokens, 
-				float64(r.currentSession.TotalReasoningTokens)/float64(r.currentSession.TotalOutputTokens)*100)
+				r.sesMgr.CurrentSession().TotalReasoningTokens, 
+				float64(r.sesMgr.CurrentSession().TotalReasoningTokens)/float64(r.sesMgr.CurrentSession().TotalOutputTokens)*100)
 		}
-		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", r.currentSession.TotalTokens)
+		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", r.sesMgr.CurrentSession().TotalTokens)
 		return Response{Entries: []Entry{{Kind: EntrySystem, Text: sb.String()}}}
 	default:
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
@@ -509,9 +509,9 @@ func (r *Runtime) providerListText() string {
 }
 
 func (r *Runtime) handleBrainCommand(parts []string) Response {
-	if r.brain == nil {
-		if r.brainInitErr != nil {
-			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Session brain not initialized: %v", r.brainInitErr)}}}
+	if r.sesMgr.Brain() == nil {
+		if r.sesMgr.BrainInitErr() != nil {
+			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Session brain not initialized: %v", r.sesMgr.BrainInitErr())}}}
 		}
 		return Response{Entries: []Entry{{Kind: EntryError, Text: "Session brain not initialized."}}}
 	}
@@ -529,7 +529,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "Usage: /brain read <filename>"}}}
 		}
 		filename := parts[1]
-		content, err := r.brain.Read(filename)
+		content, err := r.sesMgr.Brain().Read(filename)
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to read brain file: %v", err)}}}
 		}
@@ -538,7 +538,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: content},
 		}}
 	case "plan":
-		content, err := r.brain.Read("plan.md")
+		content, err := r.sesMgr.Brain().Read("plan.md")
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "No plan.md found in session brain."}}}
 		}
@@ -547,7 +547,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: content},
 		}}
 	case "tasks":
-		content, err := r.brain.Read("tasks.md")
+		content, err := r.sesMgr.Brain().Read("tasks.md")
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "No tasks.md found in session brain."}}}
 		}
@@ -556,7 +556,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: content},
 		}}
 	case "summary":
-		content, err := r.brain.Read("summary.md")
+		content, err := r.sesMgr.Brain().Read("summary.md")
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: "No summary.md found in session brain."}}}
 		}
@@ -565,13 +565,13 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 			{Kind: EntrySystem, Text: content},
 		}}
 	case cmdClear:
-		files, err := r.brain.List()
+		files, err := r.sesMgr.Brain().List()
 		if err != nil {
 			return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
 		}
 		var deleteErrors []string
 		for _, f := range files {
-			if err := r.brain.Delete(f.Name); err != nil {
+			if err := r.sesMgr.Brain().Delete(f.Name); err != nil {
 				deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Name, err))
 			}
 		}
@@ -585,7 +585,7 @@ func (r *Runtime) handleBrainCommand(parts []string) Response {
 }
 
 func (r *Runtime) listBrainFiles() Response {
-	files, err := r.brain.List()
+	files, err := r.sesMgr.Brain().List()
 	if err != nil {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: fmt.Sprintf("Failed to list brain files: %v", err)}}}
 	}

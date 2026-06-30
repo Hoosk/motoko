@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
 )
@@ -88,12 +89,12 @@ func (r *Runtime) HandleTaskResult(result TaskEvent) Response {
 		output = "(no output)"
 	}
 
-	if r.currentSession != nil {
-		r.currentSession.History = append(r.currentSession.History, provider.ConversationItem{
+	if r.sesMgr.CurrentSession() != nil {
+		r.sesMgr.CurrentSession().History = append(r.sesMgr.CurrentSession().History, provider.ConversationItem{
 			Role:    provider.RoleUser,
 			Content: fmt.Sprintf("[System: Task %s finished with exit code %d.\nOutput:\n%s]", result.ID, result.ExitCode, output),
 		})
-		_ = r.currentSession.Save()
+		_ = r.sesMgr.CurrentSession().Save()
 	}
 
 	if result.ExitCode == 0 {
@@ -110,7 +111,7 @@ func (r *Runtime) handleShell(command string) Response {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: "Missing command after !"}}}
 	}
 
-	decision := classifyShell(r.mode, command)
+	decision := shell.Classify(r.mode, command)
 	if decision.Deny {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: decision.Reason}}}
 	}

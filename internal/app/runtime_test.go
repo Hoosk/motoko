@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/app/sessiontitle"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -230,42 +231,42 @@ func TestSanitizeSessionTitlePrefersCleanFinalTitle(t *testing.T) {
 * *Constraint Check:* "4 a 8 palabras".
 
 Asistencia experta en desarrollo de software`
-	got := sanitizeSessionTitle(raw)
+	got := sessiontitle.Sanitize(raw)
 	if got != "Asistencia experta en desarrollo de software" {
-		t.Fatalf("sanitizeSessionTitle() = %q", got)
+		t.Fatalf("sessiontitle.Sanitize() = %q", got)
 	}
 }
 
 func TestSanitizeSessionTitleKeepsSingleLineTitle(t *testing.T) {
-	got := sanitizeSessionTitle("Depuracion de tools en Gemini")
+	got := sessiontitle.Sanitize("Depuracion de tools en Gemini")
 	if got != "Depuracion de tools en Gemini" {
-		t.Fatalf("sanitizeSessionTitle() = %q", got)
+		t.Fatalf("sessiontitle.Sanitize() = %q", got)
 	}
 }
 
 func TestTitleFromModelResponsePrefersStructuredMessage(t *testing.T) {
 	resp := provider.Response{FinalText: `{"message":"Depuracion de tools en Gemini"}`}
-	got := titleFromModelResponse(resp)
+	got := sessiontitle.FromModelResponse(resp)
 	if got != "Depuracion de tools en Gemini" {
-		t.Fatalf("titleFromModelResponse() = %q", got)
+		t.Fatalf("sessiontitle.FromModelResponse() = %q", got)
 	}
 }
 
 func TestExtractStructuredMessageAcceptsFencedJSON(t *testing.T) {
 	raw := "```json\n{\"message\":\"Asistencia experta en desarrollo de software\"}\n```"
-	got := extractStructuredMessage(raw)
+	got := sessiontitle.ExtractStructuredMessage(raw)
 	if got != "Asistencia experta en desarrollo de software" {
-		t.Fatalf("extractStructuredMessage() = %q", got)
+		t.Fatalf("sessiontitle.ExtractStructuredMessage() = %q", got)
 	}
 }
 
 func TestCurrentSessionEntriesMapsRolesToEntryKinds(t *testing.T) {
 	r := NewRuntime()
-	r.currentSession = &session.Session{History: []provider.ConversationItem{
+	r.sesMgr.SetCurrentSession(&session.Session{History: []provider.ConversationItem{
 		{Role: "user", Content: "hola"},
 		{Role: "assistant", Content: "mundo"},
 		{Role: "system", Content: "nota"},
-	}}
+	}})
 
 	got := r.CurrentSessionEntries()
 	want := []Entry{
@@ -484,9 +485,9 @@ func TestHandleInputToolPreservesNewlines(t *testing.T) {
 func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *testing.T) {
 	r := NewRuntime()
 	r.config = &config.AppConfig{}
-	r.currentSession = &session.Session{
+	r.sesMgr.SetCurrentSession(&session.Session{
 		History: []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")},
-	}
+	})
 
 	resp := r.CompactSession(context.Background())
 	if len(resp.Entries) != 1 || resp.Entries[0].Kind != EntryError {
@@ -500,28 +501,28 @@ func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *tes
 func TestMaybeAutoCompactSkipsWhenHistoryUsageBelowThreshold(t *testing.T) {
 	r := NewRuntime()
 	r.contextWindow = 1000
-	r.currentSession = &session.Session{
+	r.sesMgr.SetCurrentSession(&session.Session{
 		History:         []provider.ConversationItem{provider.UserText("hola")},
 		LastInputTokens: 799,
-	}
+	})
 	events := 0
 
-	err := r.maybeAutoCompact(context.Background(), func(AgentStreamEvent) error {
+	err := r.sesMgr.MaybeAutoCompact(context.Background(), func(AgentStreamEvent) error {
 		events++
 		return nil
-	})
+	}, r.config, r.newProviderClient, r.contextWindow)
 	if err != nil {
 		t.Fatalf("maybeAutoCompact() error = %v", err)
 	}
 	if events != 0 {
 		t.Fatalf("expected no compact events below threshold, got %d", events)
 	}
-	title := strings.TrimSpace(r.currentSession.Title)
+	title := strings.TrimSpace(r.sesMgr.CurrentSession().Title)
 	if title != "" && !strings.EqualFold(title, "New session") {
 		return
 	}
-	if len(r.currentSession.History) != 1 || r.currentSession.LastInputTokens != 799 {
-		t.Fatalf("expected session unchanged, got %#v", r.currentSession)
+	if len(r.sesMgr.CurrentSession().History) != 1 || r.sesMgr.CurrentSession().LastInputTokens != 799 {
+		t.Fatalf("expected session unchanged, got %#v", r.sesMgr.CurrentSession())
 	}
 }
 
@@ -538,9 +539,9 @@ func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
 			Model:  "gpt-4.1",
 		}},
 	}
-	r.currentSession = session.New("ws", "/workspace")
-	r.currentSession.History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
-	r.currentSession.LastInputTokens = 900
+	r.sesMgr.SetCurrentSession(session.New("ws", "/workspace"))
+	r.sesMgr.CurrentSession().History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
+	r.sesMgr.CurrentSession().LastInputTokens = 900
 	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
 		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
 			if !strings.Contains(systemPrompt, "You are the memory compaction") {
@@ -554,7 +555,7 @@ func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
 	}
 
 	longMsg := strings.Repeat("A", 200000)
-	r.currentSession.History = []provider.ConversationItem{
+	r.sesMgr.CurrentSession().History = []provider.ConversationItem{
 		provider.UserText(longMsg),
 		provider.AssistantText("mundo"),
 	}
@@ -563,17 +564,17 @@ func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
 	if len(resp.Entries) != 1 || resp.Entries[0] != (Entry{Kind: EntrySystem, Text: "Session compacted."}) {
 		t.Fatalf("unexpected compact response %#v", resp)
 	}
-	if len(r.currentSession.History) != 2 {
-		t.Fatalf("expected compacted two-message history, got %#v", r.currentSession.History)
+	if len(r.sesMgr.CurrentSession().History) != 2 {
+		t.Fatalf("expected compacted two-message history, got %#v", r.sesMgr.CurrentSession().History)
 	}
-	if got := r.currentSession.History[0].Role; got != provider.RoleUser {
+	if got := r.sesMgr.CurrentSession().History[0].Role; got != provider.RoleUser {
 		t.Fatalf("expected compacted summary role %q, got %q", provider.RoleUser, got)
 	}
-	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen breve") {
+	if got := r.sesMgr.CurrentSession().History[0].PlainText(); !strings.Contains(got, "resumen breve") {
 		t.Fatalf("expected compacted summary in history, got %q", got)
 	}
-	if r.currentSession.LastInputTokens != 0 {
-		t.Fatalf("expected input tokens reset, got %d", r.currentSession.LastInputTokens)
+	if r.sesMgr.CurrentSession().LastInputTokens != 0 {
+		t.Fatalf("expected input tokens reset, got %d", r.sesMgr.CurrentSession().LastInputTokens)
 	}
 }
 
@@ -591,10 +592,10 @@ func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 			Model:  "gpt-4.1",
 		}},
 	}
-	r.currentSession = session.New("ws", "/workspace")
+	r.sesMgr.SetCurrentSession(session.New("ws", "/workspace"))
 	longMsg := strings.Repeat("A", 200000)
-	r.currentSession.History = []provider.ConversationItem{provider.UserText(longMsg), provider.AssistantText("mundo")}
-	r.currentSession.LastInputTokens = 800
+	r.sesMgr.CurrentSession().History = []provider.ConversationItem{provider.UserText(longMsg), provider.AssistantText("mundo")}
+	r.sesMgr.CurrentSession().LastInputTokens = 800
 	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
 		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
 			return provider.Response{FinalText: "resumen automatico"}, nil
@@ -602,20 +603,20 @@ func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 	}
 
 	var events []AgentStreamEvent
-	err := r.maybeAutoCompact(context.Background(), func(event AgentStreamEvent) error {
+	err := r.sesMgr.MaybeAutoCompact(context.Background(), func(event AgentStreamEvent) error {
 		events = append(events, event)
 		return nil
-	})
+	}, r.config, r.newProviderClient, r.contextWindow)
 	if err != nil {
 		t.Fatalf("maybeAutoCompact() error = %v", err)
 	}
 	if !reflect.DeepEqual(events, []AgentStreamEvent{{Kind: "compacting", Content: "Compacting session..."}, {Kind: "status", Content: "Session auto-compacted."}}) {
 		t.Fatalf("unexpected compact events %#v", events)
 	}
-	if got := r.currentSession.History[0].Role; got != provider.RoleUser {
+	if got := r.sesMgr.CurrentSession().History[0].Role; got != provider.RoleUser {
 		t.Fatalf("expected auto-compacted summary role %q, got %q", provider.RoleUser, got)
 	}
-	if got := r.currentSession.History[0].PlainText(); !strings.Contains(got, "resumen automatico") {
+	if got := r.sesMgr.CurrentSession().History[0].PlainText(); !strings.Contains(got, "resumen automatico") {
 		t.Fatalf("expected auto-compact summary in history, got %q", got)
 	}
 }
@@ -633,19 +634,19 @@ func TestCompactSessionPruningPreservesToolMetadata(t *testing.T) {
 			Model:  "gpt-4.1",
 		}},
 	}
-	r.currentSession = session.New("ws", "/workspace")
+	r.sesMgr.SetCurrentSession(session.New("ws", "/workspace"))
 
 	call := provider.ToolInvocation{Name: "my_custom_tool", CallID: "call_123"}
 	longOutput := strings.Repeat("A", 3000)
 	toolMsg := provider.ToolResultForInvocation(call, longOutput)
 
-	r.currentSession.History = []provider.ConversationItem{
+	r.sesMgr.CurrentSession().History = []provider.ConversationItem{
 		provider.UserText("hello"),
 		toolMsg,
 		provider.AssistantText("done"),
 		provider.UserText(strings.Repeat("B", 200000)),
 	}
-	r.currentSession.LastInputTokens = 1000
+	r.sesMgr.CurrentSession().LastInputTokens = 1000
 
 	var capturedMessages []provider.ConversationItem
 	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
@@ -694,7 +695,7 @@ func TestGenerateTitleUpdatesCurrentSessionFromStructuredResponse(t *testing.T) 
 			Model:  "gpt-4.1",
 		}},
 	}
-	r.currentSession = session.New("ws", "/workspace")
+	r.sesMgr.SetCurrentSession(session.New("ws", "/workspace"))
 	r.newProviderClient = func(cfg config.ProviderConfig) (provider.Client, error) {
 		return fakeProviderClient{complete: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
 			if !strings.Contains(systemPrompt, "Generate a short title") {
@@ -707,9 +708,9 @@ func TestGenerateTitleUpdatesCurrentSessionFromStructuredResponse(t *testing.T) 
 		}}, nil
 	}
 
-	r.generateTitle(context.Background(), "haz pruebas", "hecho")
-	if r.currentSession.Title != "Sesion de pruebas runtime" {
-		t.Fatalf("expected generated title, got %q", r.currentSession.Title)
+	r.sesMgr.GenerateTitle(context.Background(), "haz pruebas", "hecho", r.config, r.newProviderClient)
+	if r.sesMgr.CurrentSession().Title != "Sesion de pruebas runtime" {
+		t.Fatalf("expected generated title, got %q", r.sesMgr.CurrentSession().Title)
 	}
 }
 
@@ -766,7 +767,7 @@ func TestRuntimeBrainCommands(t *testing.T) {
 	withSessionBaseDir(t)
 
 	r := NewRuntime()
-	if r.brain == nil {
+	if r.sesMgr.Brain() == nil {
 		t.Fatal("expected session brain to be initialized")
 	}
 
@@ -830,7 +831,7 @@ func TestRuntimeBrainCommands(t *testing.T) {
 		t.Errorf("expected deletion confirmation, got: %#v", resp)
 	}
 
-	if r.brain.Exists("plan") {
+	if r.sesMgr.Brain().Exists("plan") {
 		t.Error("plan should not exist after brain clear")
 	}
 }
@@ -856,20 +857,20 @@ func TestSlashCommandMetrics(t *testing.T) {
 		t.Fatalf("expected metrics response, got empty")
 	}
 	
-	r.currentSession = session.New(r.workspaceID, "/workspace")
-	r.currentSession.TotalInputTokens = 1000
-	r.currentSession.TotalOutputTokens = 500
-	r.currentSession.TotalTokens = 1500
-	r.currentSession.TotalSystemStaticTokens = 500
-	r.currentSession.TotalSystemDynamicTokens = 300
-	r.currentSession.TotalToolsTokens = 100
-	r.currentSession.TotalHistoryTokens = 100
+	r.sesMgr.SetCurrentSession(session.New(r.sesMgr.WorkspaceID(), "/workspace"))
+	r.sesMgr.CurrentSession().TotalInputTokens = 1000
+	r.sesMgr.CurrentSession().TotalOutputTokens = 500
+	r.sesMgr.CurrentSession().TotalTokens = 1500
+	r.sesMgr.CurrentSession().TotalSystemStaticTokens = 500
+	r.sesMgr.CurrentSession().TotalSystemDynamicTokens = 300
+	r.sesMgr.CurrentSession().TotalToolsTokens = 100
+	r.sesMgr.CurrentSession().TotalHistoryTokens = 100
 
-	r.currentSession.LastInputTokens = 500
-	r.currentSession.LastSystemStaticTokens = 250
-	r.currentSession.LastSystemDynamicTokens = 150
-	r.currentSession.LastToolsTokens = 50
-	r.currentSession.LastHistoryTokens = 50
+	r.sesMgr.CurrentSession().LastInputTokens = 500
+	r.sesMgr.CurrentSession().LastSystemStaticTokens = 250
+	r.sesMgr.CurrentSession().LastSystemDynamicTokens = 150
+	r.sesMgr.CurrentSession().LastToolsTokens = 50
+	r.sesMgr.CurrentSession().LastHistoryTokens = 50
 
 	resp = r.handleSlashCommand("/metrics", system.ContextInfo{})
 	if len(resp.Entries) == 0 {

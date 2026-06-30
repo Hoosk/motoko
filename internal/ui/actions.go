@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -101,7 +102,7 @@ func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd
 
 func (m *Model) runShell(command string) tea.Cmd {
 	return func() tea.Msg {
-		res := app.RunShellCommand(context.Background(), command)
+		res := shell.RunCommand(context.Background(), command)
 		return ShellResultMsg{Result: res}
 	}
 }

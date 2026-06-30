@@ -1,31 +1,32 @@
-package app
+package sessionman
 
 import (
 	"context"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app/sessiontitle"
+	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
-func (r *Runtime) generateTitle(ctx context.Context, userInput, assistantResponse string) {
+func (m *Manager) GenerateTitle(ctx context.Context, userInput, assistantResponse string, cfg *config.AppConfig, providerFn func(config.ProviderConfig) (provider.Client, error)) {
 	tracelog.Logf("auto_title: generateTitle started")
-	if r.currentSession == nil {
+	if m.currentSession == nil {
 		tracelog.Logf("auto_title: generateTitle failed because currentSession is nil")
 		return
 	}
-	currentTitle := strings.TrimSpace(r.currentSession.Title)
+	currentTitle := strings.TrimSpace(m.currentSession.Title)
 	if currentTitle != "" && !strings.EqualFold(currentTitle, "New session") {
 		tracelog.Logf("auto_title: generateTitle skipped because title is already set: %q", currentTitle)
 		return
 	}
-	active, ok := r.config.Active()
+	active, ok := cfg.Active()
 	if !ok {
 		tracelog.Logf("auto_title: generateTitle failed because no active provider config")
 		return
 	}
-	client, err := r.providerClient(active)
+	client, err := providerFn(active)
 	if err != nil {
 		tracelog.Logf("auto_title: generateTitle failed to get provider client: %v", err)
 		return
@@ -41,27 +42,12 @@ func (r *Runtime) generateTitle(ctx context.Context, userInput, assistantRespons
 		return
 	}
 	tracelog.Logf("auto_title: client.Complete succeeded. raw response: %q", resp.FinalText)
-	title := titleFromModelResponse(resp)
+	title := sessiontitle.FromModelResponse(resp)
 	if title == "" {
 		tracelog.Logf("auto_title: titleFromModelResponse returned empty string")
 		return
 	}
-	r.currentSession.Title = title
+	m.currentSession.Title = title
 	tracelog.Logf("auto_title: setting title to %q and saving session", title)
-	err = r.currentSession.Save()
-	if err != nil {
-		tracelog.Logf("auto_title: failed to save session: %v", err)
-	}
-}
-
-func titleFromModelResponse(resp provider.Response) string {
-	return sessiontitle.FromModelResponse(resp)
-}
-
-func extractStructuredMessage(raw string) string {
-	return sessiontitle.ExtractStructuredMessage(raw)
-}
-
-func sanitizeSessionTitle(raw string) string {
-	return sessiontitle.Sanitize(raw)
+	_ = m.currentSession.Save()
 }

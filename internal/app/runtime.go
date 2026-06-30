@@ -23,110 +23,82 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/updater"
 
+	"github.com/Hoosk/motoko/internal/app/sessionman"
+	"github.com/Hoosk/motoko/internal/app/taskman"
+	"github.com/Hoosk/motoko/internal/app/types"
+
 	_ "github.com/Hoosk/motoko/internal/provider/anthropic"
 	_ "github.com/Hoosk/motoko/internal/provider/gemini"
 	_ "github.com/Hoosk/motoko/internal/provider/lmstudio"
 	_ "github.com/Hoosk/motoko/internal/provider/openai"
 )
 
-type Mode string
-
-const (
-	ModePlan  Mode = "plan"
-	ModeBuild Mode = "build"
+type (
+	Mode             = types.Mode
+	InputMode        = types.InputMode
+	EntryKind        = types.EntryKind
+	Entry            = types.Entry
+	ActionType       = types.ActionType
+	Action           = types.Action
+	TaskEvent        = types.TaskEvent
+	TaskEventResult  = types.TaskEventResult
+	Response         = types.Response
+	ShellResult      = types.ShellResult
+	ShellDecision    = types.ShellDecision
+	AgentStreamEvent = types.AgentStreamEvent
+	SubagentInfo     = types.SubagentInfo
+	RuntimeOptions   = types.RuntimeOptions
 )
 
-type InputMode string
-
 const (
-	InputModeChat  InputMode = "chat"
-	InputModeShell InputMode = "shell"
+	ModePlan  = types.ModePlan
+	ModeBuild = types.ModeBuild
 )
 
-type EntryKind string
-
 const (
-	EntryUser      EntryKind = "user"
-	EntryAssistant EntryKind = "assistant"
-	EntryReasoning EntryKind = "reasoning"
-	EntrySystem    EntryKind = "system"
-	EntryCommand   EntryKind = "command"
-	EntryOutput    EntryKind = "output"
-	EntryError     EntryKind = "error"
-	EntryHelp      EntryKind = "help"
+	InputModeChat  = types.InputModeChat
+	InputModeShell = types.InputModeShell
 )
 
-type Entry struct {
-	Kind EntryKind
-	Text string
-}
-
-type ActionType string
-
 const (
-	ActionShell   ActionType = "shell"
-	ActionTask    ActionType = "task"
-	ActionAgent   ActionType = "agent"
-	ActionCompact ActionType = "compact"
+	EntryUser      = types.EntryUser
+	EntryAssistant = types.EntryAssistant
+	EntryReasoning = types.EntryReasoning
+	EntrySystem    = types.EntrySystem
+	EntryCommand   = types.EntryCommand
+	EntryOutput    = types.EntryOutput
+	EntryError     = types.EntryError
+	EntryHelp      = types.EntryHelp
 )
 
-type Action struct {
-	Type         ActionType
-	ShellCommand string
-	TaskCommand  string
-	AgentPrompt  string
-}
+const (
+	ActionShell   = types.ActionShell
+	ActionTask    = types.ActionTask
+	ActionAgent   = types.ActionAgent
+	ActionCompact = types.ActionCompact
+)
 
-type TaskEvent struct {
-	ID       string
-	Command  string
-	Output   string
-	ExitCode int
-	Duration time.Duration
-	Done     bool
-}
-
-type TaskEventResult struct {
-	Event TaskEvent
-	OK    bool
-}
-
-type Response struct {
-	Action  *Action
-	Signal  string
-	Entries []Entry
-	Clear   bool
-}
+type TaskState = taskman.TaskState
 
 type pendingShell struct {
 	Command string
 }
 
-type SubagentInfo struct {
-	StartedAt time.Time
-	Name      string
-	Prompt    string
-	Progress  string
-}
-
 type Runtime struct {
-	brainInitErr      error
 	backgroundCtx     context.Context
 	updateErr         error
 	semantic          *semantic.Index
 	agent             *agent.Agent
 	newProviderClient func(config.ProviderConfig) (provider.Client, error)
 	config            *config.AppConfig
-	tasks             *TaskManager
+	taskMgr           *taskman.Manager
+	sesMgr            *sessionman.Manager
 	updateInfo        *updater.VersionInfo
 	tachikomas        *tachikoma.Manager
 	activeSubagents   map[string]*SubagentInfo
 	pending           *pendingShell
 	tools             *tools.Registry
 	updateDone        chan struct{}
-	brain             *brain.Brain
-	currentSession    *session.Session
-	workspaceID       string
 	currentAgentName  string
 	inputMode         InputMode
 	mode              Mode
@@ -136,20 +108,7 @@ type Runtime struct {
 	availableSkills   []skills.Skill
 	contextWindow     int
 	subagentsMu       sync.Mutex
-	wasResumed        bool
 	debug             bool
-}
-
-type RuntimeOptions struct {
-	Version string
-	Resume  bool
-}
-
-type AgentStreamEvent struct {
-	Kind             string
-	Title            string
-	Content          string
-	ReasoningContent string
 }
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {
@@ -165,6 +124,19 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	}
 	workspaceID := session.WorkspaceIDFor(workspacePath)
 
+	sesMgr := sessionman.NewManager(workspaceID)
+	if runtimeOpts.Resume {
+		if last, err := session.Last(workspaceID); err == nil && last != nil {
+			sesMgr.SetCurrentSession(last)
+			sesMgr.SetWasResumed(true)
+		}
+	}
+	if sesMgr.CurrentSession() == nil {
+		sesMgr.SetCurrentSession(session.New(workspaceID, workspacePath))
+	}
+	b, brainErr := brain.New(workspaceID, sesMgr.CurrentSession().ID)
+	sesMgr.SetBrain(b, brainErr)
+
 	allAgents := append([]agent.AgentDef(nil), agent.BuiltinAgents...)
 	if customAgents, err := agent.LoadWorkspaceAgents(workspacePath); err == nil && len(customAgents) > 0 {
 		allAgents = append(allAgents, customAgents...)
@@ -178,14 +150,14 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		tools:             toolsRegistry,
 		newProviderClient: provider.NewClient,
 		config:            cfg,
+		sesMgr:            sesMgr,
 		semantic:          semantic.NewIndex(),
 		tachikomas:        tachikoma.NewManager(),
 		currentAgentName:  string(ModePlan),
 		availableAgents:   allAgents,
-		workspaceID:       workspaceID,
 		availableSkills:   sList,
 		activeSubagents:   make(map[string]*SubagentInfo),
-		tasks:             NewTaskManager(),
+		taskMgr:           taskman.NewManager(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
 	}
@@ -213,16 +185,6 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
 	}
 
-	if runtimeOpts.Resume {
-		if last, err := session.Last(workspaceID); err == nil && last != nil {
-			r.currentSession = last
-			r.wasResumed = true
-		}
-	}
-	if r.currentSession == nil {
-		r.currentSession = session.New(workspaceID, workspacePath)
-	}
-	r.brain, r.brainInitErr = brain.New(workspaceID, r.currentSession.ID)
 	r.refreshAgent()
 	return r
 }
@@ -283,7 +245,7 @@ func (r *Runtime) PendingApproval() string {
 func (r *Runtime) ToolSpecs() []tools.Spec {
 	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
 	tCtx := tools.ToolContext{
-		Workspace:       r.workspaceID,
+		Workspace:       r.sesMgr.WorkspaceID(),
 		ActiveMode:      string(r.mode),
 		MaxOutputSize:   maxOutputSize,
 	}
@@ -303,7 +265,7 @@ func (r *Runtime) ToolSpecs() []tools.Spec {
 func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
 	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
 	tCtx := tools.ToolContext{
-		Workspace:       r.workspaceID,
+		Workspace:       r.sesMgr.WorkspaceID(),
 		ActiveMode:      string(r.mode),
 		MaxOutputSize:   maxOutputSize,
 	}
@@ -321,41 +283,41 @@ func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
 }
 
 func (r *Runtime) StartTask(ctx context.Context, command string) (string, error) {
-	if r.tasks == nil {
+	if r.taskMgr == nil {
 		return "", fmt.Errorf("task manager not initialized")
 	}
 	if r.backgroundCtx != nil {
 		ctx = r.backgroundCtx
 	}
-	return r.tasks.Launch(ctx, command)
+	return r.taskMgr.Launch(ctx, command)
 }
 
 func (r *Runtime) TerminateTask(id string) error {
-	if r.tasks == nil {
+	if r.taskMgr == nil {
 		return fmt.Errorf("task manager not initialized")
 	}
-	return r.tasks.Terminate(id)
+	return r.taskMgr.Terminate(id)
 }
 
 func (r *Runtime) ListTasks() []*TaskState {
-	if r.tasks == nil {
+	if r.taskMgr == nil {
 		return nil
 	}
-	return r.tasks.List()
+	return r.taskMgr.List()
 }
 
 func (r *Runtime) NextTaskEvent(ctx context.Context) TaskEventResult {
-	if r.tasks == nil {
+	if r.taskMgr == nil {
 		return TaskEventResult{}
 	}
-	return r.tasks.Next(ctx)
+	return r.taskMgr.Next(ctx)
 }
 
 func (r *Runtime) ActiveTasks() int {
-	if r.tasks == nil {
+	if r.taskMgr == nil {
 		return 0
 	}
-	return r.tasks.ActiveTasks()
+	return r.taskMgr.ActiveTasks()
 }
 
 func (r *Runtime) AgentConfigured() bool {
@@ -501,45 +463,35 @@ func (r *Runtime) ContextWindow() int {
 }
 
 func (r *Runtime) HistoryInputTokens() int {
-	if r.currentSession == nil {
-		return 0
-	}
-	return r.currentSession.LastInputTokens
+	return r.sesMgr.HistoryInputTokens()
 }
 
 func (r *Runtime) SessionTitle() string {
-	if r.currentSession == nil {
-		return ""
-	}
-	return strings.TrimSpace(r.currentSession.Title)
+	return r.sesMgr.SessionTitle()
 }
 
 func (r *Runtime) StartupEntries() []Entry {
-	if !r.wasResumed || r.currentSession == nil {
-		return nil
-	}
-	entries := []Entry{{Kind: EntrySystem, Text: fmt.Sprintf("Sesion resumida: %s", r.currentSession.Title)}}
-	if r.brain != nil {
-		var hints []string
-		if r.brain.Exists("plan") {
-			if plan, err := r.brain.Read("plan"); err == nil {
-				hints = append(hints, fmt.Sprintf("plan.md (%.1fKB)", float64(len(plan))/1024.0))
-			}
-		}
-		if r.brain.Exists("tasks") {
-			if tasks, err := r.brain.Read("tasks"); err == nil {
-				hints = append(hints, fmt.Sprintf("tasks.md (%.1fKB)", float64(len(tasks))/1024.0))
-			}
-		}
-		if len(hints) > 0 {
-			entries = append(entries, Entry{
-				Kind: EntrySystem,
-				Text: fmt.Sprintf("Session brain found: %s. The agent will continue from the existing plan.", strings.Join(hints, ", ")),
-			})
-		}
-	}
-	entries = append(entries, r.CurrentSessionEntries()...)
-	return entries
+	return r.sesMgr.StartupEntries()
+}
+
+func (r *Runtime) GetBrain() *brain.Brain {
+	return r.sesMgr.Brain()
+}
+
+func (r *Runtime) ListSessions() ([]*session.Session, error) {
+	return r.sesMgr.ListSessions()
+}
+
+func (r *Runtime) LoadSession(id string) error {
+	return r.sesMgr.LoadSession(id)
+}
+
+func (r *Runtime) CurrentSessionEntries() []Entry {
+	return r.sesMgr.CurrentSessionEntries()
+}
+
+func (r *Runtime) CompactSession(ctx context.Context) Response {
+	return r.sesMgr.CompactSession(ctx, r.config, r.newProviderClient, r.contextWindow)
 }
 
 func (r *Runtime) SaveProvider(providerCfg config.ProviderConfig, activate bool) error {
@@ -782,10 +734,6 @@ func (r *Runtime) providerClient(cfg config.ProviderConfig) (provider.Client, er
 		return r.newProviderClient(cfg)
 	}
 	return provider.NewClient(cfg)
-}
-
-func (r *Runtime) GetBrain() *brain.Brain {
-	return r.brain
 }
 
 func (r *Runtime) Version() string {

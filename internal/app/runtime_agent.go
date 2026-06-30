@@ -26,22 +26,22 @@ func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input s
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
-	if r.currentSession != nil {
-		priorHistory = append(priorHistory, r.currentSession.History...)
+	if r.sesMgr.CurrentSession() != nil {
+		priorHistory = append(priorHistory, r.sesMgr.CurrentSession().History...)
 		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
-		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
+		ctx = provider.WithTelemetry(ctx, r.sesMgr.CurrentSession().ID, reqID)
 	}
-	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
 	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.Run(ctx, info, input, priorHistory)
 	if err != nil {
 		return result, err
 	}
-	r.persistTurn(result)
-	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
-		go r.generateTitle(context.Background(), input, result.Assistant)
+	r.sesMgr.PersistTurn(result)
+	if r.sesMgr.CurrentSession() != nil && (strings.TrimSpace(r.sesMgr.CurrentSession().Title) == "" || strings.EqualFold(strings.TrimSpace(r.sesMgr.CurrentSession().Title), "New session")) {
+		go r.sesMgr.GenerateTitle(context.Background(), input, result.Assistant, r.config, r.newProviderClient)
 	}
-	return result, r.maybeAutoCompact(ctx, nil)
+	return result, r.sesMgr.MaybeAutoCompact(ctx, nil, r.config, r.newProviderClient, r.contextWindow)
 }
 
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
@@ -53,12 +53,12 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	}
 	info = r.enrichContext(ctx, info, input)
 	priorHistory := []provider.ConversationItem(nil)
-	if r.currentSession != nil {
-		priorHistory = append(priorHistory, r.currentSession.History...)
+	if r.sesMgr.CurrentSession() != nil {
+		priorHistory = append(priorHistory, r.sesMgr.CurrentSession().History...)
 		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
-		ctx = provider.WithTelemetry(ctx, r.currentSession.ID, reqID)
+		ctx = provider.WithTelemetry(ctx, r.sesMgr.CurrentSession().ID, reqID)
 	}
-	ctx = tools.WithBrain(ctx, r.brain)
+	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
 	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	result, err := r.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
@@ -74,11 +74,11 @@ func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, i
 	if err != nil {
 		return result, err
 	}
-	r.persistTurn(result)
-	if r.currentSession != nil && (strings.TrimSpace(r.currentSession.Title) == "" || strings.EqualFold(strings.TrimSpace(r.currentSession.Title), "New session")) {
-		go r.generateTitle(context.Background(), input, result.Assistant)
+	r.sesMgr.PersistTurn(result)
+	if r.sesMgr.CurrentSession() != nil && (strings.TrimSpace(r.sesMgr.CurrentSession().Title) == "" || strings.EqualFold(strings.TrimSpace(r.sesMgr.CurrentSession().Title), "New session")) {
+		go r.sesMgr.GenerateTitle(context.Background(), input, result.Assistant, r.config, r.newProviderClient)
 	}
-	if err := r.maybeAutoCompact(ctx, onEvent); err != nil {
+	if err := r.sesMgr.MaybeAutoCompact(ctx, onEvent, r.config, r.newProviderClient, r.contextWindow); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -89,7 +89,7 @@ func (r *Runtime) enrichContext(ctx context.Context, info system.ContextInfo, in
 
 	br := tools.GetBrain(ctx)
 	if br == nil {
-		br = r.brain
+		br = r.sesMgr.Brain()
 	}
 
 	if br != nil {
@@ -287,14 +287,14 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 		r.subagentsMu.Unlock()
 	}()
 
-	subSessionID := fmt.Sprintf("%s-%s", r.currentSession.ID, id)
-	subBrain, err := brain.New(r.workspaceID, subSessionID)
+	subSessionID := fmt.Sprintf("%s-%s", r.sesMgr.CurrentSession().ID, id)
+	subBrain, err := brain.New(r.sesMgr.WorkspaceID(), subSessionID)
 	if err != nil {
 		return "", err
 	}
 
-	if cfg.InheritBrain && r.brain != nil {
-		if copyErr := r.brain.CopyTo(subBrain); copyErr != nil {
+	if cfg.InheritBrain && r.sesMgr.Brain() != nil {
+		if copyErr := r.sesMgr.Brain().CopyTo(subBrain); copyErr != nil {
 			return "", copyErr
 		}
 	}

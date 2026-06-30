@@ -1,41 +1,38 @@
-package app
+package sessionman
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
+	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
 )
 
-func (r *Runtime) doCompact(ctx context.Context) error {
-	if r.currentSession == nil || len(r.currentSession.History) == 0 {
+func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, providerFn func(config.ProviderConfig) (provider.Client, error), cw int) error {
+	if m.currentSession == nil || len(m.currentSession.History) == 0 {
 		return nil
 	}
-	active, ok := r.config.Active()
+	active, ok := cfg.Active()
 	if !ok {
 		return fmt.Errorf("no active provider")
 	}
-	client, err := r.providerClient(active)
+	client, err := providerFn(active)
 	if err != nil {
 		return err
 	}
 
-	// 1. Identify which part of the history to compact and which to preserve.
-	// We want to preserve roughly the last 40,000 tokens by default, but for small context windows (like local models),
-	// we scale the preservation budget to roughly 30% of the context window to prevent overflow and compaction failure.
-	preserveTokens := system.PreserveHistoryTokens(r.contextWindow)
+	preserveTokens := system.PreserveHistoryTokens(cw)
 	var recentHistory []provider.ConversationItem
 	var oldHistory []provider.ConversationItem
 
-	// Simple heuristic: count chars from the end. 4 chars per token.
 	charBudget := preserveTokens * 4
 	currentChars := 0
-	splitIdx := len(r.currentSession.History)
+	splitIdx := len(m.currentSession.History)
 
-	for i := len(r.currentSession.History) - 1; i >= 0; i-- {
-		msg := r.currentSession.History[i]
+	for i := len(m.currentSession.History) - 1; i >= 0; i-- {
+		msg := m.currentSession.History[i]
 		currentChars += len(msg.Content)
 		if currentChars > charBudget {
 			break
@@ -43,21 +40,16 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		splitIdx = i
 	}
 
-	// Make sure we always compact at least something if we triggered compaction,
-	// but if splitIdx is 0, we shouldn't compact anything.
 	if splitIdx <= 0 {
-		return nil // nothing to compact
+		return nil
 	}
 
-	oldHistory = r.currentSession.History[:splitIdx]
-	recentHistory = r.currentSession.History[splitIdx:]
+	oldHistory = m.currentSession.History[:splitIdx]
+	recentHistory = m.currentSession.History[splitIdx:]
 
-	// 2. Prune large tool outputs in oldHistory before summarizing
-	// to avoid blowing up the context of the summary request itself.
 	prunedOldHistory := make([]provider.ConversationItem, 0, len(oldHistory))
 	for _, msg := range oldHistory {
 		if msg.Role == provider.RoleTool {
-			// Extract tool output and truncate it if it's too large
 			call, output := provider.ParseToolResultContent(msg.Content)
 			if len(output) > 2000 {
 				prunedText := fmt.Sprintf("Tool output was large and has been pruned. Size: %d bytes. Summary: %s...", len(output), output[:500])
@@ -67,7 +59,6 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		prunedOldHistory = append(prunedOldHistory, msg)
 	}
 
-	// 3. Ask LLM to summarize only the pruned oldHistory
 	resp, err := client.Complete(ctx,
 		"You are the memory compaction engine. Summarize the following older portion of the conversation. Extract key context, important decisions, and completed tasks. Keep a structured format (e.g., bulleted Markdown) and be very concise.",
 		prunedOldHistory,
@@ -82,25 +73,23 @@ func (r *Runtime) doCompact(ctx context.Context) error {
 		return fmt.Errorf("compaction returned empty summary")
 	}
 
-	// 4. Update the brain summary.md
-	if r.brain != nil {
-		prevSummary, _ := r.brain.Read("summary.md")
+	if m.brain != nil {
+		prevSummary, _ := m.brain.Read("summary.md")
 		newSummary := summaryText
 		if prevSummary != "" {
 			newSummary = prevSummary + "\n\n### Compaction Update\n" + summaryText
 		}
-		if err := r.brain.Write("summary.md", newSummary); err != nil {
+		if err := m.brain.Write("summary.md", newSummary); err != nil {
 			return fmt.Errorf("failed to persist compact summary to session brain: %w", err)
 		}
 	}
 
-	// 5. Update session history: [Summary System Msg] + [Recent History]
 	newHistory := []provider.ConversationItem{
 		provider.UserText("Compacted conversation summary:\n" + summaryText),
 	}
 	newHistory = append(newHistory, recentHistory...)
 
-	r.currentSession.History = newHistory
-	r.currentSession.LastInputTokens = 0
-	return r.currentSession.Save()
+	m.currentSession.History = newHistory
+	m.currentSession.LastInputTokens = 0
+	return m.currentSession.Save()
 }
