@@ -155,7 +155,6 @@ func TestCompletionsThemesFiltersPrefix(t *testing.T) {
 	}
 }
 
-
 func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 	r := NewRuntime(RuntimeOptions{})
 	snapshot := semantic.Snapshot{
@@ -172,7 +171,7 @@ func TestEnrichContextAddsRelevantSnippets(t *testing.T) {
 	r.semantic = semantic.NewIndex()
 	r.semantic.SetSnapshotForTest(&snapshot)
 
-	info := r.enrichContext(context.Background(), system.ContextInfo{}, "revisa runagent")
+	info := r.agOrch.EnrichContext(context.Background(), system.ContextInfo{}, "")
 	if len(info.RelevantSnippets) == 0 {
 		t.Fatal("expected relevant snippets")
 	}
@@ -203,7 +202,7 @@ func TestSaveProviderNormalizesNameBeforeActivating(t *testing.T) {
 
 func TestMentionSuggestionsPreferAgentsAndFiles(t *testing.T) {
 	r := NewRuntime()
-	r.availableAgents = append(r.availableAgents, agent.AgentDef{Name: "explore", System: "Busca codigo"})
+	r.SetTestAgents([]agent.AgentDef{{Name: "explore", System: "Busca codigo"}})
 	r.semantic = semantic.NewIndex()
 	r.semantic.SetSnapshotForTest(&semantic.Snapshot{
 		Snapshot: symtypes.Snapshot{
@@ -281,7 +280,7 @@ func TestCurrentSessionEntriesMapsRolesToEntryKinds(t *testing.T) {
 
 func TestHandleInputBangDispatchesImmediateShellInBuildMode(t *testing.T) {
 	r := NewRuntime()
-	r.mode = ModeBuild
+	r.agOrch.SetMode(ModeBuild)
 
 	resp := r.HandleInput("!pwd", system.ContextInfo{})
 	if resp.Action == nil || resp.Action.Type != ActionShell || resp.Action.ShellCommand != "pwd" {
@@ -294,15 +293,15 @@ func TestHandleInputBangDispatchesImmediateShellInBuildMode(t *testing.T) {
 
 func TestHandleInputTracksAgentAndFileMentions(t *testing.T) {
 	r := NewRuntime()
-	r.availableAgents = append(r.availableAgents, agent.AgentDef{Name: "explore", System: "Busca codigo"})
+	r.SetTestAgents([]agent.AgentDef{{Name: "explore", System: "Busca codigo"}})
 
 	_ = r.HandleInput("revisa @explore @internal/app/runtime.go", system.ContextInfo{})
 
 	if r.AgentName() != "explore" {
 		t.Fatalf("expected agent mode switched to explore, got %q", r.AgentName())
 	}
-	if !reflect.DeepEqual(r.mentionedFiles, []string{"internal/app/runtime.go"}) {
-		t.Fatalf("expected mentioned files tracked, got %#v", r.mentionedFiles)
+	if !reflect.DeepEqual(r.agOrch.MentionedFiles(), []string{"internal/app/runtime.go"}) {
+		t.Fatalf("expected mentioned files tracked, got %#v", r.agOrch.MentionedFiles())
 	}
 }
 
@@ -333,7 +332,7 @@ func TestHandleModelsCommandUpdatesActiveModel(t *testing.T) {
 		}},
 	}
 
-	resp := r.handleModelsCommand([]string{"gpt-4.1"})
+	resp := r.provMgr.HandleModelsCommand([]string{"gpt-4.1"})
 	active, ok := r.config.Active()
 	if !ok {
 		t.Fatal("expected active provider config")
@@ -361,7 +360,7 @@ func TestProviderListTextMarksActiveProvider(t *testing.T) {
 		}},
 	}
 
-	text := r.providerListText()
+	text := r.provMgr.ProviderListText()
 	if !strings.Contains(text, "* openai [openai] gpt-4.1") {
 		t.Fatalf("expected active provider marker, got %q", text)
 	}
@@ -372,7 +371,7 @@ func TestProviderListTextMarksActiveProvider(t *testing.T) {
 
 func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) {
 	r := NewRuntime()
-	r.mode = ModePlan
+	r.agOrch.SetMode(ModePlan)
 	r.inputMode = InputModeShell
 	r.pending = &pendingShell{Command: "git status"}
 
@@ -739,11 +738,11 @@ func TestRuntimeSkillsIntegration(t *testing.T) {
 	}
 
 	r := NewRuntime()
-	if len(r.availableSkills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(r.availableSkills))
+	if len(r.agOrch.AvailableSkills()) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(r.agOrch.AvailableSkills()))
 	}
-	if r.availableSkills[0].Name != "test-skill" {
-		t.Errorf("expected skill name 'test-skill', got %q", r.availableSkills[0].Name)
+	if r.agOrch.AvailableSkills()[0].Name != "test-skill" {
+		t.Errorf("expected skill name 'test-skill', got %q", r.agOrch.AvailableSkills()[0].Name)
 	}
 
 	spec, found := r.tools.Spec(tools.ToolContext{AvailableSkills: []string{"test-skill"}}, "activate_skill")
@@ -754,7 +753,7 @@ func TestRuntimeSkillsIntegration(t *testing.T) {
 		t.Errorf("expected usage to contain skill name, got %q", spec.Usage)
 	}
 
-	info := r.enrichContext(context.Background(), system.ContextInfo{}, "test query")
+	info := r.agOrch.EnrichContext(context.Background(), system.ContextInfo{}, "")
 	if len(info.AvailableSkills) != 1 {
 		t.Fatalf("expected 1 available skill in context, got %d", len(info.AvailableSkills))
 	}
@@ -820,7 +819,7 @@ func TestRuntimeBrainCommands(t *testing.T) {
 	}
 
 	// Test enrichContext system prompt integration
-	info := r.enrichContext(context.Background(), system.ContextInfo{}, "query")
+	info := r.agOrch.EnrichContext(context.Background(), system.ContextInfo{}, "")
 	if !strings.Contains(info.BrainSummary, "plan.md") || !strings.Contains(info.BrainSummary, "This is my plan") {
 		t.Errorf("expected brain summary to contain plan and its contents, got: %q", info.BrainSummary)
 	}
@@ -851,12 +850,12 @@ func TestSlashCommandMetrics(t *testing.T) {
 	withSessionBaseDir(t)
 
 	r := NewRuntime()
-	
+
 	resp := r.handleSlashCommand("/metrics", system.ContextInfo{})
 	if len(resp.Entries) == 0 {
 		t.Fatalf("expected metrics response, got empty")
 	}
-	
+
 	r.sesMgr.SetCurrentSession(session.New(r.sesMgr.WorkspaceID(), "/workspace"))
 	r.sesMgr.CurrentSession().TotalInputTokens = 1000
 	r.sesMgr.CurrentSession().TotalOutputTokens = 500
@@ -890,4 +889,3 @@ func TestSlashCommandMetrics(t *testing.T) {
 		t.Errorf("expected static prompt breakdown, got %q", text)
 	}
 }
-

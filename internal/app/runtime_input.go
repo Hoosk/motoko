@@ -38,7 +38,7 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 			}
 		}
 	}
-	r.mentionedFiles = r.extractMentionedFiles(trimmed)
+	r.agOrch.SetMentionedFiles(r.extractMentionedFiles(trimmed))
 
 	if strings.HasPrefix(trimmed, "!") {
 		return r.handleCommand(strings.TrimSpace(trimmed[1:]))
@@ -111,7 +111,7 @@ func (r *Runtime) handleShell(command string) Response {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: "Missing command after !"}}}
 	}
 
-	decision := shell.Classify(r.mode, command)
+	decision := shell.Classify(r.agOrch.Mode(), command)
 	if decision.Deny {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: decision.Reason}}}
 	}

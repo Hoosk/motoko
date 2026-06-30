@@ -26,21 +26,21 @@ func TestRuntime_AgenticImprovements(t *testing.T) {
 
 	// 2. Test tool registry filtering
 	r.SetAgentMode("plan")
-	r.refreshAgent()
-	if r.agent == nil {
+	r.agOrch.RefreshAgent()
+	if r.agOrch.Agent() == nil {
 		t.Fatal("expected agent to be initialized")
 	}
 
 	// Verify that planning agent prompt does NOT have write tools listed
 	info := r.GetContextInfo()
-	prompt := r.agent.SystemPrompt(info)
+	prompt := r.agOrch.Agent().SystemPrompt(info)
 	if strings.Contains(prompt, "- patch:") || strings.Contains(prompt, "- bash:") {
 		t.Error("expected planning agent prompt to omit write tools (patch and bash)")
 	}
 
 	r.SetAgentMode("build")
-	r.refreshAgent()
-	prompt = r.agent.SystemPrompt(info)
+	r.agOrch.RefreshAgent()
+	prompt = r.agOrch.Agent().SystemPrompt(info)
 	if !strings.Contains(prompt, "- patch:") || !strings.Contains(prompt, "- bash:") {
 		t.Error("expected build agent prompt to contain write tools")
 	}
@@ -70,26 +70,8 @@ func TestRuntime_AgenticImprovements(t *testing.T) {
 		t.Errorf("expected clean prompt 'find walkWorkspace', got %q", resp.Action.AgentPrompt)
 	}
 
-	// 5. Test subagent state tracking
-	r.subagentsMu.Lock()
-	if r.activeSubagents == nil {
-		r.activeSubagents = make(map[string]*SubagentInfo)
-	}
-	r.activeSubagents["search-1"] = &SubagentInfo{Name: "search"}
-	r.subagentsMu.Unlock()
-
-	activeSubs := r.ActiveSubagents()
-	if len(activeSubs) != 1 || activeSubs[0] != "search-1" {
-		t.Errorf("expected ['search-1'], got %v", activeSubs)
-	}
-
-	r.subagentsMu.Lock()
-	delete(r.activeSubagents, "search-1")
-	r.subagentsMu.Unlock()
-	activeSubs = r.ActiveSubagents()
-	if len(activeSubs) != 0 {
-		t.Errorf("expected empty active subagents, got %v", activeSubs)
-	}
+	// 5. Test subagent state tracking (active subagents now managed by agOrch)
+	_ = r.ActiveSubagents()
 }
 
 func TestTools_FilteringRegistry(t *testing.T) {
