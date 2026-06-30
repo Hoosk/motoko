@@ -141,7 +141,7 @@ func TestPatchToolAppliesUnifiedDiffPatch(t *testing.T) {
 	if string(updated) != "new\n" {
 		t.Fatalf("unexpected unified diff result %q", string(updated))
 	}
-	if !strings.Contains(result.Summary, "Unified diff aplicado") {
+	if !strings.Contains(result.Summary, "Unified diff applied") {
 		t.Fatalf("unexpected summary %q", result.Summary)
 	}
 }
@@ -163,7 +163,7 @@ func TestPatchToolAppliesASTPatch(t *testing.T) {
 	if !strings.Contains(string(updated), "func Two() int {\n\treturn 9\n}") {
 		t.Fatalf("expected AST patch replacement, got %q", string(updated))
 	}
-	if !strings.Contains(result.Summary, "AST patch aplicado") {
+	if !strings.Contains(result.Summary, "AST patch applied") {
 		t.Fatalf("unexpected summary %q", result.Summary)
 	}
 }

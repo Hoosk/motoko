@@ -23,11 +23,11 @@ import (
 func applyASTPatch(content []byte, relPath string, request *astPatch) (string, error) {
 	lang, languageName := treeSitterLanguageForPath(relPath)
 	if lang == nil {
-		return "", fmt.Errorf("AST patch no soportado para %s", filepath.Ext(relPath))
+		return "", fmt.Errorf("AST patch not supported for %s", filepath.Ext(relPath))
 	}
 	root, _ := sitter.ParseCtx(context.Background(), content, lang)
 	if root == nil {
-		return "", fmt.Errorf("no se pudo parsear el AST de %s (%s)", relPath, languageName)
+		return "", fmt.Errorf("could not parse AST of %s (%s)", relPath, languageName)
 	}
 	matches, err := findASTMatches(root, content, lang, request.Selector)
 	if err != nil {
@@ -35,21 +35,21 @@ func applyASTPatch(content []byte, relPath string, request *astPatch) (string, e
 	}
 	if len(matches) == 0 {
 		if request.Selector.Query != "" {
-			return "", fmt.Errorf("no se encontro un nodo AST que coincida con la query proporcionada")
+			return "", fmt.Errorf("no AST node found matching the provided query")
 		}
-		return "", fmt.Errorf("no se encontro un nodo AST que coincida con type=%s", request.Selector.Type)
+		return "", fmt.Errorf("no AST node found matching type=%s", request.Selector.Type)
 	}
 	if request.Selector.Index > len(matches) {
 		if request.Selector.Query != "" {
-			return "", fmt.Errorf("solo hay %d coincidencias AST para la query proporcionada", len(matches))
+			return "", fmt.Errorf("only %d AST matches for the provided query", len(matches))
 		}
-		return "", fmt.Errorf("solo hay %d coincidencias AST para type=%s", len(matches), request.Selector.Type)
+		return "", fmt.Errorf("only %d AST matches for type=%s", len(matches), request.Selector.Type)
 	}
 	if request.Selector.Index == 1 && len(matches) > 1 && request.Selector.Name == "" && request.Selector.Contains == "" && request.Selector.Query == "" {
-		return "", fmt.Errorf("el selector AST coincide en %d nodos; agrega name, contains o index para desambiguar", len(matches))
+		return "", fmt.Errorf("AST selector matches %d nodes; add name, contains, or index to disambiguate", len(matches))
 	}
 	if request.Selector.Index == 1 && len(matches) > 1 && request.Selector.Query != "" {
-		return "", fmt.Errorf("la query AST coincide en %d nodos; agrega index para desambiguar", len(matches))
+		return "", fmt.Errorf("AST query matches %d nodes; add index to disambiguate", len(matches))
 	}
 	target := matches[request.Selector.Index-1]
 	start := int(target.StartByte())
@@ -80,7 +80,7 @@ func applyASTAction(content string, start, end int, request *astPatch) (string, 
 		}
 		return content[:end] + text + content[end:], nil
 	default:
-		return "", fmt.Errorf("accion AST no soportada: %s", request.Action)
+		return "", fmt.Errorf("unsupported AST action: %s", request.Action)
 	}
 }
 
@@ -107,7 +107,7 @@ func findASTMatches(root *sitter.Node, content []byte, lang *sitter.Language, se
 func findASTQueryMatches(root *sitter.Node, content []byte, lang *sitter.Language, selector astSelector) ([]*sitter.Node, error) {
 	query, err := sitter.NewQuery([]byte(selector.Query), lang)
 	if err != nil {
-		return nil, fmt.Errorf("query AST invalida: %w", err)
+		return nil, fmt.Errorf("invalid AST query: %w", err)
 	}
 	defer query.Close()
 	cursor := sitter.NewQueryCursor()
@@ -156,7 +156,7 @@ func selectQueryCaptureNode(query *sitter.Query, match *sitter.QueryMatch, captu
 	if !explicitCapture && len(match.Captures) == 1 && fallback != nil {
 		return fallback, nil
 	}
-	return nil, fmt.Errorf("la query AST no produjo la captura requerida: %s", captureName)
+	return nil, fmt.Errorf("the AST query did not produce the required capture: %s", captureName)
 }
 
 func astNodeName(node *sitter.Node, content []byte) string {

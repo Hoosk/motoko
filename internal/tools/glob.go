@@ -48,12 +48,12 @@ func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
 
 	sort.Strings(matches)
 	if len(matches) == 0 {
-		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin coincidencias para %s.", pattern), Output: ""}, nil
+		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("No matches for %s.", pattern), Output: ""}, nil
 	}
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("%d coincidencias para %s.", len(matches), pattern),
+		Summary: fmt.Sprintf("%d matches for %s.", len(matches), pattern),
 		Output:  strings.Join(matches, "\n"),
 	}, nil
 }

@@ -9,7 +9,7 @@ import (
 func Classify(mode types.Mode, command string) types.ShellDecision {
 	normalized := strings.ToLower(strings.TrimSpace(command))
 	if normalized == "" {
-		return types.ShellDecision{Deny: true, Reason: "Comando vacio."}
+		return types.ShellDecision{Deny: true, Reason: "Empty command."}
 	}
 
 	dangerousPatterns := []string{
@@ -25,7 +25,7 @@ func Classify(mode types.Mode, command string) types.ShellDecision {
 	}
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(normalized, pattern) {
-			return types.ShellDecision{Deny: true, Reason: "Comando bloqueado por politica de seguridad."}
+			return types.ShellDecision{Deny: true, Reason: "Command blocked by security policy."}
 		}
 	}
 
@@ -50,7 +50,7 @@ func Classify(mode types.Mode, command string) types.ShellDecision {
 	}
 	for _, pattern := range mutatingPatterns {
 		if strings.Contains(normalized, pattern) {
-			return types.ShellDecision{RequiresApproval: true, Reason: "El comando puede modificar archivos o el estado del repositorio."}
+			return types.ShellDecision{RequiresApproval: true, Reason: "The command may modify files or repository state."}
 		}
 	}
 

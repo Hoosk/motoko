@@ -92,7 +92,7 @@ func (t *DelegateTool) Run(ctx context.Context, args string) (Result, error) {
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Subagente %s finalizo su tarea.", agentName),
+		Summary: fmt.Sprintf("Sub-agent %s finished its task.", agentName),
 		Output:  resultText,
 	}, nil
 }

@@ -70,18 +70,18 @@ func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	if ctx.Err() == context.DeadlineExceeded {
-		result.Summary = fmt.Sprintf("bash timeout para: %s", command)
+		result.Summary = fmt.Sprintf("bash timeout for: %s", command)
 		return result, nil
 	}
 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.Summary = fmt.Sprintf("bash termino con salida %d.", exitErr.ExitCode())
+			result.Summary = fmt.Sprintf("bash finished with exit code %d.", exitErr.ExitCode())
 			return result, nil
 		}
 		return Result{}, err
 	}
 
-	result.Summary = "bash ejecutado correctamente."
+	result.Summary = "bash executed successfully."
 	return result, nil
 }

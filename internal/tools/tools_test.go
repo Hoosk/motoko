@@ -222,7 +222,7 @@ func TestBashToolSuccessAndExitStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(failure.Summary, "salida 7") {
+	if !strings.Contains(failure.Summary, "exit code 7") {
 		t.Fatalf("expected exit code summary, got %#v", failure)
 	}
 }
@@ -260,7 +260,7 @@ func TestPatchToolRejectsAmbiguousASTPatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ambiguous AST patch to fail")
 	}
-	if !strings.Contains(err.Error(), "query AST coincide") {
+	if !strings.Contains(err.Error(), "AST query matches") {
 		t.Fatalf("unexpected AST ambiguity error: %v", err)
 	}
 }
@@ -275,7 +275,7 @@ func TestPatchToolRejectsMissingQueryCapture(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing capture AST patch to fail")
 	}
-	if !strings.Contains(err.Error(), "captura requerida") {
+	if !strings.Contains(err.Error(), "required capture") {
 		t.Fatalf("unexpected missing capture error: %v", err)
 	}
 }
