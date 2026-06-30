@@ -16,7 +16,6 @@ import (
 
 const keyInput = "input"
 
-
 func init() {
 	provider.Register(config.ProviderKindGemini, NewClient)
 }
@@ -439,11 +438,11 @@ func responseFromGenAIResponse(resp *genai.GenerateContentResponse) provider.Res
 	result := provider.Response{
 		FinalText: text,
 		Usage: provider.Usage{
-			InputTokens:           input,
-			OutputTokens:          output,
-			TotalTokens:           total,
-			CacheReadInputTokens:  cacheRead,
-			ReasoningTokens:       reasoning,
+			InputTokens:          input,
+			OutputTokens:         output,
+			TotalTokens:          total,
+			CacheReadInputTokens: cacheRead,
+			ReasoningTokens:      reasoning,
 		},
 	}
 

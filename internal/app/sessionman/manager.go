@@ -16,10 +16,10 @@ import (
 )
 
 type Manager struct {
-	workspaceID    string
+	brainInitErr   error
 	currentSession *session.Session
 	brain          *brain.Brain
-	brainInitErr   error
+	workspaceID    string
 	wasResumed     bool
 }
 

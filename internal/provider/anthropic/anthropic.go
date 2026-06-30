@@ -16,7 +16,6 @@ import (
 
 const keyInput = "input"
 
-
 func init() {
 	provider.Register(config.ProviderKindAnthropic, NewClient)
 }

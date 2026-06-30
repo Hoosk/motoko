@@ -311,6 +311,3 @@ func TestModelSidebarDualWidthLayout(t *testing.T) {
 		t.Fatalf("expected sidebar layout of 36 columns on normal width 100, got width=%d ok=%t", w2, ok2)
 	}
 }
-
-
-

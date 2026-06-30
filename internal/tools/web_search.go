@@ -120,7 +120,6 @@ func (t *WebSearchTool) fetchDuckDuckGo(ctx context.Context, query string) ([]Se
 	return parseDuckDuckGoHTML(html), nil
 }
 
-
 func parseMojeekHTML(html string) []SearchResponseItem {
 	var items []SearchResponseItem
 	parts := strings.Split(html, "<!--rs-->")

@@ -1,4 +1,5 @@
 package openai
+
 import (
 	"context"
 	"fmt"

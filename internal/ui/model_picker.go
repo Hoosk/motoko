@@ -28,7 +28,7 @@ func (m modelFilterItem) Render(active bool) string {
 	if m.info.SupportsThinking {
 		indicator = " (1)"
 	}
-	return cursor + style.Render(m.info.ID + indicator)
+	return cursor + style.Render(m.info.ID+indicator)
 }
 
 type modelPickerState struct {
@@ -155,4 +155,3 @@ func (p thinkingPickerState) View() string {
 
 	return strings.Join(rows, "\n")
 }
-

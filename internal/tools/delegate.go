@@ -8,14 +8,14 @@ import (
 )
 
 type SubagentConfig struct {
-	ProgressChan  chan<- string   `json:"-"`
-	Mode          string          `json:"mode"`
-	Task          string          `json:"task"`
-	ToolFilter    []string        `json:"tool_filter"`
-	MaxIterations int             `json:"max_iterations"`
-	MaxDepth      int             `json:"max_depth"`
-	AllowDelegate bool            `json:"allow_delegate"`
-	InheritBrain  bool            `json:"inherit_brain"`
+	ProgressChan  chan<- string `json:"-"`
+	Mode          string        `json:"mode"`
+	Task          string        `json:"task"`
+	ToolFilter    []string      `json:"tool_filter"`
+	MaxIterations int           `json:"max_iterations"`
+	MaxDepth      int           `json:"max_depth"`
+	AllowDelegate bool          `json:"allow_delegate"`
+	InheritBrain  bool          `json:"inherit_brain"`
 }
 
 type AgentRunner interface {
@@ -80,7 +80,7 @@ func (t *DelegateTool) Run(ctx context.Context, args string) (Result, error) {
 			if err := json.Unmarshal([]byte(jsonStr), &cfg); err != nil {
 				return Result{}, fmt.Errorf("error parseando json config: %v", err)
 			}
-			cfg.Mode = agentName // force override
+			cfg.Mode = agentName   // force override
 			cfg.Task = instruction // force override
 		}
 	}

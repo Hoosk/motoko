@@ -153,8 +153,6 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
-		cfg.Search.MaxResults = 100
-		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	} else {
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("failed to decode config: %w", err)
@@ -168,6 +166,12 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 				}
 			}
 		}
+	}
+	if cfg.Search.MaxResults <= 0 {
+		cfg.Search.MaxResults = 100
+	}
+	if len(cfg.Search.ExcludePatterns) == 0 {
+		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	}
 
 	// Load project-scoped config if exists

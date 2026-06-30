@@ -125,7 +125,7 @@ func (fl *FilterList) View() string {
 
 	rows := []string{
 		titleStyle.Render(fl.Title),
-		styles.PopupFieldLabelStyle.Render("Search: ") + styles.PopupSelectionStyle.Render(fl.SearchQuery + "█"),
+		styles.PopupFieldLabelStyle.Render("Search: ") + styles.PopupSelectionStyle.Render(fl.SearchQuery+"█"),
 		hintStyle.Render("↑↓ navigate  letters filter  Enter select  Esc cancel"),
 		"",
 	}

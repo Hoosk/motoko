@@ -14,9 +14,9 @@ import (
 // available tools, and active agent mode.
 func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
-	
+
 	// --- STATIC PART ---
-	
+
 	header := system.LoadProviderHeader(providerKind)
 	lines = append(lines, header)
 	lines = append(lines, "")
@@ -71,11 +71,11 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"</system_instructions>",
 		"",
 	)
-	
+
 	if agentSystem != "" {
 		lines = append(lines, agentSystem, "")
 	}
-	
+
 	if len(info.AvailableSkills) > 0 {
 		lines = append(lines,
 			"<available_skills>",
@@ -93,7 +93,7 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 			"",
 		)
 	}
-	
+
 	if info.Guidelines != "" {
 		lines = append(lines,
 			"<agents_guidelines>",
@@ -184,7 +184,7 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"  [Pre-extracted Relevant Snippets]:",
 		"  "+strings.ReplaceAll(info.RelevantSnippetsSummary(), "\n", "\n  "),
 	)
-	
+
 	if info.BrainSummary != "" {
 		lines = append(lines,
 			"",

@@ -7,7 +7,6 @@ import (
 	"github.com/Hoosk/motoko/internal/system"
 )
 
-
 func TestBuiltinAgentsExist(t *testing.T) {
 	names := make(map[string]bool)
 	for _, a := range BuiltinAgents {

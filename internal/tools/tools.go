@@ -140,7 +140,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 	if len(output) <= maxOutput {
 		return output
 	}
-	
+
 	if br := GetBrain(ctx); br != nil {
 		filename := fmt.Sprintf("truncated_output_%d.md", time.Now().UnixNano())
 		err := br.Write(filename, output)

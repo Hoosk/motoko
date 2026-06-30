@@ -25,32 +25,29 @@ import (
 )
 
 type Orchestrator struct {
-	agent            *agent.Agent
-	currentAgentName string
-	mode             types.Mode
-	debug            bool
-	mentionedFiles   []string
-	activeSubagents  map[string]*types.SubagentInfo
-	subagentsMu      sync.Mutex
-
-	configFn          func() *config.AppConfig
-	providerClientFn  func() func(config.ProviderConfig) (provider.Client, error)
-	toolsFn           func() *tools.Registry
-	semanticFn        func() *semantic.Index
-	brainFn           func() *brain.Brain
-	currentSessionFn  func() *session.Session
-	workspaceIDFn     func() string
-	contextWindowFn   func() int
-	availableAgentsFn func() []agent.AgentDef
-	availableSkillsFn func() []skills.Skill
-	contextInfoFn     func() system.ContextInfo
-
-	testAgents []agent.AgentDef
-	testSkills []skills.Skill
-
-	onPersistTurn      func(agent.Result)
-	onGenerateTitle    func(ctx context.Context, userInput, assistantResponse string)
+	semanticFn         func() *semantic.Index
+	availableSkillsFn  func() []skills.Skill
 	onMaybeAutoCompact func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error
+	onGenerateTitle    func(ctx context.Context, userInput, assistantResponse string)
+	onPersistTurn      func(agent.Result)
+	activeSubagents    map[string]*types.SubagentInfo
+	contextInfoFn      func() system.ContextInfo
+	currentSessionFn   func() *session.Session
+	brainFn            func() *brain.Brain
+	toolsFn            func() *tools.Registry
+	agent              *agent.Agent
+	providerClientFn   func() func(config.ProviderConfig) (provider.Client, error)
+	configFn           func() *config.AppConfig
+	workspaceIDFn      func() string
+	contextWindowFn    func() int
+	availableAgentsFn  func() []agent.AgentDef
+	currentAgentName   string
+	mode               types.Mode
+	testAgents         []agent.AgentDef
+	testSkills         []skills.Skill
+	mentionedFiles     []string
+	subagentsMu        sync.Mutex
+	debug              bool
 }
 
 type Deps struct {
@@ -380,7 +377,7 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 	if err != nil {
 		return "", err
 	}
-	defer subBrain.Destroy()
+	defer func() { _ = subBrain.Destroy() }()
 
 	if cfg.InheritBrain && o.brainFn() != nil {
 		if copyErr := o.brainFn().CopyTo(subBrain); copyErr != nil {

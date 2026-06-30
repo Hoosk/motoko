@@ -208,11 +208,15 @@ func TestListSessionsWithData(t *testing.T) {
 	tmpDir := t.TempDir()
 	s1 := session.New(tmpDir, "/tmp")
 	s1.Title = "Session One"
-	s1.Save()
+	if err := s1.Save(); err != nil {
+		t.Fatal(err)
+	}
 
 	s2 := session.New(tmpDir, "/tmp")
 	s2.Title = "Session Two"
-	s2.Save()
+	if err := s2.Save(); err != nil {
+		t.Fatal(err)
+	}
 
 	m := &Manager{workspaceID: tmpDir}
 	sessions, err := m.ListSessions()

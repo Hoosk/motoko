@@ -111,7 +111,7 @@ func TestEnrichContextBrainSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer br.Destroy()
+	defer func() { _ = br.Destroy() }()
 
 	if err := br.Write("plan.md", "This is my plan"); err != nil {
 		t.Fatal(err)

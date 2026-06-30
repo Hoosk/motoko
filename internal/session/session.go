@@ -26,13 +26,13 @@ type Session struct {
 	UpdatedAt       time.Time                   `json:"updated_at"`
 	History         []provider.ConversationItem `json:"history,omitempty"`
 	LastInputTokens int                         `json:"last_input_tokens,omitempty"`
-	
-	TotalInputTokens      int                         `json:"total_input_tokens,omitempty"`
-	TotalOutputTokens     int                         `json:"total_output_tokens,omitempty"`
-	TotalTokens           int                         `json:"total_tokens,omitempty"`
-	TotalReasoningTokens  int                         `json:"total_reasoning_tokens,omitempty"`
-	TotalCacheReadTokens  int                         `json:"total_cache_read_tokens,omitempty"`
-	TotalCacheWriteTokens int                         `json:"total_cache_write_tokens,omitempty"`
+
+	TotalInputTokens      int `json:"total_input_tokens,omitempty"`
+	TotalOutputTokens     int `json:"total_output_tokens,omitempty"`
+	TotalTokens           int `json:"total_tokens,omitempty"`
+	TotalReasoningTokens  int `json:"total_reasoning_tokens,omitempty"`
+	TotalCacheReadTokens  int `json:"total_cache_read_tokens,omitempty"`
+	TotalCacheWriteTokens int `json:"total_cache_write_tokens,omitempty"`
 
 	// Cumulative estimated token usage per component
 	TotalSystemStaticTokens  int `json:"total_system_static_tokens,omitempty"`

@@ -313,13 +313,13 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	} else {
 		resp, err = a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
 			if delta.ReasoningContent != "" {
-				if err := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); err != nil {
-					return err
+				if evErr := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); evErr != nil {
+					return evErr
 				}
 			}
 			if delta.Content != "" {
-				if err := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); err != nil {
-					return err
+				if evErr := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); evErr != nil {
+					return evErr
 				}
 			}
 			return nil

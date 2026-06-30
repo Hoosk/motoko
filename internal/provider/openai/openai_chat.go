@@ -1,4 +1,5 @@
 package openai
+
 import (
 	"encoding/json"
 	"sort"
@@ -170,8 +171,8 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 				var rawToolCall map[string]any
 				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
 					result = append(result, map[string]any{
-						keyRole:       provider.RoleAssistant,
-						keyContent:    "",
+						keyRole:      provider.RoleAssistant,
+						keyContent:   "",
 						"tool_calls": []map[string]any{rawToolCall},
 					})
 					continue
@@ -182,10 +183,10 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 				keyRole:    provider.RoleAssistant,
 				keyContent: "",
 				"tool_calls": []map[string]any{{
-					"id":         call.CallID,
-					keyType:       keyFunction,
+					"id":    call.CallID,
+					keyType: keyFunction,
 					keyFunction: map[string]any{
-						keyName:      call.Name,
+						keyName:     call.Name,
 						"arguments": provider.AssistantToolCallArguments(call),
 					},
 				}},
@@ -495,11 +496,11 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) provider.Respons
 	result := provider.Response{
 		FinalText: text,
 		Usage: provider.Usage{
-			InputTokens:           input,
-			OutputTokens:          output,
-			TotalTokens:           total,
-			CacheReadInputTokens:  cacheRead,
-			ReasoningTokens:       reasoning,
+			InputTokens:          input,
+			OutputTokens:         output,
+			TotalTokens:          total,
+			CacheReadInputTokens: cacheRead,
+			ReasoningTokens:      reasoning,
 		},
 	}
 	if text != "" {
