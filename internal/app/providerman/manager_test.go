@@ -122,13 +122,16 @@ func TestSetActiveModelInfo(t *testing.T) {
 		}},
 	}
 	m := testManager(cfg)
-	err := m.SetActiveModelInfo(provider.ModelInfo{ID: "gpt-4.1"})
+	err := m.SetActiveModelInfo(provider.ModelInfo{ID: "gpt-4.1", EffortPresets: []string{"low", "medium"}, BudgetMax: 24576})
 	if err != nil {
 		t.Fatalf("SetActiveModelInfo: %v", err)
 	}
 	active, ok := cfg.Active()
 	if !ok || active.Model != "gpt-4.1" {
 		t.Errorf("expected model set to gpt-4.1, got %q", active.Model)
+	}
+	if len(active.EffortPresets) != 2 || active.BudgetMax != 24576 {
+		t.Fatalf("expected reasoning metadata copied to provider config, got %+v", active)
 	}
 }
 

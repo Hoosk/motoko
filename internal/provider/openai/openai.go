@@ -149,7 +149,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	}
 
 	if len(decoded.Choices) == 0 {
-		return provider.Response{}, fmt.Errorf("no hay respuesta del modelo")
+		return provider.Response{}, fmt.Errorf("no response from model")
 	}
 	return responseFromChatCompletion(decoded), nil
 }
@@ -195,7 +195,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 
 func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	if !c.listReady() {
-		return nil, fmt.Errorf("provider no configurado")
+		return nil, fmt.Errorf("provider not configured")
 	}
 	var decoded struct {
 		Data []struct {
@@ -231,7 +231,7 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, er
 }
 
 func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	// Intento 1: Consulta de modelo individual vía SDK
+	// Attempt 1: Query the individual model via the SDK.
 	m, err := c.sdkClient.Models.Get(ctx, model)
 	if err == nil && m != nil {
 		if field, ok := m.JSON.ExtraFields["context_length"]; ok {
@@ -247,7 +247,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 		}
 	}
 
-	// Intento 2: Consulta de listado general en red (si la API no soporta consultas individuales o no devolvió el campo)
+	// Attempt 2: Query the full model list if the API does not support individual lookups or omitted the field.
 	list, err := c.ListModels(ctx)
 	if err == nil {
 		for _, item := range list {
@@ -257,7 +257,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 		}
 	}
 
-	// Intento 3: LookupModel (local catalog cache)
+	// Attempt 3: Fall back to the local catalog cache.
 	if info, ok := provider.LookupModel(c.providerName, model); ok {
 		return info, nil
 	}

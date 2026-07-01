@@ -117,6 +117,33 @@ func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
 	}
 }
 
+func TestResponseFromChatCompletionKeepsReasoningAndToolCallsTogether(t *testing.T) {
+	resp := responseFromChatCompletion(chatCompletionResponse{
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{
+			Content:          "checking",
+			ReasoningContent: "need to inspect files",
+			ToolCalls: []chatCompletionToolCall{{
+				ID:   "call_1",
+				Type: "function",
+				Function: chatCompletionToolFunction{
+					Name:      "glob",
+					Arguments: `{"input":"**/*.go"}`,
+				},
+			}},
+		}}},
+	})
+	if len(resp.OutputItems) != 1 {
+		t.Fatalf("expected one assistant turn, got %#v", resp.OutputItems)
+	}
+	item := resp.OutputItems[0]
+	if item.Content != "checking" || item.ReasoningContent != "need to inspect files" || len(item.ToolCalls) != 1 {
+		t.Fatalf("unexpected assistant turn %#v", item)
+	}
+	if resp.FinalText != "" {
+		t.Fatalf("expected empty final text when tool calls are pending, got %q", resp.FinalText)
+	}
+}
+
 func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
 	messages := toChatMessages(provider.AssistantToolCallItems([]provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
@@ -166,6 +193,12 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 	fn, ok := call["function"].(map[string]any)
 	if !ok || fn["name"] != "grep" || fn["arguments"] != `{"pattern": "func"}` {
 		t.Fatalf("unexpected function values: %#v", call["function"])
+	}
+
+	withReasoning := provider.AssistantTurn("", "thinking...", []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "grep", Arguments: json.RawMessage(`{"pattern": "func"}`), CallID: "call_reasoning"}})
+	messages = toChatMessages([]provider.ConversationItem{withReasoning})
+	if messages[0]["reasoning_content"] != "thinking..." {
+		t.Fatalf("expected reasoning_content to be serialized, got %#v", messages[0])
 	}
 
 	resultItem := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "grep", CallID: "call_abc"}, "found 3 matches")

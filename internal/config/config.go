@@ -40,6 +40,9 @@ type ProviderConfig struct {
 	EnableGoogleSearch  bool           `json:"enable_google_search,omitempty"`
 	EnableCodeExecution bool           `json:"enable_code_execution,omitempty"`
 	SupportsThinking    bool           `json:"supports_thinking,omitempty"`
+	EffortPresets       []string       `json:"effort_presets,omitempty"`
+	BudgetMin           int            `json:"budget_min,omitempty"`
+	BudgetMax           int            `json:"budget_max,omitempty"`
 }
 
 type SearchConfig struct {

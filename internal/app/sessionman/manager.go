@@ -59,7 +59,7 @@ func (m *Manager) CurrentSessionEntries() []types.Entry {
 	}
 	entries := make([]types.Entry, 0, len(m.currentSession.History))
 	for _, msg := range m.currentSession.History {
-		if _, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
+		if len(msg.ToolCalls) > 0 {
 			continue
 		}
 		switch msg.Role {
@@ -68,9 +68,8 @@ func (m *Manager) CurrentSessionEntries() []types.Entry {
 		case provider.RoleAssistant:
 			entries = append(entries, types.Entry{Kind: types.EntryAssistant, Text: msg.Content})
 		case provider.RoleTool:
-			_, output := provider.ParseToolResultContent(msg.Content)
-			if strings.TrimSpace(output) != "" {
-				entries = append(entries, types.Entry{Kind: types.EntrySystem, Text: output})
+			if strings.TrimSpace(msg.Content) != "" {
+				entries = append(entries, types.Entry{Kind: types.EntrySystem, Text: msg.Content})
 			}
 		default:
 			entries = append(entries, types.Entry{Kind: types.EntrySystem, Text: msg.Content})

@@ -360,7 +360,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ModelSelectedMsg:
 		if msg.Model.SupportsThinking {
-			m.thinkingPicker.Open(msg.Model)
+			currentBudget := 0
+			if active, ok := m.runtime.GetActiveProviderConfig(); ok {
+				currentBudget = active.ThinkingBudget
+			}
+			m.thinkingPicker.Open(msg.Model, currentBudget)
 		} else {
 			cmds = append(cmds, selectModelAndBudget(m.runtime, msg.Model, 0))
 		}

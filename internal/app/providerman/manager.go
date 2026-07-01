@@ -84,6 +84,9 @@ func (m *Manager) SetActiveModelInfo(model provider.ModelInfo) error {
 	active.Models = config.UniqueSortedKeep(active.Models, model.ID)
 	active.ContextWindow = model.ContextWindow
 	active.SupportsThinking = model.SupportsThinking
+	active.EffortPresets = append([]string(nil), model.EffortPresets...)
+	active.BudgetMin = model.BudgetMin
+	active.BudgetMax = model.BudgetMax
 	cfg.UpsertProvider(active)
 	if err := cfg.Save(); err != nil {
 		return err
@@ -100,11 +103,16 @@ func (m *Manager) GetModelInfoForActiveProvider(ctx context.Context, modelID str
 	if !ok {
 		return provider.ModelInfo{}, fmt.Errorf("no active provider")
 	}
+	active.Model = ""
 	client, err := m.ProviderClient(active)
 	if err != nil {
 		return provider.ModelInfo{}, err
 	}
-	return client.GetModel(ctx, modelID)
+	info, err := client.GetModel(ctx, modelID)
+	if err != nil {
+		return provider.ModelInfo{}, err
+	}
+	return provider.EnrichModelInfo(active.Name, info), nil
 }
 
 func (m *Manager) SetThinkingBudget(budget int) error {
@@ -134,6 +142,7 @@ func (m *Manager) SetThinkingBudget(budget int) error {
 }
 
 func (m *Manager) ListModelsForProvider(ctx context.Context, providerCfg config.ProviderConfig) ([]provider.ModelInfo, error) {
+	providerCfg.Model = ""
 	client, err := m.ProviderClient(providerCfg)
 	if err != nil {
 		return nil, err
@@ -141,6 +150,9 @@ func (m *Manager) ListModelsForProvider(ctx context.Context, providerCfg config.
 	models, err := client.ListModels(ctx)
 	if err != nil {
 		return nil, err
+	}
+	for i := range models {
+		models[i] = provider.EnrichModelInfo(providerCfg.Name, models[i])
 	}
 	ids := make([]string, 0, len(models))
 	for _, model := range models {
@@ -309,6 +321,7 @@ func (m *Manager) HandleModelsCommand(args []string) types.Response {
 		return types.Response{Signal: "open-models-popup", Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Fetching models..."}}}
 	}
 	modelID := strings.Join(args, " ")
+	active.Model = ""
 	client, err := m.ProviderClient(active)
 	if err != nil {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
@@ -321,6 +334,9 @@ func (m *Manager) HandleModelsCommand(args []string) types.Response {
 	active.Models = config.UniqueSortedKeep(active.Models, info.ID)
 	active.ContextWindow = info.ContextWindow
 	active.SupportsThinking = info.SupportsThinking
+	active.EffortPresets = append([]string(nil), info.EffortPresets...)
+	active.BudgetMin = info.BudgetMin
+	active.BudgetMax = info.BudgetMax
 	cfg.UpsertProvider(active)
 	if err := cfg.Save(); err != nil {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}

@@ -164,13 +164,11 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	}
 
 	finalText := strings.TrimSpace(raw.String())
-	result := provider.Response{FinalText: finalText, Usage: usage}
-	if finalText != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(finalText)}
+	result := provider.Response{FinalText: finalText, Usage: usage, PendingCalls: pendingCalls}
+	if finalText != "" || len(pendingCalls) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(finalText, "", pendingCalls)}
 	}
-	result.PendingCalls = pendingCalls
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result, nil

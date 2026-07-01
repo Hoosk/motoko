@@ -50,10 +50,9 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 	prunedOldHistory := make([]provider.ConversationItem, 0, len(oldHistory))
 	for _, msg := range oldHistory {
 		if msg.Role == provider.RoleTool {
-			call, output := provider.ParseToolResultContent(msg.Content)
-			if len(output) > 2000 {
-				prunedText := fmt.Sprintf("Tool output was large and has been pruned. Size: %d bytes. Summary: %s...", len(output), output[:500])
-				msg = provider.ToolResultForInvocation(call, prunedText)
+			if len(msg.Content) > 2000 {
+				prunedText := fmt.Sprintf("Tool output was large and has been pruned. Size: %d bytes. Summary: %s...", len(msg.Content), msg.Content[:500])
+				msg = provider.ToolResultForInvocation(provider.ToolInvocation{Name: msg.ToolName, CallID: msg.ToolCallID}, prunedText)
 			}
 		}
 		prunedOldHistory = append(prunedOldHistory, msg)

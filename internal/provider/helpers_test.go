@@ -1,9 +1,6 @@
 package provider
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestNormalizeConversationRoleFallsBackToUser(t *testing.T) {
 	if got := NormalizeConversationRole(" TOOL "); got != RoleUser {
@@ -17,41 +14,21 @@ func TestNormalizeConversationRoleFallsBackToUser(t *testing.T) {
 	}
 }
 
-func TestFormatToolResultContentIncludesMetadata(t *testing.T) {
+func TestToolResultForInvocationUsesStructuredFields(t *testing.T) {
 	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
-	got := FormatToolResultContent(call, "ok")
-	if !strings.Contains(got, "tool_name=read") || !strings.Contains(got, "call_id=call_123") || !strings.Contains(got, "tool_input=README.md") {
-		t.Fatalf("expected metadata in formatted tool result, got %q", got)
+	got := ToolResultForInvocation(call, "ok")
+	if got.Role != RoleTool || got.ToolName != "read" || got.ToolCallID != "call_123" || got.Content != "ok" {
+		t.Fatalf("unexpected structured tool result: %#v", got)
 	}
 }
 
-func TestParseToolResultContentRoundTripsMetadata(t *testing.T) {
-	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
-	parsedCall, output := ParseToolResultContent(FormatToolResultContent(call, "ok"))
-	if parsedCall.Name != call.Name || parsedCall.Input != call.Input || parsedCall.CallID != call.CallID {
-		t.Fatalf("unexpected parsed tool call %#v", parsedCall)
+func TestAssistantTurnCarriesReasoningAndToolCalls(t *testing.T) {
+	call := ToolInvocation{Kind: InvokeCustomTool, Name: "read", CallID: "call_123"}
+	got := AssistantTurn("working", "thinking", []ToolInvocation{call})
+	if got.Role != RoleAssistant || got.Content != "working" || got.ReasoningContent != "thinking" {
+		t.Fatalf("unexpected assistant turn: %#v", got)
 	}
-	if string(parsedCall.Arguments) != string(call.Arguments) {
-		t.Fatalf("unexpected parsed arguments %s", string(parsedCall.Arguments))
-	}
-	if output != "ok" {
-		t.Fatalf("unexpected parsed output %q", output)
-	}
-}
-
-func TestAssistantToolCallContentRoundTrips(t *testing.T) {
-	call := ToolInvocation{Kind: InvokeCustomTool, Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123", Raw: []byte(`{"id":"call_123","type":"function","function":{"name":"read","arguments":"{\"input\":\"README.md\"}"},"thought_signature":"sig"}`)}
-	parsed, ok := ParseAssistantToolCallContent(FormatAssistantToolCallContent(call))
-	if !ok {
-		t.Fatal("expected assistant tool call metadata")
-	}
-	if parsed.Name != call.Name || parsed.Input != call.Input || parsed.CallID != call.CallID {
-		t.Fatalf("unexpected parsed call %#v", parsed)
-	}
-	if string(parsed.Arguments) != string(call.Arguments) {
-		t.Fatalf("unexpected parsed arguments %s", string(parsed.Arguments))
-	}
-	if string(parsed.Raw) != string(call.Raw) {
-		t.Fatalf("unexpected parsed raw payload %s", string(parsed.Raw))
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Name != "read" {
+		t.Fatalf("expected tool calls to be preserved: %#v", got)
 	}
 }

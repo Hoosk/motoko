@@ -330,23 +330,27 @@ func parseConversationItem(msg provider.ConversationItem) (string, []parsedBlock
 	}
 
 	var blocks []parsedBlock
-	if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
-		var toolInput map[string]any
-		if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
-			toolInput = map[string]any{keyInput: call.Input}
+	if len(msg.ToolCalls) > 0 {
+		if strings.TrimSpace(msg.Content) != "" {
+			blocks = append(blocks, parsedBlock{isText: true, text: msg.Content})
 		}
-		blocks = append(blocks, parsedBlock{
-			isToolUse:    true,
-			toolUseID:    call.CallID,
-			toolUseName:  call.Name,
-			toolUseInput: toolInput,
-		})
+		for _, call := range msg.ToolCalls {
+			var toolInput map[string]any
+			if err := json.Unmarshal(call.Arguments, &toolInput); err != nil {
+				toolInput = map[string]any{keyInput: call.Input}
+			}
+			blocks = append(blocks, parsedBlock{
+				isToolUse:    true,
+				toolUseID:    call.CallID,
+				toolUseName:  call.Name,
+				toolUseInput: toolInput,
+			})
+		}
 	} else if msg.Role == provider.RoleTool {
-		call, output := provider.ParseToolResultContent(msg.Content)
 		blocks = append(blocks, parsedBlock{
 			isToolResult: true,
-			toolResultID: call.CallID,
-			toolOutput:   output,
+			toolResultID: msg.ToolCallID,
+			toolOutput:   msg.Content,
 		})
 	} else {
 		blocks = append(blocks, parsedBlock{
@@ -585,13 +589,11 @@ func responseFromSDK(decoded *sdk.Message) provider.Response {
 		CacheWriteInputTokens: int(decoded.Usage.CacheCreationInputTokens),
 	}
 
-	result := provider.Response{FinalText: finalText, Usage: usage}
-	if finalText != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(finalText)}
+	result := provider.Response{FinalText: finalText, Usage: usage, PendingCalls: pendingCalls}
+	if finalText != "" || len(pendingCalls) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(finalText, "", pendingCalls)}
 	}
-	result.PendingCalls = pendingCalls
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result

@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"strings"
 )
 
 const (
@@ -51,12 +50,12 @@ type ToolSet struct {
 }
 
 type ToolInvocation struct {
-	Kind      string
-	Name      string
-	Input     string
-	Arguments json.RawMessage
-	CallID    string
-	Raw       json.RawMessage
+	Kind      string          `json:"kind,omitempty"`
+	Name      string          `json:"name"`
+	Input     string          `json:"input,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
 }
 
 type Response struct {
@@ -83,8 +82,12 @@ type Usage struct {
 }
 
 type Message struct {
-	Role    string
-	Content string
+	Role             string           `json:"role"`
+	Content          string           `json:"content,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolInvocation `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	ToolName         string           `json:"tool_name,omitempty"`
 }
 
 type ConversationItem = Message
@@ -101,30 +104,25 @@ func AssistantText(content string) ConversationItem {
 	return ConversationItem{Role: RoleAssistant, Content: content}
 }
 
-func ToolResultForInvocation(call ToolInvocation, output string) ConversationItem {
-	call.Name = strings.TrimSpace(call.Name)
-	if call.Name == "" {
-		call.Name = "tool"
-	}
-	payload := strings.TrimSpace(output)
-	if call.Arguments != nil && strings.TrimSpace(call.Input) == "" {
-		payload = strings.TrimSpace(string(call.Arguments))
-	}
-	return ConversationItem{
-		Role:    RoleTool,
-		Content: FormatToolResultContent(call, payload),
-	}
-}
-
 type Delta struct {
 	Content          string
 	ReasoningContent string
 }
 
 type ModelInfo struct {
-	ID               string
-	ContextWindow    int
-	SupportsThinking bool
+	ID               string   `json:"id"`
+	ContextWindow    int      `json:"context_window,omitempty"`
+	SupportsThinking bool     `json:"supports_thinking,omitempty"`
+	EffortPresets    []string `json:"effort_presets,omitempty"`
+	BudgetMin        int      `json:"budget_min,omitempty"`
+	BudgetMax        int      `json:"budget_max,omitempty"`
+}
+
+type ReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values,omitempty"`
+	Min    int      `json:"min,omitempty"`
+	Max    int      `json:"max,omitempty"`
 }
 
 type BatchRequestItem struct {

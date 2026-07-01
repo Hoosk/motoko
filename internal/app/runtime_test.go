@@ -664,15 +664,14 @@ func TestCompactSessionPruningPreservesToolMetadata(t *testing.T) {
 	for _, msg := range capturedMessages {
 		if msg.Role == provider.RoleTool {
 			foundTool = true
-			parsedCall, parsedOutput := provider.ParseToolResultContent(msg.Content)
-			if parsedCall.Name != "my_custom_tool" {
-				t.Errorf("expected tool name 'my_custom_tool', got %q", parsedCall.Name)
+			if msg.ToolName != "my_custom_tool" {
+				t.Errorf("expected tool name 'my_custom_tool', got %q", msg.ToolName)
 			}
-			if parsedCall.CallID != "call_123" {
-				t.Errorf("expected call ID 'call_123', got %q", parsedCall.CallID)
+			if msg.ToolCallID != "call_123" {
+				t.Errorf("expected call ID 'call_123', got %q", msg.ToolCallID)
 			}
-			if !strings.Contains(parsedOutput, "Tool output was large and has been pruned") {
-				t.Errorf("expected pruned message in output, got %q", parsedOutput)
+			if !strings.Contains(msg.Content, "Tool output was large and has been pruned") {
+				t.Errorf("expected pruned message in output, got %q", msg.Content)
 			}
 		}
 	}

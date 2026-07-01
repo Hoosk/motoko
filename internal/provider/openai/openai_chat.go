@@ -126,13 +126,13 @@ func responseFromChatCompletion(decoded chatCompletionResponse) provider.Respons
 	}
 	message := decoded.Choices[0].Message
 	text := strings.TrimSpace(message.Content)
-	result := provider.Response{FinalText: text, Usage: decoded.Usage.providerUsage()}
-	if text != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(text)}
+	reasoning := strings.TrimSpace(message.ReasoningContent)
+	pending := pendingCallsFromChatToolCalls(message.ToolCalls)
+	result := provider.Response{FinalText: text, Usage: decoded.Usage.providerUsage(), PendingCalls: pending}
+	if text != "" || reasoning != "" || len(pending) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, reasoning, pending)}
 	}
-	result.PendingCalls = pendingCallsFromChatToolCalls(message.ToolCalls)
-	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
+	if len(pending) > 0 {
 		result.FinalText = ""
 	}
 	return result
@@ -166,52 +166,58 @@ func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []provide
 func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
-			if len(call.Raw) > 0 {
-				var rawToolCall map[string]any
-				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
-					result = append(result, map[string]any{
-						keyRole:      provider.RoleAssistant,
-						keyContent:   "",
-						"tool_calls": []map[string]any{rawToolCall},
-					})
-					continue
-				}
-			}
-
-			result = append(result, map[string]any{
+		if len(msg.ToolCalls) > 0 {
+			item := map[string]any{
 				keyRole:    provider.RoleAssistant,
-				keyContent: "",
-				"tool_calls": []map[string]any{{
+				keyContent: msg.Content,
+			}
+			if msg.ReasoningContent != "" {
+				item["reasoning_content"] = msg.ReasoningContent
+			}
+			toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
+			for _, call := range msg.ToolCalls {
+				if len(call.Raw) > 0 {
+					var rawToolCall map[string]any
+					if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+						toolCalls = append(toolCalls, rawToolCall)
+						continue
+					}
+				}
+				toolCalls = append(toolCalls, map[string]any{
 					"id":    call.CallID,
 					keyType: keyFunction,
 					keyFunction: map[string]any{
 						keyName:     call.Name,
 						"arguments": provider.AssistantToolCallArguments(call),
 					},
-				}},
-			})
+				})
+			}
+			item["tool_calls"] = toolCalls
+			result = append(result, item)
 			continue
 		}
 		if msg.Role == provider.RoleTool {
-			call, output := provider.ParseToolResultContent(msg.Content)
 			item := map[string]any{
 				"role":    provider.RoleTool,
-				"content": output,
+				"content": msg.Content,
 			}
-			if call.CallID != "" {
-				item["tool_call_id"] = call.CallID
+			if msg.ToolCallID != "" {
+				item["tool_call_id"] = msg.ToolCallID
 			}
-			if call.Name != "" {
-				item["name"] = call.Name
+			if msg.ToolName != "" {
+				item["name"] = msg.ToolName
 			}
 			result = append(result, item)
 			continue
 		}
-		result = append(result, map[string]any{
+		item := map[string]any{
 			"role":    provider.NormalizeConversationRole(msg.Role),
 			"content": msg.Content,
-		})
+		}
+		if msg.ReasoningContent != "" {
+			item["reasoning_content"] = msg.ReasoningContent
+		}
+		result = append(result, item)
 	}
 	return result
 }
@@ -219,14 +225,17 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 func toResponsesInputItems(messages []provider.ConversationItem) responses.ResponseInputParam {
 	items := make(responses.ResponseInputParam, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok && call.CallID != "" {
-			items = append(items, responses.ResponseInputItemParamOfFunctionCall(provider.AssistantToolCallArguments(call), call.CallID, call.Name))
+		if len(msg.ToolCalls) > 0 {
+			for _, call := range msg.ToolCalls {
+				if call.CallID != "" {
+					items = append(items, responses.ResponseInputItemParamOfFunctionCall(provider.AssistantToolCallArguments(call), call.CallID, call.Name))
+				}
+			}
 			continue
 		}
 		if msg.Role == provider.RoleTool {
-			call, output := provider.ParseToolResultContent(msg.Content)
-			if call.CallID != "" {
-				items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(call.CallID, output))
+			if msg.ToolCallID != "" {
+				items = append(items, responses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, msg.Content))
 				continue
 			}
 		}
@@ -393,21 +402,28 @@ func sortedChatToolCalls(acc map[int]*chatCompletionToolCall) []chatCompletionTo
 func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for _, msg := range messages {
-		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
+		if len(msg.ToolCalls) > 0 || msg.ReasoningContent != "" {
+			msgMap := map[string]any{
+				"role":    provider.RoleAssistant,
+				"content": msg.Content,
+			}
+			if msg.ReasoningContent != "" {
+				msgMap["reasoning_content"] = msg.ReasoningContent
+			}
 			var sdkToolCalls []openai.ChatCompletionMessageToolCallUnionParam
-			if len(call.Raw) > 0 {
-				var rawToolCall map[string]any
-				if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
-					var sdkCall openai.ChatCompletionMessageToolCallUnionParam
-					if rawBytes, err := json.Marshal(rawToolCall); err == nil {
-						if err := json.Unmarshal(rawBytes, &sdkCall); err == nil {
-							sdkToolCalls = append(sdkToolCalls, sdkCall)
+			for _, call := range msg.ToolCalls {
+				if len(call.Raw) > 0 {
+					var rawToolCall map[string]any
+					if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+						var sdkCall openai.ChatCompletionMessageToolCallUnionParam
+						if rawBytes, err := json.Marshal(rawToolCall); err == nil {
+							if err := json.Unmarshal(rawBytes, &sdkCall); err == nil {
+								sdkToolCalls = append(sdkToolCalls, sdkCall)
+								continue
+							}
 						}
 					}
 				}
-			}
-
-			if len(sdkToolCalls) == 0 {
 				sdkToolCalls = append(sdkToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
 						ID:   call.CallID,
@@ -419,18 +435,23 @@ func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatComple
 					},
 				})
 			}
-
+			if len(sdkToolCalls) > 0 {
+				msgMap["tool_calls"] = sdkToolCalls
+			}
+			var sdkMsg openai.ChatCompletionMessageParamUnion
+			if rawBytes, err := json.Marshal(msgMap); err == nil {
+				if err := json.Unmarshal(rawBytes, &sdkMsg); err == nil {
+					result = append(result, sdkMsg)
+					continue
+				}
+			}
 			result = append(result, openai.ChatCompletionMessageParamUnion{
-				OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-					Role:      "assistant",
-					ToolCalls: sdkToolCalls,
-				},
+				OfAssistant: &openai.ChatCompletionAssistantMessageParam{Role: "assistant", ToolCalls: sdkToolCalls},
 			})
 			continue
 		}
 		if msg.Role == provider.RoleTool {
-			call, output := provider.ParseToolResultContent(msg.Content)
-			result = append(result, openai.ToolMessage(output, call.CallID))
+			result = append(result, openai.ToolMessage(msg.Content, msg.ToolCallID))
 			continue
 		}
 
@@ -439,6 +460,16 @@ func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatComple
 		case provider.RoleUser:
 			result = append(result, openai.UserMessage(msg.Content))
 		case provider.RoleAssistant:
+			if msg.ReasoningContent != "" {
+				msgMap := map[string]any{"role": provider.RoleAssistant, "content": msg.Content, "reasoning_content": msg.ReasoningContent}
+				var sdkMsg openai.ChatCompletionMessageParamUnion
+				if rawBytes, err := json.Marshal(msgMap); err == nil {
+					if err := json.Unmarshal(rawBytes, &sdkMsg); err == nil {
+						result = append(result, sdkMsg)
+						continue
+					}
+				}
+			}
 			result = append(result, openai.AssistantMessage(msg.Content))
 		default:
 			result = append(result, openai.UserMessage(msg.Content))
@@ -486,29 +517,30 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) provider.Respons
 	}
 	message := comp.Choices[0].Message
 	text := strings.TrimSpace(message.Content)
+	reasoningContent := strings.TrimSpace(rawReasoningContent(message.RawJSON()))
 
 	input := int(comp.Usage.PromptTokens)
 	output := int(comp.Usage.CompletionTokens)
 	total := int(comp.Usage.TotalTokens)
 	cacheRead := int(comp.Usage.PromptTokensDetails.CachedTokens)
-	reasoning := int(comp.Usage.CompletionTokensDetails.ReasoningTokens)
+	reasoningTokens := int(comp.Usage.CompletionTokensDetails.ReasoningTokens)
 
+	pending := pendingCallsFromSDKToolCalls(message.ToolCalls)
 	result := provider.Response{
-		FinalText: text,
+		FinalText:    text,
+		PendingCalls: pending,
 		Usage: provider.Usage{
 			InputTokens:          input,
 			OutputTokens:         output,
 			TotalTokens:          total,
 			CacheReadInputTokens: cacheRead,
-			ReasoningTokens:      reasoning,
+			ReasoningTokens:      reasoningTokens,
 		},
 	}
-	if text != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(text)}
+	if text != "" || reasoningContent != "" || len(pending) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, reasoningContent, pending)}
 	}
-	result.PendingCalls = pendingCallsFromSDKToolCalls(message.ToolCalls)
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result
@@ -572,4 +604,22 @@ func openAIInvocationInput(arguments json.RawMessage) string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Input)
+}
+
+func rawReasoningContent(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var parsed string
+	var payload struct {
+		ReasoningContent string `json:"reasoning_content"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err == nil {
+		return strings.TrimSpace(payload.ReasoningContent)
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+		return strings.TrimSpace(parsed)
+	}
+	return ""
 }

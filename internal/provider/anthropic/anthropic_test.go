@@ -86,7 +86,7 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 		CallID: "call_abc",
 	}
 	messages = []provider.ConversationItem{
-		{Role: provider.RoleAssistant, Content: provider.FormatAssistantToolCallContent(call)},
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
 	}
 	got = toSDKMessages(messages)
 	if len(got) != 1 || got[0].Role != sdk.MessageParamRoleAssistant {

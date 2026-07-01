@@ -95,6 +95,7 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 
 func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	var raw strings.Builder
+	var reasoning strings.Builder
 	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
@@ -134,6 +135,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 			delta := chunk.Choices[0].Delta
 			if delta.Content != "" || delta.ReasoningContent != "" {
 				raw.WriteString(delta.Content)
+				reasoning.WriteString(delta.ReasoningContent)
 				if onDelta != nil {
 					if err := onDelta(provider.Delta{
 						Content:          delta.Content,
@@ -154,7 +156,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		return provider.Response{}, err
 	}
 	return responseFromChatCompletion(chatCompletionResponse{
-		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ReasoningContent: reasoning.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
 		Usage: chatCompletionUsage{
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
@@ -205,6 +207,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	defer func() { _ = stream.Close() }()
 
 	var raw strings.Builder
+	var reasoning strings.Builder
 	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
@@ -214,9 +217,18 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		if len(chunk.Choices) > 0 {
 			choice := chunk.Choices[0]
 			delta := choice.Delta
+			reasoningText := rawReasoningContent(delta.RawJSON())
 			text := delta.Content
 			if text == "" {
 				text = delta.Refusal
+			}
+			if reasoningText != "" {
+				reasoning.WriteString(reasoningText)
+				if onDelta != nil {
+					if err := onDelta(provider.Delta{ReasoningContent: reasoningText}); err != nil {
+						return provider.Response{}, err
+					}
+				}
 			}
 			if text != "" {
 				raw.WriteString(text)
@@ -243,7 +255,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	}
 
 	return responseFromChatCompletion(chatCompletionResponse{
-		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ReasoningContent: reasoning.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
 		Usage: chatCompletionUsage{
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,

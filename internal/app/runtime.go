@@ -263,7 +263,6 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
 	}
 
-	r.agOrch.RefreshAgent()
 	return r
 }
 
@@ -422,7 +421,8 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(ctx)
 	}
-	go func() { _ = provider.LoadCatalog(ctx) }()
+	_ = provider.LoadCatalog(context.Background())
+	r.agOrch.RefreshAgent()
 	go func() {
 		defer close(r.updateDone)
 		if r.version == "dev" || r.version == "" {
