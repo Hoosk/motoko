@@ -17,11 +17,15 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 		RelevantSnippets: []string{"FILE internal/app/runtime.go\nLINES 10-20\nREASON symbol match: RunAgent\nfunc RunAgent() error {\n\treturn nil\n}"},
 	}
 	prompt := buildSystemPrompt("default", info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
-	if !strings.Contains(prompt, "[Pre-extracted Relevant Snippets]:") {
-		t.Fatalf("prompt missing snippets section: %s", prompt)
+	dynamicPrompt := buildDynamicPrompt("default", info)
+	if strings.Contains(prompt, "[Pre-extracted Relevant Snippets]:") {
+		t.Fatalf("static prompt should not contain dynamic snippets section: %s", prompt)
 	}
-	if !strings.Contains(prompt, "func RunAgent() error") {
-		t.Fatalf("prompt missing snippet content: %s", prompt)
+	if !strings.Contains(dynamicPrompt, "[Pre-extracted Relevant Snippets]:") {
+		t.Fatalf("dynamic prompt missing snippets section: %s", dynamicPrompt)
+	}
+	if !strings.Contains(dynamicPrompt, "func RunAgent() error") {
+		t.Fatalf("dynamic prompt missing snippet content: %s", dynamicPrompt)
 	}
 }
 

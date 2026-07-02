@@ -2,7 +2,9 @@ package sessionman
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/app/sessiontitle"
 	"github.com/Hoosk/motoko/internal/config"
@@ -31,6 +33,8 @@ func (m *Manager) GenerateTitle(ctx context.Context, userInput, assistantRespons
 		tracelog.Logf("auto_title: generateTitle failed to get provider client: %v", err)
 		return
 	}
+	reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+	ctx = provider.WithTelemetry(ctx, m.currentSession.ID, reqID)
 	tracelog.Logf("auto_title: calling Complete on provider client...")
 	resp, err := client.Complete(ctx,
 		"Generate a short title of 4 to 8 words for this session. Respond exactly with a single-line JSON object in this format: {\"message\":\"title\"}. Do not return markdown, triple quotes, explanations, options, or additional text.",

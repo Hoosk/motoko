@@ -219,9 +219,10 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 		cfg.HTTPOptions = &genai.HTTPOptions{
 			Headers: make(http.Header),
 		}
-		cfg.HTTPOptions.Headers.Set("X-Session-ID", sessionID)
-		if requestID != "" {
-			cfg.HTTPOptions.Headers.Set("X-Request-ID", requestID)
+		telemetryHeaders := map[string]string{}
+		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+		for k, v := range telemetryHeaders {
+			cfg.HTTPOptions.Headers.Set(k, v)
 		}
 	}
 

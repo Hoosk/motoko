@@ -109,42 +109,18 @@ func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
 }
 
 func buildAnthropicSystemBlocks(systemPrompt string) []sdk.TextBlockParam {
-	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
-	if len(parts) == 2 {
-		return []sdk.TextBlockParam{
-			{
-				Text:         strings.TrimSpace(parts[0]),
-				CacheControl: sdk.NewCacheControlEphemeralParam(),
-			},
-			{
-				Text: strings.TrimSpace(parts[1]),
-			},
-		}
-	}
 	return []sdk.TextBlockParam{
 		{
-			Text:         systemPrompt,
+			Text:         strings.TrimSpace(systemPrompt),
 			CacheControl: sdk.NewCacheControlEphemeralParam(),
 		},
 	}
 }
 
 func buildAnthropicBetaSystemBlocks(systemPrompt string) []sdk.BetaTextBlockParam {
-	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
-	if len(parts) == 2 {
-		return []sdk.BetaTextBlockParam{
-			{
-				Text:         strings.TrimSpace(parts[0]),
-				CacheControl: sdk.NewBetaCacheControlEphemeralParam(),
-			},
-			{
-				Text: strings.TrimSpace(parts[1]),
-			},
-		}
-	}
 	return []sdk.BetaTextBlockParam{
 		{
-			Text:         systemPrompt,
+			Text:         strings.TrimSpace(systemPrompt),
 			CacheControl: sdk.NewBetaCacheControlEphemeralParam(),
 		},
 	}
@@ -191,11 +167,12 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	reqOpts := []option.RequestOption{
 		option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
 	}
+	telemetryHeaders := map[string]string{}
 	if sessionID, requestID := provider.GetTelemetry(ctx); sessionID != "" {
-		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
-		}
+		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	}
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
 
 	resp, err := c.sdkClient.Messages.New(ctx, params, reqOpts...)

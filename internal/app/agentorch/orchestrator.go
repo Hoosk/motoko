@@ -450,7 +450,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, info system.ContextInfo, in
 	}
 	if sess := o.currentSessionFn(); sess != nil && (strings.TrimSpace(sess.Title) == "" || strings.EqualFold(strings.TrimSpace(sess.Title), "New session")) {
 		if o.onGenerateTitle != nil {
-			go o.onGenerateTitle(context.Background(), input, result.Assistant)
+			go o.onGenerateTitle(ctx, input, result.Assistant)
 		}
 	}
 	if o.onMaybeAutoCompact != nil {
@@ -494,7 +494,7 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 	}
 	if sess := o.currentSessionFn(); sess != nil && (strings.TrimSpace(sess.Title) == "" || strings.EqualFold(strings.TrimSpace(sess.Title), "New session")) {
 		if o.onGenerateTitle != nil {
-			go o.onGenerateTitle(context.Background(), input, result.Assistant)
+			go o.onGenerateTitle(ctx, input, result.Assistant)
 		}
 	}
 	if o.onMaybeAutoCompact != nil {

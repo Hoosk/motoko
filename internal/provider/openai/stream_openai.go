@@ -36,11 +36,10 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
 	reqOpts := make([]openaioption.RequestOption, 0)
-	if sessionID != "" {
-		reqOpts = append(reqOpts, openaioption.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, openaioption.WithHeader("X-Request-ID", requestID))
-		}
+	telemetryHeaders := map[string]string{}
+	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
 	}
 	stream := c.sdkClient.Responses.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
@@ -105,8 +104,12 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
-		"temperature": 0.2,
-		"stream":      true,
+		"temperature":    0.2,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
+	}
+	if sessionID, _ := provider.GetTelemetry(ctx); sessionID != "" {
+		payload["prompt_cache_key"] = sessionID
 	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
@@ -116,12 +119,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
@@ -176,11 +174,18 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		openai.SystemMessage(systemPrompt),
 	}
 	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(c.model),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.NewOpt(true),
+		},
+	}
+	if sessionID != "" {
+		params.PromptCacheKey = param.NewOpt(sessionID)
 	}
 	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
 		params.Tools = sdkTools
@@ -191,13 +196,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))

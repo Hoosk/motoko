@@ -106,11 +106,10 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
 	reqOpts := make([]option.RequestOption, 0)
-	if sessionID != "" {
-		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
-		}
+	telemetryHeaders := map[string]string{}
+	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
 	resp, err := c.sdkClient.Responses.New(ctx, params, reqOpts...)
 	if err != nil {
@@ -129,6 +128,9 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}
+	if sessionID, _ := provider.GetTelemetry(ctx); sessionID != "" {
+		payload["prompt_cache_key"] = sessionID
+	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
@@ -137,12 +139,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 
 	if err := provider.PostJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
 		return provider.Response{}, err
@@ -159,11 +156,15 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 		openai.SystemMessage(systemPrompt),
 	}
 	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(c.model),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
+	}
+	if sessionID != "" {
+		params.PromptCacheKey = param.NewOpt(sessionID)
 	}
 	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
 		params.Tools = sdkTools
@@ -174,13 +175,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 	reqOpts := make([]option.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))

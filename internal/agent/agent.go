@@ -90,7 +90,12 @@ func (a *Agent) SystemPrompt(info system.ContextInfo) string {
 	if a == nil {
 		return ""
 	}
-	return buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
+	staticPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
+	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	if dynamicPrompt == "" {
+		return staticPrompt
+	}
+	return staticPrompt + "\n\n" + dynamicPrompt
 }
 
 func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem) (Result, error) {
@@ -309,13 +314,24 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	specs := a.tools.Specs(tCtx)
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
+	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	providerMessages := append([]provider.ConversationItem(nil), messages...)
+	if dynamicPrompt != "" {
+		for i := len(providerMessages) - 1; i >= 0; i-- {
+			if providerMessages[i].Role != provider.RoleUser {
+				continue
+			}
+			providerMessages[i].Content = dynamicPrompt + "\n\n<user_request>\n" + providerMessages[i].Content + "\n</user_request>"
+			break
+		}
+	}
 
 	var resp provider.Response
 	var err error
 	if onEvent == nil {
-		resp, err = a.provider.Complete(ctx, systemPrompt, messages, toolSet)
+		resp, err = a.provider.Complete(ctx, systemPrompt, providerMessages, toolSet)
 	} else {
-		resp, err = a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
+		resp, err = a.provider.StreamComplete(ctx, systemPrompt, providerMessages, toolSet, func(delta provider.Delta) error {
 			if delta.ReasoningContent != "" {
 				if evErr := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); evErr != nil {
 					return evErr
@@ -335,15 +351,7 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	}
 
 	// Calculate character metrics
-	staticPrompt := systemPrompt
-	dynamicPrompt := ""
-	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
-	if len(parts) == 2 {
-		staticPrompt = parts[0]
-		dynamicPrompt = parts[1]
-	}
-
-	resp.Usage.SystemStaticChars = len(staticPrompt)
+	resp.Usage.SystemStaticChars = len(systemPrompt)
 	resp.Usage.SystemDynamicChars = len(dynamicPrompt)
 
 	toolsSize := 0
@@ -353,7 +361,7 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	resp.Usage.ToolsChars = toolsSize
 
 	historySize := 0
-	for _, msg := range messages {
+	for _, msg := range providerMessages {
 		historySize += len(msg.Role) + len(msg.Content)
 	}
 	resp.Usage.HistoryChars = historySize

@@ -10,8 +10,7 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
-// buildSystemPrompt assembles the complete system prompt for the given context,
-// available tools, and active agent mode.
+// buildSystemPrompt assembles the stable, cache-friendly system prompt.
 func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
 
@@ -142,10 +141,13 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"",
 	)
 
-	// Inject split token
-	lines = append(lines, "--- DYNAMIC ---", "")
+	return strings.Join(lines, "\n")
+}
 
-	// --- DYNAMIC PART ---
+// buildDynamicPrompt assembles the per-turn dynamic context that should live in
+// the uncached tail of the conversation instead of the system prompt.
+func buildDynamicPrompt(providerKind string, info system.ContextInfo) string {
+	var lines []string
 
 	lines = append(lines,
 		"<environment>",

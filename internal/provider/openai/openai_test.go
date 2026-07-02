@@ -5,11 +5,42 @@ import (
 	"strings"
 	"testing"
 
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 )
+
+func TestChatStreamingIncludesUsage(t *testing.T) {
+	params := openai.ChatCompletionNewParams{
+		Model:       openai.ChatModel("gpt-4.1-mini"),
+		Messages:    []openai.ChatCompletionMessageParamUnion{openai.SystemMessage("system")},
+		Temperature: param.NewOpt(0.2),
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.NewOpt(true),
+		},
+	}
+	if !params.StreamOptions.IncludeUsage.Value {
+		t.Fatal("expected stream options to include usage")
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"stream_options":{"include_usage":true}`) {
+		t.Fatalf("expected stream_options include_usage in payload, got %s", string(encoded))
+	}
+	params.PromptCacheKey = param.NewOpt("sess-123")
+	encoded, err = json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"prompt_cache_key":"sess-123"`) {
+		t.Fatalf("expected prompt_cache_key in payload, got %s", string(encoded))
+	}
+}
 
 func TestMessageSerializationHelpers(t *testing.T) {
 	items := toResponsesInputItems([]provider.Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})

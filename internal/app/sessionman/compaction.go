@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
@@ -57,6 +58,8 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 		}
 		prunedOldHistory = append(prunedOldHistory, msg)
 	}
+	reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+	ctx = provider.WithTelemetry(ctx, m.currentSession.ID, reqID)
 
 	resp, err := client.Complete(ctx,
 		"You are the memory compaction engine. Summarize the following older portion of the conversation. Extract key context, important decisions, and completed tasks. Keep a structured format (e.g., bulleted Markdown) and be very concise.",
