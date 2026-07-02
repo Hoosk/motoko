@@ -56,7 +56,7 @@ func TestMessageSerializationHelpers(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0, "")
 	if params.Temperature.Value != 0.2 {
 		t.Fatalf("expected temperature for non-reasoning model, got %#v", params.Temperature)
 	}
@@ -72,7 +72,7 @@ func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) {
-	params := buildResponseParams("o1-preview", "system", []provider.ConversationItem{provider.AssistantText("hola")}, provider.ToolSet{}, 24576)
+	params := buildResponseParams("o1-preview", "system", []provider.ConversationItem{provider.AssistantText("hola")}, provider.ToolSet{}, 24576, "")
 	if params.Reasoning.Effort != "high" {
 		t.Fatalf("expected high reasoning effort, got %#v", params.Reasoning)
 	}
@@ -85,7 +85,7 @@ func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) 
 }
 
 func TestBuildResponseParamsIncludesTools(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", nil, provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", nil, provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0, "")
 	if len(params.Tools) != 1 {
 		t.Fatalf("expected one tool, got %#v", params.Tools)
 	}
@@ -253,9 +253,23 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 }
 
 func TestBuildResponseParamsLeavesReasoningEmptyWithoutBudget(t *testing.T) {
-	params := buildResponseParams("o4-mini", "system", nil, provider.ToolSet{}, 0)
+	params := buildResponseParams("o4-mini", "system", nil, provider.ToolSet{}, 0, "")
 	if params.Reasoning.Effort != "" {
 		t.Fatalf("expected empty reasoning effort without budget, got %#v", params.Reasoning)
+	}
+}
+
+func TestBuildResponseParamsIncludesPromptCacheKey(t *testing.T) {
+	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0, "sess-123")
+	if params.PromptCacheKey.Value != "sess-123" {
+		t.Fatalf("expected prompt cache key, got %#v", params.PromptCacheKey)
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"prompt_cache_key":"sess-123"`) {
+		t.Fatalf("expected prompt_cache_key in responses payload, got %s", string(encoded))
 	}
 }
 

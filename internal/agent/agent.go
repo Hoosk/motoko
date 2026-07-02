@@ -131,21 +131,6 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		currentHistory := make([]provider.ConversationItem, len(history))
 		copy(currentHistory, history)
 
-		userMsgIdx := len(priorHistory)
-		if userMsgIdx < len(currentHistory) {
-			if strings.EqualFold(info.ActiveMode, "plan") {
-				frag := system.LoadFragment("plan_active")
-				if frag != "" {
-					currentHistory[userMsgIdx].Content += "\n\n" + frag
-				}
-			} else if strings.EqualFold(info.ActiveMode, "build") {
-				frag := system.LoadFragment("build_switch")
-				if frag != "" {
-					currentHistory[userMsgIdx].Content += "\n\n" + frag
-				}
-			}
-		}
-
 		if i >= maxIterations-2 {
 			frag := system.LoadFragment("max_steps")
 			if frag != "" {
@@ -315,15 +300,15 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
 	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
+		if dynamicPrompt != "" {
+			dynamicPrompt += "\n\n"
+		}
+		dynamicPrompt += modeFragment
+	}
 	providerMessages := append([]provider.ConversationItem(nil), messages...)
 	if dynamicPrompt != "" {
-		for i := len(providerMessages) - 1; i >= 0; i-- {
-			if providerMessages[i].Role != provider.RoleUser {
-				continue
-			}
-			providerMessages[i].Content = dynamicPrompt + "\n\n<user_request>\n" + providerMessages[i].Content + "\n</user_request>"
-			break
-		}
+		providerMessages = append(providerMessages, provider.UserText(dynamicPrompt))
 	}
 
 	var resp provider.Response
@@ -367,6 +352,17 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	resp.Usage.HistoryChars = historySize
 
 	return resp, nil
+}
+
+func activeModeFragment(activeMode string) string {
+	switch {
+	case strings.EqualFold(activeMode, "plan"):
+		return system.LoadFragment("plan_active")
+	case strings.EqualFold(activeMode, "build"):
+		return system.LoadFragment("build_switch")
+	default:
+		return ""
+	}
 }
 
 func toolSet(specs []tools.Spec) provider.ToolSet {

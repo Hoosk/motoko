@@ -103,8 +103,8 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 		return c.completeChat(ctx, systemPrompt, messages, tools)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]option.RequestOption, 0)
 	telemetryHeaders := map[string]string{}
 	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
@@ -271,7 +271,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 
 // buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
 // The system prompt goes into Instructions; messages become the Input item list.
-func buildResponseParams(model, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, thinkingBudget int) responses.ResponseNewParams {
+func buildResponseParams(model, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, thinkingBudget int, promptCacheKey string) responses.ResponseNewParams {
 	p := responses.ResponseNewParams{
 		Model:        model,
 		Instructions: param.NewOpt(systemPrompt),
@@ -283,6 +283,9 @@ func buildResponseParams(model, systemPrompt string, messages []provider.Convers
 				OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
 			},
 		},
+	}
+	if promptCacheKey != "" {
+		p.PromptCacheKey = param.NewOpt(promptCacheKey)
 	}
 	if toolDefs := responseTools(tools); len(toolDefs) > 0 {
 		p.Tools = toolDefs

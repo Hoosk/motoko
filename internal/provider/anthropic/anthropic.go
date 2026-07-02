@@ -365,7 +365,7 @@ func buildSDKMessages[MsgT any, RoleT any, BlockT any](
 			sdkBlocks[j] = buildBlock(b)
 		}
 
-		if i == len(messages)-1 && role == provider.RoleUser && len(sdkBlocks) > 0 {
+		if i == len(messages)-2 && len(sdkBlocks) > 0 {
 			setCacheControl(&sdkBlocks[len(sdkBlocks)-1])
 		}
 
@@ -445,6 +445,8 @@ func toSDKMessages(messages []provider.ConversationItem) []sdk.MessageParam {
 		func(block *sdk.ContentBlockParamUnion) {
 			if block.OfText != nil {
 				block.OfText.CacheControl = sdk.NewCacheControlEphemeralParam()
+			} else if block.OfToolUse != nil {
+				block.OfToolUse.CacheControl = sdk.NewCacheControlEphemeralParam()
 			} else if block.OfToolResult != nil {
 				block.OfToolResult.CacheControl = sdk.NewCacheControlEphemeralParam()
 			}
@@ -493,6 +495,8 @@ func toSDKBetaMessages(messages []provider.ConversationItem) []sdk.BetaMessagePa
 		func(block *sdk.BetaContentBlockParamUnion) {
 			if block.OfText != nil {
 				block.OfText.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
+			} else if block.OfToolUse != nil {
+				block.OfToolUse.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 			} else if block.OfToolResult != nil {
 				block.OfToolResult.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 			}

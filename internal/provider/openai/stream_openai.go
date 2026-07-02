@@ -33,8 +33,8 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]openaioption.RequestOption, 0)
 	telemetryHeaders := map[string]string{}
 	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
