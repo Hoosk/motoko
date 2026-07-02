@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"context"
+	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +29,7 @@ type TaskEventMsg struct {
 }
 
 type AgentResultMsg struct {
+	RequestID int
 	Err       error
 	Prompt    string
 	Assistant string
@@ -50,8 +54,10 @@ type Model struct {
 	notificationTime       time.Time
 	agentBuffer            *agentStreamBuffer
 	agentStream            chan app.AgentStreamEvent
+	cancelCurrent          context.CancelFunc
 	runtime                *app.Runtime
 	modelPicker            modelPickerState
+	promptQueue            []string
 	taskStatus             string
 	notificationText       string
 	sessionPicker          sessionPickerState
@@ -63,11 +69,14 @@ type Model struct {
 	timeline               TimelineModel
 	footer                 FooterModel
 	sidebarPref            sidebarLayoutState
+	requestID              int
 	height                 int
 	width                  int
+	queueSel               int
 	prevActiveTasks        int
 	prevActiveSubagents    int
 	notificationShow       bool
+	queueFocus             bool
 	showHelp               bool
 	showTools              bool
 	showSidebar            bool
@@ -226,6 +235,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.Prompt) == "" {
 			break
 		}
+		if m.timeline.model.Thinking {
+			m.enqueuePrompt(msg.Prompt)
+			break
+		}
 		resp := m.runtime.HandleInput(msg.Prompt, m.runtime.GetContextInfo())
 
 		if resp.Clear {
@@ -257,13 +270,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if resp.Action != nil {
 			switch resp.Action.Type {
 			case app.ActionAgent:
+				m.requestID++
 				m.timeline.SetStreaming(true)
 				m.timeline.SetThinking(true)
 				m.footer.SetThinking(true)
 				m.composer.SetThinking(true)
+				ctx, cancel := context.WithCancel(context.Background())
+				m.cancelCurrent = cancel
 				m.agentStream = make(chan app.AgentStreamEvent, 100)
 				m.agentBuffer = &agentStreamBuffer{}
-				cmds = append(cmds, m.runAgent(resp.Action.AgentPrompt), m.waitAgentStream(m.agentStream), m.thinkingTick())
+				cmds = append(cmds, m.runAgent(ctx, resp.Action.AgentPrompt, m.requestID, m.agentStream), m.waitAgentStream(m.agentStream, m.requestID), m.thinkingTick())
 
 			case app.ActionShell:
 				cmds = append(cmds, m.runShell(resp.Action.ShellCommand))
@@ -277,6 +293,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case AgentStreamBatchMsg:
+		if msg.RequestID != m.requestID {
+			break
+		}
 		for _, event := range msg.Events {
 			m.timeline.Update(AgentStreamEventMsg{Event: event})
 		}
@@ -286,7 +305,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agentBuffer.mu.Unlock()
 		}
 		if !msg.Done && m.agentStream != nil {
-			cmds = append(cmds, m.waitAgentStream(m.agentStream))
+			cmds = append(cmds, m.waitAgentStream(m.agentStream, msg.RequestID))
 		} else if msg.Done {
 			m.agentStream = nil
 		}
@@ -299,19 +318,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.footer.Update(msg)
 
 	case AgentResultMsg:
-		if strings.TrimSpace(msg.Assistant) != "" {
-			if cmd := m.timeline.Update(finalizeStreamMsg{Text: msg.Assistant}); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+		if msg.RequestID != m.requestID {
+			break
+		}
+		if cmd := m.timeline.Update(finalizeStreamMsg{Text: msg.Assistant}); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 		m.timeline.SetThinking(false)
 		m.footer.SetThinking(false)
 		m.composer.SetThinking(false)
-		if msg.Err != nil {
+		m.cancelCurrent = nil
+		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+			m.timeline.renderMessages()
+		} else if errors.Is(msg.Err, context.Canceled) {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Request cancelled."})
 			m.timeline.renderMessages()
 		}
 		cmds = append(cmds, m.updateContextStats())
+		if next, ok := m.dequeuePrompt(); ok {
+			cmds = append(cmds, func() tea.Msg {
+				return SubmitPromptMsg{Prompt: next}
+			})
+		}
 
 	case ShellResultMsg:
 		m.timeline.appendEntry(app.Entry{Kind: app.EntryCommand, Text: msg.Result.Command})
@@ -333,8 +362,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.timeline.renderMessages()
 
-			// Auto wake up! Only trigger if agent is configured and not already thinking
-			if m.runtime.AgentConfigured() && !m.timeline.model.Thinking {
+			// Auto wake up! If another request is running, this will now queue cleanly.
+			if m.runtime.AgentConfigured() {
 				cmds = append(cmds, func() tea.Msg {
 					return SubmitPromptMsg{Prompt: "[System: Task " + msg.Event.ID + " finished. Please continue.]"}
 				})
@@ -418,6 +447,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.hideNotification())
 
 	case tea.KeyMsg:
+		if m.queueFocus {
+			switch msg.String() {
+			case keyEsc:
+				m.queueFocus = false
+				return m, nil
+			case keyUp, keyCtrlP:
+				m.queueSel = clamp(m.queueSel-1, 0, max(0, len(m.promptQueue)-1))
+				return m, nil
+			case keyDown, keyCtrlN:
+				m.queueSel = clamp(m.queueSel+1, 0, max(0, len(m.promptQueue)-1))
+				return m, nil
+			case "backspace", "delete":
+				m.removeQueuedAt(m.queueSel)
+				return m, nil
+			case "ctrl+up":
+				m.moveQueued(m.queueSel, -1)
+				return m, nil
+			case "ctrl+down":
+				m.moveQueued(m.queueSel, 1)
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case keyEsc:
 			if m.showTools || m.showHelp {
@@ -425,8 +478,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 				return m, nil
 			}
+			if m.timeline.model.Thinking && m.cancelCurrent != nil {
+				m.cancelCurrent()
+				return m, nil
+			}
 		case keyCtrlP:
 			m.providerForm.Open(m.runtime)
+		case "ctrl+q":
+			if len(m.promptQueue) > 0 {
+				m.queueFocus = !m.queueFocus
+				m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+				return m, nil
+			}
 		case "ctrl+m":
 			cmds = append(cmds, m.listModels())
 		case "ctrl+o":
@@ -525,6 +588,9 @@ func (m Model) renderComposerToolbar(width int) string {
 	}
 
 	left := " " + modeIndicator + "  " + statusStr
+	if queued := len(m.promptQueue); queued > 0 {
+		left += "  " + styles.WarmGoldStyle.Render("queued ") + styles.WhiteStyle.Render(strconv.Itoa(queued))
+	}
 
 	var subagentsStr string
 	activeSubagents := m.runtime.ActiveSubagents()
@@ -532,7 +598,7 @@ func (m Model) renderComposerToolbar(width int) string {
 		subagentsStr = styles.BoldBlueStyle.Render("subagents ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
 	}
 
-	helpHint := styles.GrayStyle.Render("Ctrl+H help • Ctrl+A modes • Ctrl+T tools • Ctrl+R reasoning")
+	helpHint := styles.GrayStyle.Render("Esc stop • Ctrl+Q queue • Ctrl+H help • Ctrl+R reasoning")
 
 	leftContent := left
 	if subagentsStr != "" {
@@ -560,16 +626,27 @@ func (m Model) View() string {
 
 	composerView := m.composer.View()
 	toolbarView := m.renderComposerToolbar(mainWidth)
+	queueView := m.renderQueuePanel(mainWidth)
 	timelineView := m.timeline.View()
 	footerView := m.footer.View()
 
 	var mainView string
 	if sidebarWidth > 0 {
-		mainContent := lipgloss.JoinVertical(lipgloss.Left, timelineView, toolbarView, composerView)
+		blocks := []string{timelineView, toolbarView}
+		if queueView != "" {
+			blocks = append(blocks, queueView)
+		}
+		blocks = append(blocks, composerView)
+		mainContent := lipgloss.JoinVertical(lipgloss.Left, blocks...)
 		sidebarView := m.sidebar.View()
 		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
 	} else {
-		mainView = lipgloss.JoinVertical(lipgloss.Left, timelineView, toolbarView, composerView)
+		blocks := []string{timelineView, toolbarView}
+		if queueView != "" {
+			blocks = append(blocks, queueView)
+		}
+		blocks = append(blocks, composerView)
+		mainView = lipgloss.JoinVertical(lipgloss.Left, blocks...)
 	}
 
 	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
@@ -666,15 +743,101 @@ func (m *Model) SyncLayout() {
 	m.footer.width = m.width
 
 	toolbarHeight := 1
+	queueHeight := m.queuePanelHeight(mainWidth)
 
-	timelineHeight := m.height - footerHeight - composerHeight - toolbarHeight
+	timelineHeight := m.height - footerHeight - composerHeight - toolbarHeight - queueHeight
 	if timelineHeight < 4 {
 		timelineHeight = 4
 	}
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
 	m.sidebar.width = sidebarWidth
-	m.sidebar.height = timelineHeight + toolbarHeight + composerHeight
+	m.sidebar.height = timelineHeight + toolbarHeight + queueHeight + composerHeight
+}
+
+func (m *Model) enqueuePrompt(prompt string) {
+	m.promptQueue = append(m.promptQueue, prompt)
+	m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+}
+
+func (m *Model) dequeuePrompt() (string, bool) {
+	if len(m.promptQueue) == 0 {
+		m.queueSel = 0
+		m.queueFocus = false
+		return "", false
+	}
+	prompt := m.promptQueue[0]
+	m.promptQueue = append([]string(nil), m.promptQueue[1:]...)
+	if len(m.promptQueue) == 0 {
+		m.queueSel = 0
+		m.queueFocus = false
+	} else {
+		m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+	}
+	return prompt, true
+}
+
+func (m *Model) removeQueuedAt(index int) {
+	if index < 0 || index >= len(m.promptQueue) {
+		return
+	}
+	m.promptQueue = append(m.promptQueue[:index], m.promptQueue[index+1:]...)
+	if len(m.promptQueue) == 0 {
+		m.queueSel = 0
+		m.queueFocus = false
+		return
+	}
+	m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+}
+
+func (m *Model) moveQueued(index, delta int) {
+	if index < 0 || index >= len(m.promptQueue) {
+		return
+	}
+	target := clamp(index+delta, 0, len(m.promptQueue)-1)
+	if target == index {
+		return
+	}
+	m.promptQueue[index], m.promptQueue[target] = m.promptQueue[target], m.promptQueue[index]
+	m.queueSel = target
+}
+
+func (m Model) queuePanelHeight(width int) int {
+	if len(m.promptQueue) == 0 || width <= 0 {
+		return 0
+	}
+	return lipgloss.Height(m.renderQueuePanel(width))
+}
+
+func (m Model) renderQueuePanel(width int) string {
+	if len(m.promptQueue) == 0 || width <= 0 {
+		return ""
+	}
+	contentWidth := width - 4
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
+	header := styles.WarmGoldStyle.Render("Queue") + " " + styles.GrayStyle.Render("("+strconv.Itoa(len(m.promptQueue))+")")
+	if m.queueFocus {
+		header += "  " + styles.BoldNeonStyle.Render("Ctrl+Up/Down reorder • Backspace delete • Esc close")
+	} else {
+		header += "  " + styles.GrayStyle.Render("Ctrl+Q manage")
+	}
+	lines := []string{header}
+	for i, prompt := range m.promptQueue {
+		line := strconv.Itoa(i+1) + ". " + strings.TrimSpace(prompt)
+		if contentWidth > 6 && lipgloss.Width(line) > contentWidth {
+			line = truncate(line, contentWidth)
+		}
+		if m.queueFocus && i == m.queueSel {
+			lines = append(lines, styles.PopupSelectionStyle.Render(line))
+		} else {
+			lines = append(lines, styles.GrayStyle.Render(line))
+		}
+	}
+	body := styles.InputChromeStyle.Width(contentWidth).Render(strings.Join(lines, "\n"))
+	separator := styles.GrayStyle.Width(contentWidth).Render(strings.Repeat("─", contentWidth))
+	return lipgloss.JoinVertical(lipgloss.Left, separator, body)
 }
 
 type hideNotificationMsg struct{}

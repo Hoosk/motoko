@@ -80,10 +80,6 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 		m.refreshSuggestions()
 
 	case tea.KeyMsg:
-		if m.thinking {
-			return m, nil
-		}
-
 		switch msg.String() {
 		case keyTab, keyRight:
 			if len(m.mentionSuggestions) > 0 {
@@ -368,12 +364,20 @@ func (m ComposerModel) renderSuggestionsLine() string {
 				detail = "Direct shell active. Enter to execute. /chat to exit. Ctrl+T for tools."
 			}
 		} else {
-			if chromeWidth < 50 {
-				detail = "Tab: suggest • Ctrl+H: help"
-			} else if chromeWidth < 75 {
-				detail = "Tab: rotate suggestions • /provider add • /models"
+			if m.thinking {
+				if chromeWidth < 60 {
+					detail = "Enter: queue • Esc: cancel"
+				} else {
+					detail = "Agent busy. Enter queues your prompt. Esc cancels. Ctrl+Q manages queue."
+				}
 			} else {
-				detail = "Tab to rotate suggestions. /provider add for config. /models for selection."
+				if chromeWidth < 50 {
+					detail = "Tab: suggest • Ctrl+H: help"
+				} else if chromeWidth < 75 {
+					detail = "Tab: rotate suggestions • /provider add • /models"
+				} else {
+					detail = "Tab to rotate suggestions. /provider add for config. /models for selection."
+				}
 			}
 		}
 		detail = styles.InputHintStyle.Render(detail)
