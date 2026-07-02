@@ -73,11 +73,14 @@ type Deps struct {
 }
 
 type Dispatcher struct {
-	deps Deps
+	deps     Deps
+	registry *Registry
 }
 
 func New(deps Deps) *Dispatcher {
-	return &Dispatcher{deps: deps}
+	d := &Dispatcher{deps: deps}
+	d.registry = d.buildRegistry()
+	return d
 }
 
 func (d *Dispatcher) Handle(input string, info system.ContextInfo) types.Response {
@@ -87,39 +90,42 @@ func (d *Dispatcher) Handle(input string, info system.ContextInfo) types.Respons
 	}
 
 	command := strings.ToLower(parts[0])
+	cmd, ok := d.registry.Lookup(command)
+	if !ok {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
+	}
+	return cmd.Handler(Invocation{RawInput: input, Args: parts[1:], Info: info})
+}
+
+func (d *Dispatcher) Definitions() []Definition {
+	if d.registry == nil {
+		return nil
+	}
+	return d.registry.Definitions()
+}
+
+func (d *Dispatcher) buildRegistry() *Registry {
+	r := NewRegistry()
+	for _, def := range commandDefinitions {
+		def := def
+		r.Add(Command{
+			Definition: def,
+			Handler: func(inv Invocation) types.Response {
+				return d.dispatchCommand(def.Name, inv)
+			},
+		})
+	}
+	return r
+}
+
+func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Response {
+	parts := append([]string{command}, inv.Args...)
+	input := inv.RawInput
+	info := inv.Info
 
 	switch command {
 	case "help":
-		return types.Response{Entries: []types.Entry{{Kind: types.EntryHelp, Text: strings.Join([]string{
-			"Available commands:",
-			"/help                   Show this help message",
-			"/clear                  Clear the timeline history",
-			"/compact                Manually compact the active session",
-			"/mode                   Open the agent mode selector",
-			"/plan                   Activate read-only plan mode",
-			"/build                  Activate active build mode",
-			"/agent <name>           Switch or show active agent mode",
-			"/shell                  Activate direct shell execution mode",
-			"/chat                   Return to normal chat mode",
-			"/status                 Summarize mode, permissions, and approvals",
-			"/context                Show raw system prompt sent to the agent",
-			"/provider               Manage configured LLM providers",
-			"/models [model]         List or select models from the active provider",
-			"/themes [theme]         List or switch visual themes (cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome)",
-			"/sessions               List or switch between workspace sessions",
-			"/tools                  Show all registered tools",
-			"/tool <name> [args]     Execute a specific runtime tool",
-			"/task                   Interact with background tasks",
-			"/approve                Execute the pending tool command",
-			"/deny                   Cancel the pending tool command",
-			"/brain                  Interact with the session brain (list, read, plan, tasks, summary, clear)",
-			"/metrics                Show cumulative token usage for this session",
-			"/trace                  Toggle trace logging (requires -tags motoko_trace)",
-			"/exit                   Exit the application",
-			"/quit                   Exit the application",
-			"!<cmd>                  Execute an explicit shell command",
-			"@<file|agent>           Mention a file or agent in the prompt",
-		}, "\n")}}}
+		return d.helpResponse()
 	case "exit", "quit":
 		return types.Response{Signal: "quit"}
 	case "themes":
@@ -167,8 +173,8 @@ func (d *Dispatcher) Handle(input string, info system.ContextInfo) types.Respons
 	case string(types.ModePlan):
 		d.deps.SetAgentModeFn(string(types.ModePlan))
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
-	case "build":
-		d.deps.SetAgentModeFn("build")
+	case string(types.ModeBuild):
+		d.deps.SetAgentModeFn(string(types.ModeBuild))
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
 	case "agent":
 		if len(parts) < 2 {
@@ -395,9 +401,30 @@ func (d *Dispatcher) Handle(input string, info system.ContextInfo) types.Respons
 		}
 		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", sess.TotalTokens)
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: sb.String()}}}
-	default:
-		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}
+
+	return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
+}
+
+func (d *Dispatcher) helpResponse() types.Response {
+	defs := d.Definitions()
+	maxWidth := 0
+	for _, def := range defs {
+		if len(def.Usage) > maxWidth {
+			maxWidth = len(def.Usage)
+		}
+	}
+
+	lines := []string{"Available commands:"}
+	for _, def := range defs {
+		lines = append(lines, fmt.Sprintf("%-*s %s", maxWidth, def.Usage, def.Summary))
+	}
+	lines = append(lines,
+		fmt.Sprintf("%-*s %s", maxWidth, "!<cmd>", "Execute an explicit shell command"),
+		fmt.Sprintf("%-*s %s", maxWidth, "@<file|agent>", "Mention a file or agent in the prompt"),
+	)
+
+	return types.Response{Entries: []types.Entry{{Kind: types.EntryHelp, Text: strings.Join(lines, "\n")}}}
 }
 
 func (d *Dispatcher) statusText(info system.ContextInfo) string {
@@ -448,14 +475,14 @@ func (d *Dispatcher) handleShell(command string) types.Response {
 		d.deps.SetPendingFn(command)
 		return types.Response{Entries: []types.Entry{
 			{Kind: types.EntryCommand, Text: "$ " + command},
-			{Kind: types.EntrySystem, Text: fmt.Sprintf("Accion pendiente: %s Usa /approve o /deny.", decision.Reason)},
+			{Kind: types.EntrySystem, Text: fmt.Sprintf("Pending action: %s Use /approve or /deny.", decision.Reason)},
 		}}
 	}
 
 	return types.Response{
 		Entries: []types.Entry{
 			{Kind: types.EntryCommand, Text: "$ " + command},
-			{Kind: types.EntrySystem, Text: "Ejecutando comando..."},
+			{Kind: types.EntrySystem, Text: "Executing command..."},
 		},
 		Action: &types.Action{Type: types.ActionShell, ShellCommand: command},
 	}

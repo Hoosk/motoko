@@ -371,6 +371,10 @@ func (r *Runtime) ActiveTasks() int {
 
 func (r *Runtime) ProviderSummary() string                  { return r.provMgr.ProviderSummary() }
 func (r *Runtime) ProviderPresets() []config.ProviderPreset { return r.provMgr.ProviderPresets() }
+func (r *Runtime) ConfiguredProviders() []config.ProviderConfig {
+	providers := append([]config.ProviderConfig(nil), r.config.Providers...)
+	return providers
+}
 func (r *Runtime) LookupCatalogProvider(id string) (provider.CatalogProvider, bool) {
 	return r.provMgr.LookupCatalogProvider(id)
 }

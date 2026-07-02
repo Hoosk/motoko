@@ -207,6 +207,12 @@ func (m *ComposerModel) SetWidth(width int) {
 	m.syncLayout()
 }
 
+func (m *ComposerModel) SetInput(value string) {
+	m.textarea.SetValue(value)
+	m.textarea.CursorEnd()
+	m.refreshSuggestions()
+}
+
 func (m *ComposerModel) SyncLayout(width, height int) {
 	m.width = width
 	m.height = height
@@ -374,9 +380,9 @@ func (m ComposerModel) renderSuggestionsLine() string {
 				if chromeWidth < 50 {
 					detail = "Tab: suggest • Ctrl+H: help"
 				} else if chromeWidth < 75 {
-					detail = "Tab: rotate suggestions • /provider add • /models"
+					detail = "Tab: rotate suggestions • /provider add • /models list"
 				} else {
-					detail = "Tab to rotate suggestions. /provider add for config. /models for selection."
+					detail = "Tab to rotate suggestions. /provider add for config. /models list for selection."
 				}
 			}
 		}

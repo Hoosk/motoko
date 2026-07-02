@@ -1,6 +1,7 @@
 package providerman
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,6 +10,27 @@ import (
 
 	"github.com/Hoosk/motoko/internal/app/types"
 )
+
+type stubClient struct {
+	getModel func(context.Context, string) (provider.ModelInfo, error)
+}
+
+func (s stubClient) Configured() bool     { return true }
+func (s stubClient) ProviderKind() string { return "stub" }
+func (s stubClient) Complete(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error) {
+	return provider.Response{}, nil
+}
+func (s stubClient) StreamComplete(context.Context, string, []provider.ConversationItem, provider.ToolSet, func(provider.Delta) error) (provider.Response, error) {
+	return provider.Response{}, nil
+}
+func (s stubClient) Summary() string                                          { return "stub" }
+func (s stubClient) ListModels(context.Context) ([]provider.ModelInfo, error) { return nil, nil }
+func (s stubClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
+	if s.getModel != nil {
+		return s.getModel(ctx, model)
+	}
+	return provider.ModelInfo{}, nil
+}
 
 func testManager(cfg *config.AppConfig) *Manager {
 	return NewManager(
@@ -239,6 +261,35 @@ func TestHandleModelsCommandList(t *testing.T) {
 	resp := m.HandleModelsCommand(nil)
 	if len(resp.Entries) == 0 {
 		t.Fatal("expected models output")
+	}
+}
+
+func TestHandleModelsCommandInfo(t *testing.T) {
+	cfg := &config.AppConfig{
+		ActiveProvider: "openai",
+		Providers: []config.ProviderConfig{{
+			Name:   "openai",
+			Preset: config.ProviderPresetOpenAI,
+			Kind:   config.ProviderKindOpenAICompatible,
+			APIKey: "k",
+			Model:  "gpt-4.1",
+		}},
+	}
+	m := NewManager(
+		func() *config.AppConfig { return cfg },
+		func() func(config.ProviderConfig) (provider.Client, error) {
+			return func(config.ProviderConfig) (provider.Client, error) {
+				return stubClient{getModel: func(_ context.Context, modelID string) (provider.ModelInfo, error) {
+					return provider.ModelInfo{ID: modelID, ContextWindow: 128000, SupportsThinking: true, EffortPresets: []string{"low", "high"}, BudgetMin: 1024, BudgetMax: 8192}, nil
+				}}, nil
+			}
+		},
+		func() {},
+	)
+
+	resp := m.HandleModelsCommand([]string{"info", "gpt-4.1"})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "Context window: 128000") {
+		t.Fatalf("expected model info output, got %#v", resp)
 	}
 }
 

@@ -12,15 +12,20 @@ import (
 )
 
 type TimelineModel struct {
-	version string
-	model   timeline.Model
+	version    string
+	onboarding []string
+	model      timeline.Model
 }
 
 func (m *TimelineModel) startupMessages() []string {
-	messages := []string{
-		styles.BoldNeonStyle.Render(m.getLogo()),
-		styles.SystemStyle.Render("Inspect code, edit files, run tools, or ask for a focused review."),
-		styles.GrayStyle.Render("Try: /help  /models  /sessions  /provider add"),
+	messages := []string{styles.BoldNeonStyle.Render(m.getLogo())}
+	if len(m.onboarding) > 0 {
+		messages = append(messages, m.onboarding...)
+	} else {
+		messages = append(messages,
+			styles.SystemStyle.Render("Inspect code, edit files, run tools, or ask for a focused review."),
+			styles.GrayStyle.Render("Try: /help  /models list  /sessions  /provider add"),
+		)
 	}
 	return messages
 }
@@ -32,6 +37,13 @@ func NewTimelineModel() TimelineModel {
 	}
 	m.resetMessages()
 	return m
+}
+
+func (m *TimelineModel) SetOnboarding(lines []string) {
+	m.onboarding = append([]string(nil), lines...)
+	if len(m.model.Entries) == 0 {
+		m.resetMessages()
+	}
 }
 
 func (m *TimelineModel) getLogo() string {

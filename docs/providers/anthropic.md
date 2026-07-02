@@ -32,10 +32,13 @@ Motoko supports **Anthropic** as a cloud LLM provider, providing native integrat
 
 ```bash
 # List available models
-/models
+/models list
 
 # Select the model
 /models use claude-4.6-sonnet
+
+# Inspect the model metadata
+/models info claude-4.6-sonnet
 ```
 
 > [!NOTE]

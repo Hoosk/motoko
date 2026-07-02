@@ -86,7 +86,10 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **Alt + C** | Copy selected message contents |
 | **Esc** | Close popups / Cancel action |
 | **Ctrl + C** | Exit Motoko |
-| **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility (only available when terminal width >= 100) |
+| **Ctrl + K** | Open Command Palette |
+| **Ctrl + Q** | Focus queued prompts |
+| **Ctrl + Up / Down** | Reorder queued prompts |
+| **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility (disabled under width 40; auto-restored on large terminals) |
 | **Ctrl + T** | Toggle Tool Catalog overlay |
 | **Ctrl + H** | Toggle Help overlay |
 | **Ctrl + R** | Toggle Reasoning/Thinking output visibility |
@@ -103,6 +106,7 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | :--- | :--- |
 | **`!cmd`** | Run shell command directly (e.g. `!go test ./...`) |
 | **`/help`** | Display all available commands and help overlay |
+| **`/clear`** | Reset the visible timeline and active session history |
 | **`/chat`** | Switch input mode to standard chat |
 | **`/shell`** | Switch input mode to direct shell execution |
 | **`/plan`** | Shortcut to activate read-only `plan` mode |
@@ -112,8 +116,8 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **`/tool <name> <args>`** | Manually execute a registered tool |
 | **`/tools`** | List all available developer tools |
 | **`/provider`** | Manage configurations (`list`, `add`, `use`, `remove`) |
-| **`/models`** | List and select LLM models |
-| **`/themes [name]`** | List available visual themes or switch themes (`cyberpunk`, `nord`, `dracula`, `monochrome`) |
+| **`/models`** | Manage active-provider models (`list`, `use`, `info`) |
+| **`/themes [name]`** | List available visual themes or switch themes (`cyberpunk`, `ghost-cyber`, `neon-shadow`, `black-ice`, `nord`, `dracula`, `monochrome`) |
 | **`/sessions`** | Open the session switcher |
 | **`/brain`** | Manage session brain files (`list`, `read`, `plan`, `tasks`, `summary`, `clear`) |
 | **`/context`** | View raw system prompt generated for the next turn |
@@ -121,8 +125,11 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **`/compact`** | Trigger manual conversation compaction |
 | **`/task`** | Manage background commands and task logs |
 | **`/approve`** / **`/deny`** | Accept or reject a pending shell execution request |
+| **`/metrics`** | Show session token usage metrics |
 | **`/debug`** | Toggle agent debugging log output |
 | **`/trace`** | Toggle tracing logs (requires compilation with `-tags motoko_trace`) |
+| **`/exit`** / **`/quit`** | Exit the application |
+| **`@<file|agent>`** | Mention a file or agent directly in the prompt |
 
 ---
 
@@ -135,19 +142,24 @@ Use the `/themes` slash command in Motoko to dynamically switch visual themes. T
 
 Available themes:
 *   **cyberpunk** (Default) - Neon green, purple, and gold cyberpunk details.
+*   **ghost-cyber** - Restrained dark cyberpunk with precise accents.
+*   **neon-shadow** - Dramatic high-contrast magenta and cyan.
+*   **black-ice** - Cold technical palette with ice-blue accents.
 *   **nord** - Cool frosted blues and snow accents.
 *   **dracula** - High-contrast purple and pink classic theme.
 *   **monochrome** - Matrix green on black look.
 
 #### Sidebar Behavior
-The sidebar is automatically enabled on large terminals (width >= 100 columns) and automatically hidden on small terminals (width < 100 columns) to prevent overlapping layout and maintain spacing. When resizing terminal width from below 100 back to 100 or wider, the sidebar is automatically restored unless it was explicitly hidden by the user.
+The sidebar is automatically enabled on large terminals (width >= 140 columns), uses a narrower layout on medium terminals, and is disabled entirely below 40 columns. When the terminal grows again, the sidebar is restored unless it was explicitly hidden by the user.
 
 #### Managing Providers
 ```bash
 /provider add          # Add a new LLM provider config
 /provider list         # List configured providers
 /provider use <name>   # Switch active provider
-/models                # Select models for the active provider
+/models list           # List cached models for the active provider
+/models use <name>     # Switch active model
+/models info <name>    # Inspect model capabilities
 ```
 ---
 

@@ -16,6 +16,6 @@ func entriesForProviderModels(models []provider.ModelInfo, err error) []app.Entr
 	}
 	return []app.Entry{{
 		Kind: app.EntrySystem,
-		Text: fmt.Sprintf("%d models loaded. Use /models to see them or /models <model> to select one.", len(models)),
+		Text: fmt.Sprintf("%d models loaded. Use /models list to see them or /models use <model> to select one.", len(models)),
 	}}
 }

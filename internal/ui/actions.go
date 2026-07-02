@@ -45,6 +45,15 @@ func (m *Model) listSessions() tea.Cmd {
 	}
 }
 
+func (m *Model) loadSession(id string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runtime.LoadSession(id); err != nil {
+			return SessionLoadedMsg{Err: err}
+		}
+		return SessionLoadedMsg{}
+	}
+}
+
 func (m *Model) updateContextStats() tea.Cmd {
 	return func() tea.Msg {
 		tokens := m.runtime.HistoryInputTokens()

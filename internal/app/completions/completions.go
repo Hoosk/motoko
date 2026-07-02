@@ -4,18 +4,12 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Hoosk/motoko/internal/app/commands"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/tools"
 
 	"github.com/Hoosk/motoko/internal/app/types"
-)
-
-const (
-	ThemeCyberpunk = "cyberpunk"
-	CmdTool        = "tool"
-	CmdClear       = "clear"
-	CmdStatus      = "status"
 )
 
 type Deps struct {
@@ -61,7 +55,7 @@ func Completions(d Deps, input string) []string {
 		return commandCompletions(parts[0])
 	}
 
-	if strings.EqualFold(parts[0], CmdTool) {
+	if strings.EqualFold(parts[0], commands.CmdTool) {
 		prefix := ""
 		if len(parts) > 1 {
 			prefix = parts[1]
@@ -91,21 +85,40 @@ func Completions(d Deps, input string) []string {
 	if strings.EqualFold(parts[0], "models") {
 		active, ok := d.ActiveConfigFn()
 		if !ok || len(active.Models) == 0 {
-			return []string{"/models"}
+			if len(parts) == 1 {
+				return []string{"/models list", "/models use "}
+			}
+			return []string{"/models list"}
 		}
-		prefix := ""
-		if len(parts) > 1 {
-			prefix = strings.Join(parts[1:], " ")
+
+		if len(parts) == 1 {
+			return []string{"/models list", "/models use ", "/models info "}
 		}
-		var result []string
-		for _, model := range active.Models {
-			if prefix == "" || strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix)) {
-				result = append(result, "/models "+model)
+
+		subcommand := strings.ToLower(parts[1])
+		if len(parts) == 2 && !hasTrailingSpace {
+			options := []string{"list", "use", "info"}
+			var result []string
+			for _, option := range options {
+				if strings.HasPrefix(option, subcommand) {
+					result = append(result, "/models "+option)
+				}
+			}
+			if len(result) > 0 {
+				return result
 			}
 		}
-		if len(result) > 0 {
-			return result
+
+		if subcommand != "use" && subcommand != "info" {
+			prefix := strings.Join(parts[1:], " ")
+			return modelCompletions(active.Models, prefix, "/models ")
 		}
+
+		prefix := ""
+		if len(parts) > 2 {
+			prefix = strings.Join(parts[2:], " ")
+		}
+		return modelCompletions(active.Models, prefix, "/models "+subcommand+" ")
 	}
 
 	if strings.EqualFold(parts[0], "themes") {
@@ -113,7 +126,7 @@ func Completions(d Deps, input string) []string {
 		if len(parts) > 1 {
 			prefix = strings.ToLower(parts[1])
 		}
-		allThemes := []string{ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
+		allThemes := []string{commands.ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
 		var result []string
 		for _, t := range allThemes {
 			if prefix == "" || strings.HasPrefix(t, prefix) {
@@ -178,12 +191,23 @@ func trailingMentionToken(input string) (string, bool) {
 }
 
 func commandCompletions(prefix string) []string {
-	commands := []string{"help", CmdClear, "compact", "mode", string(types.ModePlan), string(types.ModeBuild), "agent", "shell", "chat", CmdStatus, "debug", "trace", "context", "provider", "models", "themes", "sessions", "tools", CmdTool, "approve", "deny", "metrics"}
+	defs := commands.CommandDefinitions()
+	prefix = strings.ToLower(prefix)
+	result := make([]string, 0, len(defs))
+	for _, def := range defs {
+		if strings.HasPrefix(def.Name, prefix) {
+			result = append(result, "/"+def.Name)
+		}
+	}
+	return result
+}
+
+func modelCompletions(models []string, prefix, commandPrefix string) []string {
 	prefix = strings.ToLower(prefix)
 	var result []string
-	for _, command := range commands {
-		if strings.HasPrefix(command, prefix) {
-			result = append(result, "/"+command)
+	for _, model := range models {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(model), prefix) {
+			result = append(result, commandPrefix+model)
 		}
 	}
 	return result

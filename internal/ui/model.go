@@ -64,6 +64,8 @@ type Model struct {
 	sidebar                SidebarModel
 	providerForm           providerForm
 	modePopup              modePopupState
+	commandPalette         commandPaletteState
+	helpOverlay            helpOverlayState
 	thinkingPicker         thinkingPickerState
 	composer               ComposerModel
 	timeline               TimelineModel
@@ -77,7 +79,6 @@ type Model struct {
 	prevActiveSubagents    int
 	notificationShow       bool
 	queueFocus             bool
-	showHelp               bool
 	showTools              bool
 	showSidebar            bool
 	prevHasPendingApproval bool
@@ -109,6 +110,7 @@ func NewModel(runtime *app.Runtime) Model {
 	}
 
 	m.timeline.version = runtime.Version()
+	m.timeline.SetOnboarding(timelineOnboarding(runtime))
 
 	// Load startup entries (e.g. resumed session history)
 	for _, entry := range runtime.StartupEntries() {
@@ -167,6 +169,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.modePopup.active {
 		cmds = append(cmds, m.modePopup.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+	if m.commandPalette.active {
+		cmds = append(cmds, m.commandPalette.Update(msg))
+		return m, tea.Batch(cmds...)
+	}
+	if m.helpOverlay.active {
+		cmds = append(cmds, m.helpOverlay.Update(msg))
 		return m, tea.Batch(cmds...)
 	}
 
@@ -408,6 +418,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
 		} else {
+			m.timeline.SetOnboarding(timelineOnboarding(m.runtime))
 			m.timeline.resetMessages()
 			for _, entry := range m.runtime.CurrentSessionEntries() {
 				m.timeline.appendEntry(entry)
@@ -446,6 +457,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notificationTime = time.Now()
 		cmds = append(cmds, m.hideNotification())
 
+	case PaletteSelectedMsg:
+		if msg.SessionID != "" {
+			cmds = append(cmds, m.loadSession(msg.SessionID))
+			break
+		}
+		if msg.Shortcut != "" {
+			switch msg.Shortcut {
+			case "ctrl+m":
+				cmds = append(cmds, m.listModels())
+			case "ctrl+p":
+				m.providerForm.Open(m.runtime)
+			case "ctrl+o":
+				m.sessionPicker.Open()
+				cmds = append(cmds, m.listSessions())
+			case "ctrl+a":
+				m.modePopup.Open(m.runtime)
+			case "ctrl+h":
+				m.helpOverlay.Open()
+			case "ctrl+t":
+				m.showTools = true
+			case "ctrl+s":
+				if _, allowed := m.sidebarLayout(); allowed {
+					m.showSidebar = !m.showSidebar
+					if m.showSidebar {
+						m.sidebarPref = sidebarForceShow
+					} else {
+						m.sidebarPref = sidebarForceHide
+					}
+					m.SyncLayout()
+				}
+			case "cancel-request":
+				if m.timeline.model.Thinking && m.cancelCurrent != nil {
+					m.cancelCurrent()
+				}
+			}
+			break
+		}
+		if msg.Execute {
+			cmds = append(cmds, func() tea.Msg {
+				return SubmitPromptMsg{Prompt: msg.Prompt}
+			})
+		} else {
+			m.composer.SetInput(msg.Prompt)
+		}
+
 	case tea.KeyMsg:
 		if m.queueFocus {
 			switch msg.String() {
@@ -473,9 +529,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case keyEsc:
-			if m.showTools || m.showHelp {
+			if m.showTools || m.helpOverlay.active {
 				m.showTools = false
-				m.showHelp = false
+				m.helpOverlay.active = false
 				return m, nil
 			}
 			if m.timeline.model.Thinking && m.cancelCurrent != nil {
@@ -513,10 +569,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+a":
 			m.modePopup.Open(m.runtime)
+		case "ctrl+k":
+			m.commandPalette.Open(m.paletteContext())
 		case "ctrl+t":
 			m.showTools = !m.showTools
 		case "ctrl+h":
-			m.showHelp = !m.showHelp
+			if m.helpOverlay.active {
+				m.helpOverlay.active = false
+			} else {
+				m.helpOverlay.Open()
+			}
 		case "ctrl+r":
 			m.timeline.model.ShowReasoning = !m.timeline.model.ShowReasoning
 			m.timeline.renderMessages()
@@ -598,7 +660,7 @@ func (m Model) renderComposerToolbar(width int) string {
 		subagentsStr = styles.BoldBlueStyle.Render("subagents ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
 	}
 
-	helpHint := styles.GrayStyle.Render("Esc stop • Ctrl+Q queue • Ctrl+H help • Ctrl+R reasoning")
+	helpHint := styles.GrayStyle.Render("Ctrl+K palette • Ctrl+H help • Ctrl+Q queue • Ctrl+R reasoning")
 
 	leftContent := left
 	if subagentsStr != "" {
@@ -686,11 +748,14 @@ func (m Model) View() string {
 	} else if m.modePopup.active {
 		popup := widePopupStyle.Render(m.modePopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.commandPalette.active {
+		popup := widePopupStyle.Render(m.commandPalette.View())
+		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.showTools {
 		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
 		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.showHelp {
-		popup := popupStyle.Render(helpView())
+	} else if m.helpOverlay.active {
+		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	}
 
@@ -753,6 +818,43 @@ func (m *Model) SyncLayout() {
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
 	m.sidebar.width = sidebarWidth
 	m.sidebar.height = timelineHeight + toolbarHeight + queueHeight + composerHeight
+}
+
+func timelineOnboarding(runtime *app.Runtime) []string {
+	provider := runtime.ProviderSummary()
+	mode := runtime.AgentName()
+	workspace := runtime.GetContextInfo().Workspace
+	if workspace == "" {
+		workspace = "workspace unavailable"
+	}
+
+	return []string{
+		styles.SystemStyle.Render("Inspect code, edit files, run tools, or ask for a focused review."),
+		styles.GrayStyle.Render("Workspace: " + workspace),
+		styles.GrayStyle.Render("Mode: " + mode + "  •  Provider: " + provider),
+		styles.GrayStyle.Render("Shortcuts: Ctrl+K palette  •  Ctrl+H help  •  Ctrl+M models  •  Ctrl+P provider"),
+		styles.GrayStyle.Render("Try: /help  /models list  /sessions  /provider add  @README.md explain the entry point"),
+	}
+}
+
+func (m Model) paletteContext() paletteContext {
+	ctx := paletteContext{
+		Info:        m.runtime.GetContextInfo(),
+		Providers:   m.runtime.ConfiguredProviders(),
+		Skills:      m.runtime.AvailableSkills(),
+		Tasks:       m.runtime.ListTasks(),
+		Agents:      m.runtime.AvailableAgents(),
+		Pending:     m.runtime.PendingApproval(),
+		Thinking:    m.timeline.model.Thinking,
+		QueueLen:    len(m.promptQueue),
+		ShowSidebar: m.showSidebar,
+		Brain:       m.runtime.GetBrain(),
+	}
+	ctx.ActiveProvider, ctx.HasActiveProvider = m.runtime.GetActiveProviderConfig()
+	if sessions, err := m.runtime.ListSessions(); err == nil {
+		ctx.Sessions = sessions
+	}
+	return ctx
 }
 
 func (m *Model) enqueuePrompt(prompt string) {

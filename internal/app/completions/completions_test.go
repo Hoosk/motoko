@@ -150,18 +150,30 @@ func TestCompletionsModelsSubcommand(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("expected model completions")
 	}
-	for _, c := range got {
-		if !strings.HasPrefix(c, "/models ") {
-			t.Errorf("expected /models prefix, got %q", c)
-		}
+	want := []string{"/models list", "/models use ", "/models info "}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
 
 func TestCompletionsModelsSubcommandNoActive(t *testing.T) {
 	d := noopDeps()
 	got := Completions(d, "/models ")
-	if len(got) != 1 || got[0] != "/models" {
-		t.Errorf("expected [/models], got %v", got)
+	want := []string{"/models list", "/models use "}
+	if !slicesEqual(got, want) {
+		t.Errorf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsModelsUseSubcommand(t *testing.T) {
+	d := noopDeps()
+	d.ActiveConfigFn = func() (config.ProviderConfig, bool) {
+		return config.ProviderConfig{Models: []string{"gpt-4.1", "gpt-3.5-turbo"}}, true
+	}
+	got := Completions(d, "/models use gpt")
+	want := []string{"/models use gpt-4.1", "/models use gpt-3.5-turbo"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
 
@@ -286,6 +298,11 @@ func TestCommandCompletionsEmpty(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("expected all commands for empty prefix")
 	}
+	for _, want := range []string{"/task", "/brain", "/exit", "/quit"} {
+		if !contains(got, want) {
+			t.Fatalf("expected %s in completions, got %v", want, got)
+		}
+	}
 }
 
 func TestCommandCompletionsH(t *testing.T) {
@@ -325,4 +342,25 @@ func TestShellCompletionsNoMatch(t *testing.T) {
 	if len(got) != 1 || got[0] != "xyzabc" {
 		t.Errorf("expected [xyzabc] for unknown prefix, got %v", got)
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -315,12 +315,37 @@ func (m *Manager) HandleModelsCommand(args []string) types.Response {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "No active provider configured."}}}
 	}
 	if len(args) == 0 {
-		if len(active.Models) > 0 {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Available models for %s:\n%s", active.Name, strings.Join(active.Models, "\n"))}}}
-		}
-		return types.Response{Signal: "open-models-popup", Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Fetching models..."}}}
+		return m.listModelsResponse(active)
 	}
-	modelID := strings.Join(args, " ")
+
+	subcommand := strings.ToLower(args[0])
+	switch subcommand {
+	case "list":
+		return m.listModelsResponse(active)
+	case "use":
+		if len(args) < 2 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /models use <model>"}}}
+		}
+		return m.setActiveModel(active, strings.Join(args[1:], " "))
+	case "info":
+		if len(args) < 2 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /models info <model>"}}}
+		}
+		return m.modelInfoResponse(active, strings.Join(args[1:], " "))
+	default:
+		return m.setActiveModel(active, strings.Join(args, " "))
+	}
+}
+
+func (m *Manager) listModelsResponse(active config.ProviderConfig) types.Response {
+	if len(active.Models) > 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Available models for %s:\n%s", active.Name, strings.Join(active.Models, "\n"))}}}
+	}
+	return types.Response{Signal: "open-models-popup", Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Fetching models..."}}}
+}
+
+func (m *Manager) setActiveModel(active config.ProviderConfig, modelID string) types.Response {
+	cfg := m.cfgFn()
 	active.Model = ""
 	client, err := m.ProviderClient(active)
 	if err != nil {
@@ -345,6 +370,28 @@ func (m *Manager) HandleModelsCommand(args []string) types.Response {
 		m.onRefresh()
 	}
 	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Model set: %s", info.ID)}}}
+}
+
+func (m *Manager) modelInfoResponse(active config.ProviderConfig, modelID string) types.Response {
+	info, err := m.GetModelInfoForActiveProvider(context.Background(), modelID)
+	if err != nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Model: %s", info.ID))
+	if info.ContextWindow > 0 {
+		lines = append(lines, fmt.Sprintf("Context window: %d", info.ContextWindow))
+	}
+	lines = append(lines, fmt.Sprintf("Thinking: %t", info.SupportsThinking))
+	if len(info.EffortPresets) > 0 {
+		lines = append(lines, fmt.Sprintf("Effort presets: %s", strings.Join(info.EffortPresets, ", ")))
+	}
+	if info.BudgetMin > 0 || info.BudgetMax > 0 {
+		lines = append(lines, fmt.Sprintf("Thinking budget: %d-%d", info.BudgetMin, info.BudgetMax))
+	}
+
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
 }
 
 var ThinkingBudgetLevels = []int{0, 1024, 8192, 24576, 65536}

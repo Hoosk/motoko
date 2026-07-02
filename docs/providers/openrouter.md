@@ -37,10 +37,13 @@ Once OpenRouter is activated, you can select any model supported by the OpenRout
 
 ```bash
 # List all models available on the endpoint
-/models
+/models list
 
 # Select the model to use
 /models use <model-identifier>
+
+# Inspect the model metadata
+/models info <model-identifier>
 ```
 
 > [!NOTE]

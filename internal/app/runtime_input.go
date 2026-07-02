@@ -58,7 +58,7 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 
 	return Response{Entries: []Entry{
 		{Kind: EntryUser, Text: trimmed},
-		{Kind: EntryAssistant, Text: "The runtime is operational but the agent is not ready. Configure a provider using /provider add and then select a model using /models <model>."},
+		{Kind: EntryAssistant, Text: "The runtime is operational but the agent is not ready. Configure a provider using /provider add and then select a model using /models use <model>."},
 	}}
 }
 
@@ -120,14 +120,14 @@ func (r *Runtime) handleShell(command string) Response {
 		r.pending = &pendingShell{Command: command}
 		return Response{Entries: []Entry{
 			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: fmt.Sprintf("Accion pendiente: %s Usa /approve o /deny.", decision.Reason)},
+			{Kind: EntrySystem, Text: fmt.Sprintf("Pending action: %s Use /approve or /deny.", decision.Reason)},
 		}}
 	}
 
 	return Response{
 		Entries: []Entry{
 			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: "Ejecutando comando..."},
+			{Kind: EntrySystem, Text: "Executing command..."},
 		},
 		Action: &Action{Type: ActionShell, ShellCommand: command},
 	}

@@ -104,7 +104,7 @@ func TestCompletionsModelsKeepsTrailingSpaceContext(t *testing.T) {
 	}
 
 	got := r.Completions("/models ")
-	want := []string{"/models gpt-4.1", "/models gpt-4.1-mini", "/models o4-mini"}
+	want := []string{"/models list", "/models use ", "/models info "}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Completions(/models space) = %#v, want %#v", got, want)
 	}
@@ -122,8 +122,8 @@ func TestCompletionsModelsFiltersPrefix(t *testing.T) {
 		}},
 	}
 
-	got := r.Completions("/models gpt-4.1-m")
-	want := []string{"/models gpt-4.1-mini"}
+	got := r.Completions("/models use gpt-4.1-m")
+	want := []string{"/models use gpt-4.1-mini"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Completions(/models prefix) = %#v, want %#v", got, want)
 	}
@@ -332,7 +332,7 @@ func TestHandleModelsCommandUpdatesActiveModel(t *testing.T) {
 		}},
 	}
 
-	resp := r.provMgr.HandleModelsCommand([]string{"gpt-4.1"})
+	resp := r.provMgr.HandleModelsCommand([]string{"use", "gpt-4.1"})
 	active, ok := r.config.Active()
 	if !ok {
 		t.Fatal("expected active provider config")

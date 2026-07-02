@@ -81,6 +81,11 @@ func TestHandleHelp(t *testing.T) {
 	if !strings.Contains(resp.Entries[0].Text, "/help") {
 		t.Error("expected help text to mention /help")
 	}
+	for _, want := range []string{"/models [list|use <model>|info <model>]", "/task [list|terminate <id>]", "/brain [list|read <file>|plan|tasks|summary|clear]"} {
+		if !strings.Contains(resp.Entries[0].Text, want) {
+			t.Fatalf("expected help text to contain %q, got:\n%s", want, resp.Entries[0].Text)
+		}
+	}
 }
 
 func TestHandleExit(t *testing.T) {
