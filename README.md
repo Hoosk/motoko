@@ -54,9 +54,15 @@ Motoko includes task-focused agent modes that you can switch between:
     *   Denies code edits and file modifications by default.
     *   Focuses on building the session plan before committing to modifications.
 *   **search** - Read-only exploration mode.
-    *   Optimized for codebase queries and semantic search.
+*   Optimized for codebase queries and semantic search.
+*   **learn** - Capture reusable project knowledge into `.agents/skills/` or `.agents/modes/`.
+    *   Intended for extracting durable instructions, conventions, and reusable roles from the current conversation.
+*   **teamwork** - Parallel planning/orchestration mode for larger projects.
+    *   Uses delegation heavily to split work into multiple planning tracks before build handoff.
+*   **grill** - Clarification/interview mode.
+    *   Interrogates the current `plan.md` / `tasks.md` until open questions are resolved.
 
-Define custom agents using a `.agents` configuration file at the root of your workspace.
+Define custom agents using markdown files under `.agents/modes/` at the root of your workspace.
 
 ---
 
@@ -113,6 +119,12 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **`/build`** | Shortcut to activate editing `build` mode |
 | **`/agent [name]`** | Switch to or show active agent mode |
 | **`/mode`** | Open agent mode selection popup |
+| **`/settings`** | Open Motoko settings (thinking verbosity, max iterations, and related controls) |
+| **`/learn`** | Capture reusable project knowledge as a skill or custom mode |
+| **`/teamwork-preview [goal]`** | Run parallel planning/delegation for larger projects |
+| **`/grill-me`** | Interview the current plan until open questions are closed |
+| **`/goal [plan\|clear\|status\|<description>]`** | Persist a goal and auto-continue until tasks are complete |
+| **`/schedule [list\|add ...\|remove <id>]`** | Schedule one-shot or recurring instructions |
 | **`/tool <name> <args>`** | Manually execute a registered tool |
 | **`/tools`** | List all available developer tools |
 | **`/provider`** | Manage configurations (`list`, `add`, `use`, `remove`) |
@@ -137,6 +149,12 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 
 Motoko reads its configuration from `~/.config/motoko/config.json`. You can configure API keys and providers interactively using `/provider add` or edit the file manually.
 
+Additional global settings now include:
+*   `thinking_verbosity` - `normal`, `concise`, or `caveman`
+*   `max_iterations` - default maximum tool-call iterations per turn
+
+These can be changed interactively with `/settings`.
+
 #### Themes & Visual Settings
 Use the `/themes` slash command in Motoko to dynamically switch visual themes. The current configuration is stored in the `theme` field inside `~/.config/motoko/config.json`.
 
@@ -151,6 +169,22 @@ Available themes:
 
 #### Sidebar Behavior
 The sidebar is automatically enabled on large terminals (width >= 140 columns), uses a narrower layout on medium terminals, and is disabled entirely below 40 columns. When the terminal grows again, the sidebar is restored unless it was explicitly hidden by the user.
+
+#### Custom Modes & Skills
+Workspace-specific reusable behavior lives under `.agents/`:
+
+```text
+.agents/
+  modes/
+    my-mode.md
+  skills/
+    my-skill/
+      SKILL.md
+  config.json
+```
+
+*   **Modes** (`.agents/modes/*.md`) define custom agents with frontmatter such as `readonly`, `tool_filter`, `exclude_tools`, `allow_question`, `allow_delegate`, `allow_task`, `allow_write`, `allow_brain_write`, `allow_web`, and `max_iterations`.
+*   **Skills** (`.agents/skills/<name>/SKILL.md`) define reusable instructions that the model can load through the `activate_skill` tool.
 
 #### Managing Providers
 ```bash

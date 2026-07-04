@@ -2,9 +2,11 @@ package ui
 
 import (
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tools"
 	"github.com/Hoosk/motoko/internal/updater"
 )
 
@@ -99,4 +101,12 @@ type ModelSelectedMsg struct {
 type ThinkingBudgetSelectedMsg struct {
 	Model  provider.ModelInfo
 	Budget int
+}
+
+type QuestionAskedMsg struct {
+	Pending *tools.PendingQuestion
+}
+
+type ScheduleEventMsg struct {
+	Event scheduleman.Event
 }

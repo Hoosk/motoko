@@ -64,12 +64,14 @@ type AgentOverride struct {
 }
 
 type AppConfig struct {
-	Agents         map[string]AgentOverride `json:"agents,omitempty"`
-	ActiveProvider string                   `json:"active_provider"`
-	Theme          string                   `json:"theme,omitempty"`
-	Density        string                   `json:"density,omitempty"`
-	Providers      []ProviderConfig         `json:"providers"`
-	Search         SearchConfig             `json:"search,omitempty"`
+	Agents            map[string]AgentOverride `json:"agents,omitempty"`
+	ActiveProvider    string                   `json:"active_provider"`
+	Theme             string                   `json:"theme,omitempty"`
+	Density           string                   `json:"density,omitempty"`
+	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
+	Providers         []ProviderConfig         `json:"providers"`
+	Search            SearchConfig             `json:"search,omitempty"`
+	MaxIterations     int                      `json:"max_iterations,omitempty"`
 }
 
 func (c *AppConfig) Merge(other *AppConfig) {
@@ -84,6 +86,12 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if other.Density != "" {
 		c.Density = other.Density
+	}
+	if other.ThinkingVerbosity != "" {
+		c.ThinkingVerbosity = other.ThinkingVerbosity
+	}
+	if other.MaxIterations > 0 {
+		c.MaxIterations = other.MaxIterations
 	}
 	for _, op := range other.Providers {
 		op = NormalizeProvider(op)
@@ -216,6 +224,8 @@ func (c *AppConfig) Save() error {
 	encryptedCfg.Agents = c.Agents
 	encryptedCfg.Theme = c.Theme
 	encryptedCfg.Density = c.Density
+	encryptedCfg.ThinkingVerbosity = c.ThinkingVerbosity
+	encryptedCfg.MaxIterations = c.MaxIterations
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p

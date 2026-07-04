@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/app/sessiontitle"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -886,5 +888,78 @@ func TestSlashCommandMetrics(t *testing.T) {
 	}
 	if !strings.Contains(text, "System Prompt (Static):  500 (50.0% of input)") {
 		t.Errorf("expected static prompt breakdown, got %q", text)
+	}
+}
+
+func TestSchedulePersistenceRoundTrip(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	def, err := r.AddSchedule("run tests", time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := r.GetBrain().Read("schedule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, def.ID) || !strings.Contains(content, "run tests") {
+		t.Fatalf("unexpected persisted schedule content: %q", content)
+	}
+
+	parsed := parseScheduleBrain(content)
+	if len(parsed) != 1 {
+		t.Fatalf("expected one parsed schedule, got %#v", parsed)
+	}
+	if parsed[0].Instruction != "run tests" {
+		t.Fatalf("unexpected parsed instruction: %#v", parsed[0])
+	}
+}
+
+func TestLoadSessionRestoresSchedulesFromBrain(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	s := session.New(r.sesMgr.WorkspaceID(), "/workspace")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := brain.New(r.sesMgr.WorkspaceID(), s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := formatScheduleBrain([]scheduleman.Definition{{ID: "sched-7", Instruction: "run tests", Interval: time.Minute}})
+	if err := b.Write("schedule", content); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.LoadSession(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	defs := r.ListSchedules()
+	if len(defs) != 1 || defs[0].ID != "sched-7" {
+		t.Fatalf("expected restored schedules, got %#v", defs)
+	}
+}
+
+func TestRuntimeStopCancelsBackgroundContext(t *testing.T) {
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	bg := r.BackgroundContext()
+	r.Stop()
+
+	select {
+	case <-bg.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected background context to be cancelled by Stop")
 	}
 }

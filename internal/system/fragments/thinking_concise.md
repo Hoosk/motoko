@@ -1,0 +1,1 @@
+[SYSTEM INJECTION: Keep your internal reasoning concise. Skip redundant restatements, compress obvious deductions, and spend reasoning tokens only on genuine uncertainty, tool choice, and trade-offs.]

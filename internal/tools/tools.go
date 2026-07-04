@@ -232,3 +232,19 @@ func GetMaxOutputSize(ctx context.Context) int {
 	}
 	return maxToolOutputBytes
 }
+
+type questionBrokerKey struct{}
+
+func WithQuestionBroker(ctx context.Context, broker *QuestionBroker) context.Context {
+	return context.WithValue(ctx, questionBrokerKey{}, broker)
+}
+
+func GetQuestionBroker(ctx context.Context) *QuestionBroker {
+	if ctx == nil {
+		return nil
+	}
+	if broker, ok := ctx.Value(questionBrokerKey{}).(*QuestionBroker); ok {
+		return broker
+	}
+	return nil
+}

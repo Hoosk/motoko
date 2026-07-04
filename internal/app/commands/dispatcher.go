@@ -18,6 +18,7 @@ import (
 	"github.com/Hoosk/motoko/internal/tracelog"
 
 	"github.com/Hoosk/motoko/internal/app/providerman"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/app/taskman"
 	"github.com/Hoosk/motoko/internal/app/types"
@@ -57,8 +58,11 @@ type Deps struct {
 	BrainFn        func() *brain.Brain
 	BrainInitErrFn func() error
 
-	ListTasksFn     func() []*taskman.TaskState
-	TerminateTaskFn func(id string) error
+	ListTasksFn      func() []*taskman.TaskState
+	TerminateTaskFn  func(id string) error
+	ListSchedulesFn  func() []scheduleman.Definition
+	AddScheduleFn    func(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error)
+	RemoveScheduleFn func(id string) error
 
 	ToolSpecsFn func() []tools.Spec
 	RunToolFn   func(ctx context.Context, name, args string) (tools.Result, error)
@@ -176,6 +180,20 @@ func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Respo
 	case string(types.ModeBuild):
 		d.deps.SetAgentModeFn(string(types.ModeBuild))
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
+	case "learn":
+		d.deps.SetAgentModeFn("learn")
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: learn"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: learnPrompt()}}
+	case "teamwork-preview":
+		goal := strings.TrimSpace(strings.Join(inv.Args, " "))
+		d.deps.SetAgentModeFn("teamwork")
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: teamwork"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: teamworkPreviewPrompt(goal)}}
+	case "grill-me":
+		d.deps.SetAgentModeFn("grill")
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: grill"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: grillMePrompt()}}
+	case "goal":
+		return d.handleGoalCommand(inv.Args)
+	case "schedule":
+		return d.handleScheduleCommand(inv.Args)
 	case "agent":
 		if len(parts) < 2 {
 			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Active agent: %s. Available agents: %s", d.deps.AgentNameFn(), strings.Join(d.deps.AgentNamesFn(), ", "))}}}
@@ -219,6 +237,8 @@ func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Respo
 		return d.deps.ProvMgr.HandleModelsCommand(parts[1:])
 	case "sessions":
 		return types.Response{Signal: "open-sessions-popup"}
+	case "settings":
+		return types.Response{Signal: "open-settings-popup"}
 	case "tools":
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}}
 	case CmdTool:
@@ -254,6 +274,7 @@ func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Respo
 		}
 
 		runCtx := tools.WithBrain(context.Background(), d.deps.BrainFn())
+		runCtx = tools.WithConfig(runCtx, d.deps.ConfigFn())
 		runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(d.deps.ContextWindowFn()))
 		result, err := d.deps.RunToolFn(runCtx, toolName, toolArgs)
 		if err != nil {
@@ -588,4 +609,155 @@ func formatToolList(specs []tools.Spec) string {
 		lines = append(lines, fmt.Sprintf("- %s: %s", spec.Usage, spec.Summary))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (d *Dispatcher) handleGoalCommand(args []string) types.Response {
+	br := d.deps.BrainFn()
+	if br == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Session brain not initialized."}}}
+	}
+	if len(args) == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /goal [plan|clear|status|<description>]"}}}
+	}
+	joined := strings.TrimSpace(strings.Join(args, " "))
+	switch strings.ToLower(joined) {
+	case "clear":
+		_ = br.Delete("goal")
+		_ = br.Delete("goal_state")
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Goal cleared."}}}
+	case "status":
+		content, err := br.Read("goal")
+		if err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active goal."}}}
+		}
+		pending, completed := countTaskCheckboxes(br)
+		status := fmt.Sprintf("Active goal:\n%s\n\nTasks: %d pending, %d completed", content, pending, completed)
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: status}}}
+	case "plan":
+		if _, err := br.Read("tasks"); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "No tasks.md found in the session brain. Run /plan first."}}}
+		}
+		if err := br.Write("goal", "# Goal\nFinish every unchecked task in tasks.md until the plan is complete."); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Goal activated from tasks.md. Motoko will auto-continue until all tasks are done or /goal clear is used."}}}
+	default:
+		content := "# Goal\n" + joined + "\n\nBreak this into tasks.md if needed and keep going until it is complete."
+		if err := br.Write("goal", content); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		return types.Response{
+			Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Goal stored. Motoko will keep auto-continuing until completion or /goal clear."}},
+			Action:  &types.Action{Type: types.ActionAgent, AgentPrompt: goalKickoffPrompt(joined)},
+		}
+	}
+}
+
+func (d *Dispatcher) handleScheduleCommand(args []string) types.Response {
+	if len(args) == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /schedule [list|add <instruction> every|once <duration>|remove <id>]"}}}
+	}
+	subcmd := strings.ToLower(strings.TrimSpace(args[0]))
+	switch subcmd {
+	case CmdList:
+		schedules := d.deps.ListSchedulesFn()
+		if len(schedules) == 0 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active schedules."}}}
+		}
+		var sb strings.Builder
+		sb.WriteString("Active schedules:\n")
+		for _, sched := range schedules {
+			kind := "every"
+			if sched.OneShot {
+				kind = "once"
+			}
+			fmt.Fprintf(&sb, "- %s: %q (%s %s)\n", sched.ID, sched.Instruction, kind, sched.Interval)
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.TrimSpace(sb.String())}}}
+	case "remove":
+		if len(args) < 2 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /schedule remove <id>"}}}
+		}
+		if err := d.deps.RemoveScheduleFn(strings.TrimSpace(args[1])); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Schedule %s removed.", strings.TrimSpace(args[1]))}}}
+	case "add":
+		instruction, every, duration, err := parseScheduleArgs(args[1:])
+		if err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		def, addErr := d.deps.AddScheduleFn(instruction, duration, !every)
+		if addErr != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: addErr.Error()}}}
+		}
+		kind := "every"
+		if def.OneShot {
+			kind = "once"
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Schedule %s created for %q (%s %s).", def.ID, def.Instruction, kind, def.Interval)}}}
+	default:
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Unknown schedule subcommand. Use list, add, or remove."}}}
+	}
+}
+
+func learnPrompt() string {
+	return "Capture reusable project knowledge from the current conversation. Ask follow-up questions first if the scope or output format is unclear."
+}
+
+func teamworkPreviewPrompt(goal string) string {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		goal = "Use the current plan.md/tasks.md in the brain as the project goal."
+	}
+	return fmt.Sprintf("Project goal for this teamwork preview: %s", goal)
+}
+
+func grillMePrompt() string {
+	return "Interview me about the current plan until the important ambiguities are resolved."
+}
+
+func goalKickoffPrompt(goal string) string {
+	return strings.TrimSpace(fmt.Sprintf(`A persistent goal has been set for this session:
+
+%s
+
+Requirements:
+- If tasks.md does not exist or is too vague, create or refine it first.
+- Continue executing the next unfinished task.
+- Keep tasks.md updated with [x] as tasks complete.
+- The system will keep prompting you to continue until all tasks are done or the user clears the goal.`, goal))
+}
+
+func countTaskCheckboxes(br *brain.Brain) (pending int, completed int) {
+	if br == nil {
+		return 0, 0
+	}
+	return br.TaskCounts()
+}
+
+func parseScheduleArgs(args []string) (instruction string, every bool, duration time.Duration, err error) {
+	if len(args) < 3 {
+		return "", false, 0, fmt.Errorf("usage: /schedule add <instruction> every|once <duration>")
+	}
+	marker := -1
+	for i, arg := range args {
+		if strings.EqualFold(arg, "every") || strings.EqualFold(arg, "once") {
+			marker = i
+			break
+		}
+	}
+	if marker <= 0 || marker >= len(args)-1 {
+		return "", false, 0, fmt.Errorf("usage: /schedule add <instruction> every|once <duration>")
+	}
+	instruction = strings.Trim(strings.Join(args[:marker], " "), `"`)
+	every = strings.EqualFold(args[marker], "every")
+	duration, err = time.ParseDuration(strings.TrimSpace(args[marker+1]))
+	if err != nil {
+		return "", false, 0, fmt.Errorf("invalid duration: %v", err)
+	}
+	if strings.TrimSpace(instruction) == "" {
+		return "", false, 0, fmt.Errorf("instruction cannot be empty")
+	}
+	return instruction, every, duration, nil
 }

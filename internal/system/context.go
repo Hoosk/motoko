@@ -14,27 +14,28 @@ type SkillDef struct {
 }
 
 type ContextInfo struct {
-	Signals          map[string]string
-	OnDemandSignals  map[string]string
-	Path             string
-	GitBranch        string
-	BrainSummary     string
-	Workspace        string
-	SemanticSummary  string
-	Guidelines       string
-	DesignSpec       string
-	ActiveMode       string
-	RelevantSnippets []string
-	ModifiedFiles    []string
-	RelevantFiles    []string
-	AvailableSkills  []SkillDef
-	AvailableAgents  []string
-	Untracked        int
-	Unstaged         int
-	Staged           int
-	GitDirty         bool
-	HasGit           bool
-	ContextWindow    int
+	Signals           map[string]string
+	OnDemandSignals   map[string]string
+	Path              string
+	GitBranch         string
+	BrainSummary      string
+	Workspace         string
+	SemanticSummary   string
+	Guidelines        string
+	DesignSpec        string
+	ActiveMode        string
+	RelevantSnippets  []string
+	ModifiedFiles     []string
+	RelevantFiles     []string
+	AvailableSkills   []SkillDef
+	AvailableAgents   []string
+	ThinkingVerbosity string
+	Untracked         int
+	Unstaged          int
+	Staged            int
+	GitDirty          bool
+	HasGit            bool
+	ContextWindow     int
 }
 
 func GetContextInfo() ContextInfo {

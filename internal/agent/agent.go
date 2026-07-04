@@ -15,7 +15,7 @@ import (
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
-const defaultMaxToolIterations = 24
+const defaultMaxToolIterations = 250
 
 type Result struct {
 	Context    ContextSnapshot
@@ -124,7 +124,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		RelevantSnippets: info.RelevantSnippetsSummary(),
 	}
 
-	maxIterations := maxToolIterations()
+	maxIterations := maxToolIterations(ctx)
 	for i := 0; i < maxIterations; i++ {
 		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(history), a.provider.Summary())
 
@@ -282,7 +282,10 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 	return Result{}, fmt.Errorf("maximum tool iterations reached")
 }
 
-func maxToolIterations() int {
+func maxToolIterations(ctx context.Context) int {
+	if cfg := tools.GetConfig(ctx); cfg != nil && cfg.MaxIterations > 0 {
+		return cfg.MaxIterations
+	}
 	value := strings.TrimSpace(os.Getenv("MOTOKO_MAX_ITERATIONS"))
 	if value == "" {
 		return defaultMaxToolIterations
@@ -305,6 +308,12 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 			dynamicPrompt += "\n\n"
 		}
 		dynamicPrompt += modeFragment
+	}
+	if verbosityFragment := thinkingVerbosityFragment(info.ThinkingVerbosity); verbosityFragment != "" {
+		if dynamicPrompt != "" {
+			dynamicPrompt += "\n\n"
+		}
+		dynamicPrompt += verbosityFragment
 	}
 	providerMessages := append([]provider.ConversationItem(nil), messages...)
 	if dynamicPrompt != "" {
@@ -362,6 +371,17 @@ func activeModeFragment(activeMode string) string {
 		return system.LoadFragment("build_switch")
 	default:
 		return ""
+	}
+}
+
+func thinkingVerbosityFragment(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "concise":
+		return system.LoadFragment("thinking_concise")
+	case "caveman":
+		return system.LoadFragment("thinking_caveman")
+	default:
+		return system.LoadFragment("thinking_normal")
 	}
 }
 

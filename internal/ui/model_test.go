@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/tools"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestQueueOperations(t *testing.T) {
@@ -97,5 +100,61 @@ func TestSubmitPromptQueuesWhileThinking(t *testing.T) {
 	got := updated.(Model)
 	if len(got.promptQueue) != 1 || got.promptQueue[0] != "queued prompt" {
 		t.Fatalf("expected prompt to be queued, got %#v", got.promptQueue)
+	}
+}
+
+func TestNextPromptAfterAgentKeepsGoalAliveWithoutTasks(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	br := m.runtime.GetBrain()
+	if err := br.Write("goal", "# Goal\nDo the thing"); err != nil {
+		t.Fatal(err)
+	}
+
+	next, ok := m.nextPromptAfterAgent()
+	if !ok || !strings.Contains(next, "No tasks.md exists yet") {
+		t.Fatalf("unexpected next prompt: %q ok=%v", next, ok)
+	}
+	if !br.Exists("goal") {
+		t.Fatal("goal should remain active when tasks.md does not exist")
+	}
+}
+
+func TestNextPromptAfterAgentCompletesGoalWhenTasksDone(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	br := m.runtime.GetBrain()
+	if err := br.Write("goal", "# Goal\nDo the thing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := br.Write("tasks", "# Tasks\n- [x] done"); err != nil {
+		t.Fatal(err)
+	}
+
+	next, ok := m.nextPromptAfterAgent()
+	if ok || next != "" {
+		t.Fatalf("expected no auto-continue prompt, got %q ok=%v", next, ok)
+	}
+	if br.Exists("goal") {
+		t.Fatal("goal should be cleared when tasks are complete")
+	}
+}
+
+func TestQuestionPopupSwitchesBetweenListAndCustomFocus(t *testing.T) {
+	var popup questionPopupState
+	popup.Open(&tools.PendingQuestion{Question: tools.Question{
+		Header:      "Decision",
+		Question:    "Pick one",
+		AllowCustom: true,
+		Options:     []tools.QuestionOption{{Label: "one"}, {Label: "two"}},
+	}})
+	if popup.focus != questionFocusList {
+		t.Fatalf("expected initial list focus, got %v", popup.focus)
+	}
+	popup.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if popup.focus != questionFocusCustom {
+		t.Fatalf("expected custom focus after tab, got %v", popup.focus)
+	}
+	popup.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if popup.focus != questionFocusList {
+		t.Fatalf("expected list focus after shift+tab, got %v", popup.focus)
 	}
 }

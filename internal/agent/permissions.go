@@ -7,6 +7,7 @@ type AgentPermissions struct {
 	DeniedTools     []string // Explicit denylist
 	MaxIterations   int      // Per-agent iteration limit
 	AllowWrite      bool     // Can use write/modify tools (bash, patch)
+	AllowQuestion   bool     // Can interrupt execution to ask the user
 	AllowDelegate   bool     // Can spawn subagents
 	AllowTask       bool     // Can launch background tasks
 	AllowBrainWrite bool     // Can write to the session brain
@@ -18,6 +19,7 @@ type AgentPermissions struct {
 func DefaultBuildPermissions() AgentPermissions {
 	return AgentPermissions{
 		AllowWrite:      true,
+		AllowQuestion:   true,
 		AllowDelegate:   true,
 		AllowTask:       true,
 		AllowBrainWrite: true,
@@ -30,6 +32,7 @@ func DefaultBuildPermissions() AgentPermissions {
 func DefaultPlanPermissions() AgentPermissions {
 	return AgentPermissions{
 		AllowWrite:      false,
+		AllowQuestion:   true,
 		AllowDelegate:   true,
 		AllowTask:       false,
 		AllowBrainWrite: true,
@@ -42,6 +45,7 @@ func DefaultPlanPermissions() AgentPermissions {
 func DefaultSearchPermissions() AgentPermissions {
 	return AgentPermissions{
 		AllowWrite:      false,
+		AllowQuestion:   false,
 		AllowDelegate:   false,
 		AllowTask:       false,
 		AllowBrainWrite: true,

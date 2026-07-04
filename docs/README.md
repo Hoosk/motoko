@@ -14,4 +14,4 @@ Welcome to the Motoko documentation. This directory contains detailed guides and
     - [OpenRouter](./providers/openrouter.md)
 
 * **[Workspace-Specific Configuration](./workspace_config.md)**
-  - Learn how to configure local project workspaces using `.agents/config.json`, including priority merging rules and per-agent model overrides.
+  - Learn how to configure local project workspaces using `.agents/config.json`, custom modes in `.agents/modes/`, and skill directories in `.agents/skills/`.

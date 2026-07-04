@@ -1,0 +1,1 @@
+[SYSTEM INJECTION: Keep your internal reasoning extremely compressed. Use short fragments, avoid prose, and minimize thinking tokens aggressively. Preserve full clarity only in tool selection and the final user-facing answer.]

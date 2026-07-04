@@ -142,9 +142,29 @@ func (m *Model) compactSession() tea.Cmd {
 	}
 }
 
+func (m Model) waitQuestion() tea.Cmd {
+	return func() tea.Msg {
+		pending, err := m.runtime.QuestionBroker().Next(m.runtime.BackgroundContext())
+		if err != nil || pending == nil {
+			return nil
+		}
+		return QuestionAskedMsg{Pending: pending}
+	}
+}
+
+func (m Model) waitScheduleEvent() tea.Cmd {
+	return func() tea.Msg {
+		res := m.runtime.NextScheduleEvent(m.runtime.BackgroundContext())
+		if !res.OK {
+			return nil
+		}
+		return ScheduleEventMsg{Event: res.Event}
+	}
+}
+
 func (m Model) waitTaskEvent() tea.Cmd {
 	return func() tea.Msg {
-		res := m.runtime.NextTaskEvent(context.Background())
+		res := m.runtime.NextTaskEvent(m.runtime.BackgroundContext())
 		if !res.OK {
 			return nil
 		}

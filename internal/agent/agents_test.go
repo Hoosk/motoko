@@ -18,6 +18,11 @@ func TestBuiltinAgentsExist(t *testing.T) {
 	if !names["build"] {
 		t.Fatal("expected 'build' in BuiltinAgents")
 	}
+	for _, name := range []string{"learn", "teamwork", "grill"} {
+		if !names[name] {
+			t.Fatalf("expected %q in BuiltinAgents", name)
+		}
+	}
 }
 
 func TestBuildSystemPromptInjectsAgentMode(t *testing.T) {

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
@@ -65,7 +67,9 @@ type Model struct {
 	providerForm           providerForm
 	modePopup              modePopupState
 	commandPalette         commandPaletteState
+	questionPopup          questionPopupState
 	helpOverlay            helpOverlayState
+	settingsPopup          settingsPopupState
 	thinkingPicker         thinkingPickerState
 	composer               ComposerModel
 	timeline               TimelineModel
@@ -127,6 +131,8 @@ func (m Model) Init() tea.Cmd {
 		m.composer.Init(),
 		m.footer.Init(),
 		m.sidebar.Init(),
+		m.waitQuestion(),
+		m.waitScheduleEvent(),
 		m.waitTaskEvent(),
 		m.checkForUpdatesCmd(),
 	)
@@ -140,6 +146,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "ctrl+c":
 			if time.Since(m.lastCtrlC) < 2*time.Second {
+				m.runtime.Stop()
 				return m, tea.Quit
 			}
 			m.lastCtrlC = time.Now()
@@ -175,8 +182,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.commandPalette.Update(msg))
 		return m, tea.Batch(cmds...)
 	}
+	if m.questionPopup.active {
+		if done := m.questionPopup.Update(msg); done {
+			cmds = append(cmds, m.waitQuestion())
+		}
+		return m, tea.Batch(cmds...)
+	}
 	if m.helpOverlay.active {
 		cmds = append(cmds, m.helpOverlay.Update(msg))
+		return m, tea.Batch(cmds...)
+	}
+	if m.settingsPopup.active {
+		cmds = append(cmds, m.settingsPopup.Update(msg, m.runtime))
 		return m, tea.Batch(cmds...)
 	}
 
@@ -264,6 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if resp.Signal != "" {
 			switch resp.Signal {
 			case "quit":
+				m.runtime.Stop()
 				cmds = append(cmds, tea.Quit)
 			case "open-provider-popup":
 				m.providerForm.Open(m.runtime)
@@ -274,6 +292,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.listSessions())
 			case "open-mode-popup":
 				m.modePopup.Open(m.runtime)
+			case "open-settings-popup":
+				m.settingsPopup.Open()
 			}
 		}
 
@@ -346,7 +366,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timeline.renderMessages()
 		}
 		cmds = append(cmds, m.updateContextStats())
-		if next, ok := m.dequeuePrompt(); ok {
+		if next, ok := m.nextPromptAfterAgent(); ok {
 			cmds = append(cmds, func() tea.Msg {
 				return SubmitPromptMsg{Prompt: next}
 			})
@@ -386,6 +406,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.waitTaskEvent())
 
+	case ScheduleEventMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Scheduled instruction fired: " + msg.Event.Instruction})
+		m.timeline.renderMessages()
+		cmds = append(cmds, m.waitScheduleEvent())
+		if m.runtime.AgentConfigured() {
+			cmds = append(cmds, func() tea.Msg {
+				return SubmitPromptMsg{Prompt: "[System: Scheduled instruction fired from " + msg.Event.ID + "] " + msg.Event.Instruction}
+			})
+		}
+
 	case ProviderModelsMsg:
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
@@ -410,6 +440,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ThinkingBudgetSelectedMsg:
 		cmds = append(cmds, selectModelAndBudget(m.runtime, msg.Model, msg.Budget))
+
+	case QuestionAskedMsg:
+		if msg.Pending != nil {
+			m.questionPopup.Open(msg.Pending)
+		}
 
 	case SessionsMsg:
 		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
@@ -757,6 +792,12 @@ func (m Model) View() string {
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.questionPopup.active {
+		popup := widePopupStyle.Render(m.questionPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.settingsPopup.active {
+		popup := widePopupStyle.Render(m.settingsPopup.View(m.runtime))
+		base = overlayCenter(base, popup, m.width, m.height)
 	}
 
 	if m.notificationShow {
@@ -877,6 +918,81 @@ func (m *Model) dequeuePrompt() (string, bool) {
 		m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
 	}
 	return prompt, true
+}
+
+func (m *Model) nextPromptAfterAgent() (string, bool) {
+	if br := m.runtime.GetBrain(); br != nil && br.Exists("goal") {
+		pending, completed := br.TaskCounts()
+		if !br.Exists("tasks") {
+			return "[System: Goal still active. No tasks.md exists yet. Create or refine tasks.md first, then continue.]", true
+		}
+		if pending > 0 {
+			attempts, lastPending := readGoalState(br)
+			if lastPending == pending {
+				attempts++
+			} else {
+				attempts = 1
+			}
+			_ = writeGoalState(br, attempts, pending)
+			if attempts > 20 {
+				_ = br.Delete("goal")
+				_ = br.Delete("goal_state")
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "Goal auto-continue stopped after 20 attempts without progress."})
+				m.timeline.renderMessages()
+				return m.dequeuePrompt()
+			}
+			return "[System: Goal still active. Continue with the next unfinished task in tasks.md.]", true
+		}
+		if pending == 0 && completed == 0 {
+			attempts, lastPending := readGoalState(br)
+			if lastPending == 0 {
+				attempts++
+			} else {
+				attempts = 1
+			}
+			_ = writeGoalState(br, attempts, 0)
+			if attempts > 20 {
+				_ = br.Delete("goal")
+				_ = br.Delete("goal_state")
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "Goal auto-continue stopped after 20 attempts without a usable tasks.md checklist."})
+				m.timeline.renderMessages()
+				return m.dequeuePrompt()
+			}
+			return "[System: Goal still active, but tasks.md has no checkboxes yet. Refine tasks.md first, then continue.]", true
+		}
+		_ = br.Delete("goal_state")
+		_ = br.Delete("goal")
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Goal completed."})
+		m.timeline.renderMessages()
+	}
+	return m.dequeuePrompt()
+}
+
+func readGoalState(br *brain.Brain) (attempts int, lastPending int) {
+	if br == nil {
+		return 0, -1
+	}
+	content, err := br.Read("goal_state")
+	if err != nil {
+		return 0, -1
+	}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "attempts:") {
+			_, _ = fmt.Sscanf(line, "attempts: %d", &attempts)
+		}
+		if strings.HasPrefix(line, "pending:") {
+			_, _ = fmt.Sscanf(line, "pending: %d", &lastPending)
+		}
+	}
+	return attempts, lastPending
+}
+
+func writeGoalState(br *brain.Brain, attempts int, pending int) error {
+	if br == nil {
+		return nil
+	}
+	return br.Write("goal_state", fmt.Sprintf("attempts: %d\npending: %d\n", attempts, pending))
 }
 
 func (m *Model) removeQueuedAt(index int) {

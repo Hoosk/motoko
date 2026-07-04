@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,11 +9,18 @@ import (
 
 // AgentFrontmatter represents the parsed YAML frontmatter from a custom agent markdown file.
 type AgentFrontmatter struct {
-	Name         string   `yaml:"name"`
-	Description  string   `yaml:"description"`
-	ToolFilter   []string `yaml:"tool_filter"`
-	ExcludeTools []string `yaml:"exclude_tools"`
-	ReadOnly     bool     `yaml:"readonly"`
+	Name            string   `yaml:"name"`
+	Description     string   `yaml:"description"`
+	ToolFilter      []string `yaml:"tool_filter"`
+	ExcludeTools    []string `yaml:"exclude_tools"`
+	ReadOnly        bool     `yaml:"readonly"`
+	AllowWrite      *bool    `yaml:"allow_write"`
+	AllowQuestion   *bool    `yaml:"allow_question"`
+	AllowDelegate   *bool    `yaml:"allow_delegate"`
+	AllowTask       *bool    `yaml:"allow_task"`
+	AllowBrainWrite *bool    `yaml:"allow_brain_write"`
+	AllowWebAccess  *bool    `yaml:"allow_web"`
+	MaxIterations   int      `yaml:"max_iterations"`
 }
 
 // CustomAgentDef represents an agent loaded from a markdown file.
@@ -98,6 +106,20 @@ func parseCustomAgentFile(path string) (CustomAgentDef, error) {
 					frontmatter.Description = value
 				case "readonly":
 					frontmatter.ReadOnly = strings.ToLower(value) == "true"
+				case "allow_write":
+					frontmatter.AllowWrite = parseOptionalBool(value)
+				case "allow_question":
+					frontmatter.AllowQuestion = parseOptionalBool(value)
+				case "allow_delegate":
+					frontmatter.AllowDelegate = parseOptionalBool(value)
+				case "allow_task":
+					frontmatter.AllowTask = parseOptionalBool(value)
+				case "allow_brain_write":
+					frontmatter.AllowBrainWrite = parseOptionalBool(value)
+				case "allow_web":
+					frontmatter.AllowWebAccess = parseOptionalBool(value)
+				case "max_iterations":
+					frontmatter.MaxIterations = parseInt(value)
 				case "tool_filter":
 					frontmatter.ToolFilter = parseList(value)
 				case "exclude_tools":
@@ -154,4 +176,24 @@ func parseList(value string) []string {
 		}
 	}
 	return result
+}
+
+func parseOptionalBool(value string) *bool {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "true" {
+		v := true
+		return &v
+	}
+	if trimmed == "false" {
+		v := false
+		return &v
+	}
+	return nil
+}
+
+func parseInt(value string) int {
+	value = strings.TrimSpace(value)
+	var parsed int
+	_, _ = fmt.Sscanf(value, "%d", &parsed)
+	return parsed
 }
