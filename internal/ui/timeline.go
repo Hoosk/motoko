@@ -230,6 +230,66 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+func (m *TimelineModel) ApplyStreamBatch(events []app.AgentStreamEvent) {
+	if !m.model.Streaming || len(events) == 0 {
+		return
+	}
+	for _, event := range events {
+		if event.Kind == "assistant_delta" || event.Kind == "thinking_delta" {
+			targetKind := app.EntryAssistant
+			content := event.Content
+			if event.Kind == "thinking_delta" {
+				targetKind = app.EntryReasoning
+				content = event.ReasoningContent
+			}
+
+			if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
+				m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
+				m.model.StreamEntryIndex = len(m.model.Entries) - 1
+				m.model.StreamedRunes = nil
+			}
+			if content != "" {
+				m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
+				if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
+					m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
+				}
+			}
+			continue
+		}
+
+		switch event.Kind {
+		case "tool":
+			m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "tool " + event.Title})
+			if strings.TrimSpace(event.Content) != "" {
+				m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+			}
+		case "task_started":
+			m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + event.Title})
+			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
+		case "task_finished":
+			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+			if strings.TrimSpace(event.ReasoningContent) != "" {
+				m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
+			}
+		case "output":
+			if event.Title == "web_search" || event.Title == "web_fetch" {
+				m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("[%s: %d characters]", event.Title, len(event.Content))})
+			} else {
+				m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
+			}
+		case "error":
+			m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
+		case "debug":
+			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
+		}
+		if m.model.StreamEntryIndex != -1 {
+			m.model.StreamEntryIndex = -1
+			m.model.StreamedRunes = nil
+		}
+	}
+	m.renderMessages()
+}
+
 func (m TimelineModel) View() string {
 	if m.model.Width <= 0 || m.model.Height <= 0 {
 		return ""

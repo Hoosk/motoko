@@ -90,8 +90,9 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 	a := New(p, tools.NewRegistry())
 	messages := []provider.ConversationItem{provider.UserText("haz algo")}
 	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko", ActiveMode: "plan"}
+	specs := a.tools.Specs(buildToolContext(info))
 
-	if _, err := a.complete(context.Background(), info, messages, nil); err != nil {
+	if _, err := a.complete(context.Background(), info, messages, nil, specs); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.messages) != 2 {

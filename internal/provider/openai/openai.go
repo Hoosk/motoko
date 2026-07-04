@@ -134,7 +134,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
-		payload["parallel_tool_calls"] = false
+		payload["parallel_tool_calls"] = true
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
@@ -171,7 +171,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
 			OfAuto: param.NewOpt("auto"),
 		}
-		params.ParallelToolCalls = param.NewOpt(false)
+		params.ParallelToolCalls = param.NewOpt(true)
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
@@ -290,8 +290,8 @@ func buildResponseParams(model, systemPrompt string, messages []provider.Convers
 	if toolDefs := responseTools(tools); len(toolDefs) > 0 {
 		p.Tools = toolDefs
 		p.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto)}
-		p.MaxToolCalls = param.NewOpt(int64(1))
-		p.ParallelToolCalls = param.NewOpt(false)
+		p.MaxToolCalls = param.NewOpt(int64(8))
+		p.ParallelToolCalls = param.NewOpt(true)
 	}
 	if thinkingBudget > 0 {
 		p.Reasoning = shared.ReasoningParam{

@@ -140,6 +140,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	oldComposerHeight := m.composer.Height()
 
 	// 1. Handle Priority Key Commands (Global)
 	if key, ok := msg.(tea.KeyMsg); ok {
@@ -204,12 +205,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
 				if m.sidebar.offset > 0 {
-					m.sidebar.offset = max(0, m.sidebar.offset-3)
+					m.sidebar.SetOffset(max(0, m.sidebar.offset-3))
 				}
 				m.SyncLayout()
 				return m, nil
 			case tea.MouseButtonWheelDown:
-				m.sidebar.offset += 3
+				m.sidebar.SetOffset(m.sidebar.offset + 3)
 				m.SyncLayout()
 				return m, nil
 			}
@@ -256,7 +257,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TachikomaStatusMsg:
 		m.footer.tachikomaInfo = msg.Statuses
-		m.sidebar.Update(msg)
 
 	case SubmitPromptMsg:
 		if strings.TrimSpace(msg.Prompt) == "" {
@@ -326,9 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.RequestID != m.requestID {
 			break
 		}
-		for _, event := range msg.Events {
-			m.timeline.Update(AgentStreamEventMsg{Event: event})
-		}
+		m.timeline.ApplyStreamBatch(msg.Events)
 		if msg.Done && m.agentBuffer != nil {
 			m.agentBuffer.mu.Lock()
 			m.agentBuffer.done = true
@@ -659,7 +657,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.prevActiveTasks = currentActiveTasks
 	m.prevActiveSubagents = currentActiveSubagents
 
-	m.SyncLayout()
+	if _, isKey := msg.(tea.KeyMsg); !isKey || m.composer.Height() != oldComposerHeight {
+		m.SyncLayout()
+	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -842,8 +842,7 @@ func (m *Model) SyncLayout() {
 	mainWidth := m.width - sidebarWidth
 
 	m.composer.SetWidth(mainWidth)
-	composerView := m.composer.View()
-	composerHeight := lipgloss.Height(composerView)
+	composerHeight := m.composer.Height()
 
 	footerHeight := 1
 	m.footer.width = m.width
@@ -857,8 +856,7 @@ func (m *Model) SyncLayout() {
 	}
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	m.sidebar.width = sidebarWidth
-	m.sidebar.height = timelineHeight + toolbarHeight + queueHeight + composerHeight
+	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+composerHeight)
 }
 
 func timelineOnboarding(runtime *app.Runtime) []string {

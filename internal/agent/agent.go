@@ -123,6 +123,12 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		RelevantFiles:    info.RelevantFilesSummary(),
 		RelevantSnippets: info.RelevantSnippetsSummary(),
 	}
+	tCtx := buildToolContext(info)
+	specs := a.tools.Specs(tCtx)
+	availableTools := make([]string, 0, len(specs))
+	for _, s := range specs {
+		availableTools = append(availableTools, s.Name)
+	}
 
 	maxIterations := maxToolIterations(ctx)
 	for i := 0; i < maxIterations; i++ {
@@ -138,7 +144,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			}
 		}
 
-		resp, err := a.complete(ctx, info, currentHistory, onEvent)
+		resp, err := a.complete(ctx, info, currentHistory, onEvent, specs)
 		if err != nil {
 			tracelog.Logf("agent completion error=%v", err)
 			return Result{}, err
@@ -189,10 +195,6 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		for idx, call := range pending {
 			toolName := strings.TrimSpace(call.Name)
 
-			var availableTools []string
-			for _, s := range a.tools.Specs(buildToolContext(info)) {
-				availableTools = append(availableTools, s.Name)
-			}
 			if repairedName := tools.RepairToolName(toolName, availableTools); repairedName != "" {
 				if repairedName != toolName {
 					tracelog.Logf("agent tool repair from=%s to=%s", toolName, repairedName)
@@ -297,9 +299,7 @@ func maxToolIterations(ctx context.Context) int {
 	return iterations
 }
 
-func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error) (provider.Response, error) {
-	tCtx := buildToolContext(info)
-	specs := a.tools.Specs(tCtx)
+func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error, specs []tools.Spec) (provider.Response, error) {
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
 	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)

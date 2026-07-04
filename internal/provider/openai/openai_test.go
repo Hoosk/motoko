@@ -89,7 +89,7 @@ func TestBuildResponseParamsIncludesTools(t *testing.T) {
 	if len(params.Tools) != 1 {
 		t.Fatalf("expected one tool, got %#v", params.Tools)
 	}
-	if params.MaxToolCalls.Value != 1 || params.ParallelToolCalls.Value {
+	if params.MaxToolCalls.Value != 8 || !params.ParallelToolCalls.Value {
 		t.Fatalf("unexpected tool execution params %#v %#v", params.MaxToolCalls, params.ParallelToolCalls)
 	}
 	if params.ToolChoice.OfToolChoiceMode.Value != responses.ToolChoiceOptionsAuto {

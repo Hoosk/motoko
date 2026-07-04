@@ -69,7 +69,7 @@ func (m Model) hideNotification() tea.Cmd {
 }
 
 func (m Model) thinkingTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		return ThinkingTickMsg{}
 	})
 }
@@ -89,15 +89,13 @@ func (m Model) waitAgentStream(ch chan app.AgentStreamEvent, requestID int) tea.
 				if len(events) > 0 {
 					return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: false}
 				}
-				// If nothing available, block for a tiny bit
-				time.Sleep(10 * time.Millisecond)
 				select {
 				case ev, ok := <-ch:
 					if !ok {
 						return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: true}
 					}
 					events = append(events, ev)
-				default:
+				case <-time.After(10 * time.Millisecond):
 					return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: false}
 				}
 			}

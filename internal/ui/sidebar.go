@@ -14,14 +14,17 @@ import (
 
 type SidebarModel struct {
 	runtime *app.Runtime
+	cached  string
 	width   int
 	height  int
 	offset  int
+	dirty   bool
 }
 
 func NewSidebarModel(runtime *app.Runtime) SidebarModel {
 	return SidebarModel{
 		runtime: runtime,
+		dirty:   true,
 	}
 }
 
@@ -30,7 +33,28 @@ func (m SidebarModel) Init() tea.Cmd {
 }
 
 func (m SidebarModel) Update(msg tea.Msg) (SidebarModel, tea.Cmd) {
+	switch msg.(type) {
+	case TachikomaStatusMsg, ContextInfoMsg, ContextTokensMsg, ResponseAppliedMsg, AgentResultMsg, AgentStreamBatchMsg, TaskEventMsg, ScheduleEventMsg, SessionLoadedMsg:
+		m.dirty = true
+	}
 	return m, nil
+}
+
+func (m *SidebarModel) SetDimensions(width, height int) {
+	if m.width == width && m.height == height {
+		return
+	}
+	m.width = width
+	m.height = height
+	m.dirty = true
+}
+
+func (m *SidebarModel) SetOffset(offset int) {
+	if m.offset == offset {
+		return
+	}
+	m.offset = offset
+	m.dirty = true
 }
 
 func renderHeader(title string, style lipgloss.Style, width int) string {
@@ -46,9 +70,12 @@ func renderHeader(title string, style lipgloss.Style, width int) string {
 	return style.Render(fmt.Sprintf("%s %s %s", strings.Repeat("─", left), title, strings.Repeat("─", right)))
 }
 
-func (m SidebarModel) View() string {
+func (m *SidebarModel) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
+	}
+	if !m.dirty && m.cached != "" {
+		return m.cached
 	}
 
 	info := m.runtime.GetContextInfo()
@@ -224,7 +251,9 @@ func (m SidebarModel) View() string {
 		Height(m.height).
 		MaxHeight(m.height)
 
-	return style.Render(strings.Join(content, "\n"))
+	m.cached = style.Render(strings.Join(content, "\n"))
+	m.dirty = false
+	return m.cached
 }
 
 func contractPath(path string, maxLength int) string {

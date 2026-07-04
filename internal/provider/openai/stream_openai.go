@@ -114,7 +114,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
-		payload["parallel_tool_calls"] = false
+		payload["parallel_tool_calls"] = true
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
@@ -192,7 +192,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
 			OfAuto: param.NewOpt("auto"),
 		}
-		params.ParallelToolCalls = param.NewOpt(false)
+		params.ParallelToolCalls = param.NewOpt(true)
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
