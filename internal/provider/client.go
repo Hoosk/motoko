@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
 type ClientFactory func(config.ProviderConfig) Client
@@ -25,7 +26,24 @@ func Register(kind config.ProviderKind, factory ClientFactory) {
 
 func NewClient(cfg config.ProviderConfig) (Client, error) {
 	cfg = config.NormalizeProvider(cfg)
-	if cfg.Preset != "" {
+	if style, ok := ResolveAPIStyle(cfg.BaseURL, cfg.Model); ok {
+		tracelog.Logf("NewClient: ResolveAPIStyle(baseURL=%q, model=%q) => style=%q", cfg.BaseURL, cfg.Model, style)
+		switch style {
+		case apiStyleAnthropic:
+			cfg.Kind = config.ProviderKindAnthropic
+			cfg.Preset = config.ProviderPresetAnthropic
+			cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/v1")
+		case apiStyleOpenAICompatible:
+			cfg.Kind = config.ProviderKindOpenAICompatible
+			cfg.Preset = config.ProviderPresetOpenAICompatible
+		case apiStyleOpenAI:
+			cfg.Kind = config.ProviderKindOpenAICompatible
+			cfg.Preset = config.ProviderPresetOpenAI
+		case apiStyleGemini:
+			cfg.Kind = config.ProviderKindGemini
+			cfg.Preset = config.ProviderPresetGemini
+		}
+	} else if cfg.Preset != "" {
 		if catProv, ok := LookupProvider(string(cfg.Preset)); ok {
 			if cfg.BaseURL == "" && catProv.API != "" {
 				cfg.BaseURL = catProv.API

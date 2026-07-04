@@ -40,6 +40,9 @@ type ProviderConfig struct {
 	EnableGoogleSearch  bool           `json:"enable_google_search,omitempty"`
 	EnableCodeExecution bool           `json:"enable_code_execution,omitempty"`
 	SupportsThinking    bool           `json:"supports_thinking,omitempty"`
+	EffortPresets       []string       `json:"effort_presets,omitempty"`
+	BudgetMin           int            `json:"budget_min,omitempty"`
+	BudgetMax           int            `json:"budget_max,omitempty"`
 }
 
 type SearchConfig struct {
@@ -153,8 +156,6 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
-		cfg.Search.MaxResults = 100
-		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	} else {
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("failed to decode config: %w", err)
@@ -168,6 +169,12 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 				}
 			}
 		}
+	}
+	if cfg.Search.MaxResults <= 0 {
+		cfg.Search.MaxResults = 100
+	}
+	if len(cfg.Search.ExcludePatterns) == 0 {
+		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	}
 
 	// Load project-scoped config if exists

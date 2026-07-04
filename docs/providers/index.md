@@ -70,8 +70,11 @@ Catalog providers behave as `openai-compatible` endpoints under the hood, but pr
 ### Select a Model
 ```bash
 # List models available on the active provider
-/models
+/models list
 
 # Use a specific model
 /models use <model-name>
+
+# Inspect model capabilities
+/models info <model-name>
 ```

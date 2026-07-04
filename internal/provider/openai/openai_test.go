@@ -5,11 +5,42 @@ import (
 	"strings"
 	"testing"
 
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 )
+
+func TestChatStreamingIncludesUsage(t *testing.T) {
+	params := openai.ChatCompletionNewParams{
+		Model:       openai.ChatModel("gpt-4.1-mini"),
+		Messages:    []openai.ChatCompletionMessageParamUnion{openai.SystemMessage("system")},
+		Temperature: param.NewOpt(0.2),
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.NewOpt(true),
+		},
+	}
+	if !params.StreamOptions.IncludeUsage.Value {
+		t.Fatal("expected stream options to include usage")
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"stream_options":{"include_usage":true}`) {
+		t.Fatalf("expected stream_options include_usage in payload, got %s", string(encoded))
+	}
+	params.PromptCacheKey = param.NewOpt("sess-123")
+	encoded, err = json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"prompt_cache_key":"sess-123"`) {
+		t.Fatalf("expected prompt_cache_key in payload, got %s", string(encoded))
+	}
+}
 
 func TestMessageSerializationHelpers(t *testing.T) {
 	items := toResponsesInputItems([]provider.Message{{Role: "user", Content: "hola"}, {Role: "assistant", Content: "mundo"}})
@@ -25,7 +56,7 @@ func TestMessageSerializationHelpers(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0, "")
 	if params.Temperature.Value != 0.2 {
 		t.Fatalf("expected temperature for non-reasoning model, got %#v", params.Temperature)
 	}
@@ -41,7 +72,7 @@ func TestBuildResponseParamsUsesTemperatureForNonReasoningModels(t *testing.T) {
 }
 
 func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) {
-	params := buildResponseParams("o1-preview", "system", []provider.ConversationItem{provider.AssistantText("hola")}, provider.ToolSet{}, 24576)
+	params := buildResponseParams("o1-preview", "system", []provider.ConversationItem{provider.AssistantText("hola")}, provider.ToolSet{}, 24576, "")
 	if params.Reasoning.Effort != "high" {
 		t.Fatalf("expected high reasoning effort, got %#v", params.Reasoning)
 	}
@@ -54,7 +85,7 @@ func TestBuildResponseParamsUsesReasoningForOpenAIReasoningModels(t *testing.T) 
 }
 
 func TestBuildResponseParamsIncludesTools(t *testing.T) {
-	params := buildResponseParams("gpt-4.1-mini", "system", nil, provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0)
+	params := buildResponseParams("gpt-4.1-mini", "system", nil, provider.ToolSet{Local: []provider.LocalToolDefinition{{Name: "bash", Description: "Run shell", InputHint: "bash <cmd>"}}}, 0, "")
 	if len(params.Tools) != 1 {
 		t.Fatalf("expected one tool, got %#v", params.Tools)
 	}
@@ -117,6 +148,33 @@ func TestResponseFromChatCompletionMapsPromptAndCompletionTokens(t *testing.T) {
 	}
 }
 
+func TestResponseFromChatCompletionKeepsReasoningAndToolCallsTogether(t *testing.T) {
+	resp := responseFromChatCompletion(chatCompletionResponse{
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{
+			Content:          "checking",
+			ReasoningContent: "need to inspect files",
+			ToolCalls: []chatCompletionToolCall{{
+				ID:   "call_1",
+				Type: "function",
+				Function: chatCompletionToolFunction{
+					Name:      "glob",
+					Arguments: `{"input":"**/*.go"}`,
+				},
+			}},
+		}}},
+	})
+	if len(resp.OutputItems) != 1 {
+		t.Fatalf("expected one assistant turn, got %#v", resp.OutputItems)
+	}
+	item := resp.OutputItems[0]
+	if item.Content != "checking" || item.ReasoningContent != "need to inspect files" || len(item.ToolCalls) != 1 {
+		t.Fatalf("unexpected assistant turn %#v", item)
+	}
+	if resp.FinalText != "" {
+		t.Fatalf("expected empty final text when tool calls are pending, got %q", resp.FinalText)
+	}
+}
+
 func TestChatMessagesReuseRawAssistantToolCallPayload(t *testing.T) {
 	raw := []byte(`{"id":"call_789","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls -F\"}"},"thought_signature":"sig"}`)
 	messages := toChatMessages(provider.AssistantToolCallItems([]provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "bash", Input: "ls -F", CallID: "call_789", Raw: raw}}))
@@ -168,6 +226,12 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 		t.Fatalf("unexpected function values: %#v", call["function"])
 	}
 
+	withReasoning := provider.AssistantTurn("", "thinking...", []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "grep", Arguments: json.RawMessage(`{"pattern": "func"}`), CallID: "call_reasoning"}})
+	messages = toChatMessages([]provider.ConversationItem{withReasoning})
+	if messages[0]["reasoning_content"] != "thinking..." {
+		t.Fatalf("expected reasoning_content to be serialized, got %#v", messages[0])
+	}
+
 	resultItem := provider.ToolResultForInvocation(provider.ToolInvocation{Name: "grep", CallID: "call_abc"}, "found 3 matches")
 	messages = toChatMessages([]provider.ConversationItem{resultItem})
 	if len(messages) != 1 {
@@ -189,9 +253,23 @@ func TestToChatMessagesStructuredFlow(t *testing.T) {
 }
 
 func TestBuildResponseParamsLeavesReasoningEmptyWithoutBudget(t *testing.T) {
-	params := buildResponseParams("o4-mini", "system", nil, provider.ToolSet{}, 0)
+	params := buildResponseParams("o4-mini", "system", nil, provider.ToolSet{}, 0, "")
 	if params.Reasoning.Effort != "" {
 		t.Fatalf("expected empty reasoning effort without budget, got %#v", params.Reasoning)
+	}
+}
+
+func TestBuildResponseParamsIncludesPromptCacheKey(t *testing.T) {
+	params := buildResponseParams("gpt-4.1-mini", "system", []provider.ConversationItem{provider.UserText("hola")}, provider.ToolSet{}, 0, "sess-123")
+	if params.PromptCacheKey.Value != "sess-123" {
+		t.Fatalf("expected prompt cache key, got %#v", params.PromptCacheKey)
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"prompt_cache_key":"sess-123"`) {
+		t.Fatalf("expected prompt_cache_key in responses payload, got %s", string(encoded))
 	}
 }
 

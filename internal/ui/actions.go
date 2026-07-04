@@ -6,19 +6,24 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *Model) runAgent(prompt string) tea.Cmd {
+func (m *Model) runAgent(ctx context.Context, prompt string, requestID int, ch chan app.AgentStreamEvent) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		defer close(ch)
 		info := m.runtime.GetContextInfo()
 		res, err := m.runtime.RunAgentStream(ctx, info, prompt, func(ev app.AgentStreamEvent) error {
-			m.agentStream <- ev
-			return nil
+			select {
+			case ch <- ev:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		})
-		return AgentResultMsg{Prompt: prompt, Result: res, Assistant: res.Assistant, Err: err}
+		return AgentResultMsg{RequestID: requestID, Prompt: prompt, Result: res, Assistant: res.Assistant, Err: err}
 	}
 }
 
@@ -37,6 +42,15 @@ func (m *Model) listSessions() tea.Cmd {
 	return func() tea.Msg {
 		sessions, err := m.runtime.ListSessions()
 		return SessionsMsg{Sessions: sessions, Err: err}
+	}
+}
+
+func (m *Model) loadSession(id string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.runtime.LoadSession(id); err != nil {
+			return SessionLoadedMsg{Err: err}
+		}
+		return SessionLoadedMsg{}
 	}
 }
 
@@ -60,7 +74,7 @@ func (m Model) thinkingTick() tea.Cmd {
 	})
 }
 
-func (m Model) waitAgentStream(ch chan app.AgentStreamEvent) tea.Cmd {
+func (m Model) waitAgentStream(ch chan app.AgentStreamEvent, requestID int) tea.Cmd {
 	return func() tea.Msg {
 		var events []app.AgentStreamEvent
 		// Read at most 10 events to avoid blocking too long
@@ -68,27 +82,27 @@ func (m Model) waitAgentStream(ch chan app.AgentStreamEvent) tea.Cmd {
 			select {
 			case ev, ok := <-ch:
 				if !ok {
-					return AgentStreamBatchMsg{Events: events, Done: true}
+					return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: true}
 				}
 				events = append(events, ev)
 			default:
 				if len(events) > 0 {
-					return AgentStreamBatchMsg{Events: events, Done: false}
+					return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: false}
 				}
 				// If nothing available, block for a tiny bit
 				time.Sleep(10 * time.Millisecond)
 				select {
 				case ev, ok := <-ch:
 					if !ok {
-						return AgentStreamBatchMsg{Events: events, Done: true}
+						return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: true}
 					}
 					events = append(events, ev)
 				default:
-					return AgentStreamBatchMsg{Events: events, Done: false}
+					return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: false}
 				}
 			}
 		}
-		return AgentStreamBatchMsg{Events: events, Done: false}
+		return AgentStreamBatchMsg{RequestID: requestID, Events: events, Done: false}
 	}
 }
 
@@ -101,7 +115,7 @@ func loadProviderModels(runtime *app.Runtime, cfg config.ProviderConfig) tea.Cmd
 
 func (m *Model) runShell(command string) tea.Cmd {
 	return func() tea.Msg {
-		res := app.RunShellCommand(context.Background(), command)
+		res := shell.RunCommand(context.Background(), command)
 		return ShellResultMsg{Result: res}
 	}
 }

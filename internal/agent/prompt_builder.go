@@ -10,13 +10,12 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
-// buildSystemPrompt assembles the complete system prompt for the given context,
-// available tools, and active agent mode.
+// buildSystemPrompt assembles the stable, cache-friendly system prompt.
 func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
-	
+
 	// --- STATIC PART ---
-	
+
 	header := system.LoadProviderHeader(providerKind)
 	lines = append(lines, header)
 	lines = append(lines, "")
@@ -71,11 +70,11 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"</system_instructions>",
 		"",
 	)
-	
+
 	if agentSystem != "" {
 		lines = append(lines, agentSystem, "")
 	}
-	
+
 	if len(info.AvailableSkills) > 0 {
 		lines = append(lines,
 			"<available_skills>",
@@ -93,7 +92,7 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 			"",
 		)
 	}
-	
+
 	if info.Guidelines != "" {
 		lines = append(lines,
 			"<agents_guidelines>",
@@ -142,10 +141,13 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"",
 	)
 
-	// Inject split token
-	lines = append(lines, "--- DYNAMIC ---", "")
+	return strings.Join(lines, "\n")
+}
 
-	// --- DYNAMIC PART ---
+// buildDynamicPrompt assembles the per-turn dynamic context that should live in
+// the uncached tail of the conversation instead of the system prompt.
+func buildDynamicPrompt(providerKind string, info system.ContextInfo) string {
+	var lines []string
 
 	lines = append(lines,
 		"<environment>",
@@ -184,7 +186,7 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"  [Pre-extracted Relevant Snippets]:",
 		"  "+strings.ReplaceAll(info.RelevantSnippetsSummary(), "\n", "\n  "),
 	)
-	
+
 	if info.BrainSummary != "" {
 		lines = append(lines,
 			"",

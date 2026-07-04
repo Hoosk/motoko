@@ -17,7 +17,7 @@ func parseUnifiedPatch(input string) (*unifiedPatch, error) {
 		}
 	}
 	if start == -1 || start+1 >= len(lines) || !strings.HasPrefix(lines[start+1], "+++ ") {
-		return nil, fmt.Errorf("unified diff invalido; faltan cabeceras ---/+++")
+		return nil, fmt.Errorf("invalid unified diff; missing ---/+++ headers")
 	}
 	patch := &unifiedPatch{
 		OldPath: normalizeDiffPath(strings.TrimSpace(strings.TrimPrefix(lines[start], "--- "))),
@@ -30,7 +30,7 @@ func parseUnifiedPatch(input string) (*unifiedPatch, error) {
 			continue
 		}
 		if !strings.HasPrefix(line, "@@ ") {
-			return nil, fmt.Errorf("unified diff invalido; hunk esperado y se encontro: %s", line)
+			return nil, fmt.Errorf("invalid unified diff; hunk expected but found: %s", line)
 		}
 		hunk, next, err := parseUnifiedHunk(lines, i)
 		if err != nil {
@@ -40,7 +40,7 @@ func parseUnifiedPatch(input string) (*unifiedPatch, error) {
 		i = next
 	}
 	if len(patch.Hunks) == 0 {
-		return nil, fmt.Errorf("unified diff invalido; no contiene hunks")
+		return nil, fmt.Errorf("invalid unified diff; no hunks")
 	}
 	return patch, nil
 }
@@ -48,7 +48,7 @@ func parseUnifiedPatch(input string) (*unifiedPatch, error) {
 func parseUnifiedHunk(lines []string, start int) (unifiedHunk, int, error) {
 	match := unifiedHunkHeaderPattern.FindStringSubmatch(lines[start])
 	if match == nil {
-		return unifiedHunk{}, 0, fmt.Errorf("cabecera de hunk invalida: %s", lines[start])
+		return unifiedHunk{}, 0, fmt.Errorf("invalid hunk header: %s", lines[start])
 	}
 	hunk := unifiedHunk{
 		OldStart: mustParsePatchNumber(match[1]),
@@ -63,7 +63,7 @@ func parseUnifiedHunk(lines []string, start int) (unifiedHunk, int, error) {
 		}
 		if strings.HasPrefix(line, "\\ No newline at end of file") {
 			if len(hunk.Lines) == 0 {
-				return unifiedHunk{}, 0, fmt.Errorf("marcador de newline invalido en hunk")
+				return unifiedHunk{}, 0, fmt.Errorf("invalid newline marker in hunk")
 			}
 			hunk.Lines[len(hunk.Lines)-1].NoNewline = true
 			continue
@@ -74,7 +74,7 @@ func parseUnifiedHunk(lines []string, start int) (unifiedHunk, int, error) {
 		}
 		kind := line[0]
 		if kind != ' ' && kind != '+' && kind != '-' {
-			return unifiedHunk{}, 0, fmt.Errorf("linea de hunk invalida: %s", line)
+			return unifiedHunk{}, 0, fmt.Errorf("invalid hunk line: %s", line)
 		}
 		hunk.Lines = append(hunk.Lines, unifiedHunkLine{Kind: kind, Text: line[1:]})
 	}
@@ -88,7 +88,7 @@ func applyUnifiedPatch(current string, patch *unifiedPatch) (string, error) {
 	for _, hunk := range patch.Hunks {
 		target := hunk.targetIndex()
 		if target < pos || target > len(lines) {
-			return "", fmt.Errorf("no se puede aplicar el hunk en la linea %d", hunk.OldStart)
+			return "", fmt.Errorf("cannot apply hunk at line %d", hunk.OldStart)
 		}
 		result = append(result, lines[pos:target]...)
 		pos = target
@@ -96,13 +96,13 @@ func applyUnifiedPatch(current string, patch *unifiedPatch) (string, error) {
 			switch line.Kind {
 			case ' ':
 				if pos >= len(lines) || lines[pos].Text != line.Text {
-					return "", fmt.Errorf("el contexto del hunk no coincide en la linea %d", pos+1)
+					return "", fmt.Errorf("hunk context does not match at line %d", pos+1)
 				}
 				result = append(result, lines[pos])
 				pos++
 			case '-':
 				if pos >= len(lines) || lines[pos].Text != line.Text {
-					return "", fmt.Errorf("la eliminacion del hunk no coincide en la linea %d", pos+1)
+					return "", fmt.Errorf("hunk deletion does not match at line %d", pos+1)
 				}
 				pos++
 			case '+':

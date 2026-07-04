@@ -48,10 +48,13 @@ Once the provider is added and activated:
 
 ```bash
 # List available models served by the endpoint
-/models
+/models list
 
 # Select the model to use
 /models use <model-identifier>
+
+# Inspect the model metadata
+/models info <model-identifier>
 ```
 
 > [!NOTE]

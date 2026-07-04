@@ -97,7 +97,7 @@ func TestBrainTools(t *testing.T) {
 	if res.Output != expectedOutput {
 		t.Errorf("got %q, want %q", res.Output, expectedOutput)
 	}
-	if !strings.Contains(res.Summary, "leido desde linea 2") {
+	if !strings.Contains(res.Summary, "read from line 2") {
 		t.Errorf("unexpected summary: %s", res.Summary)
 	}
 

@@ -43,10 +43,13 @@ Once the provider is activated, you can view and select the model running on you
 
 ```bash
 # List available models
-/models
+/models list
 
 # Select the local model to use
 /models use <model-name>
+
+# Inspect the model metadata
+/models info <model-name>
 ```
 
 > [!NOTE]

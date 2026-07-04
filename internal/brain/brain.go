@@ -250,3 +250,11 @@ func (b *Brain) CopyTo(target *Brain) error {
 	}
 	return nil
 }
+
+// Destroy removes the brain directory and all its contents.
+func (b *Brain) Destroy() error {
+	if b == nil || b.Dir == "" {
+		return nil
+	}
+	return os.RemoveAll(b.Dir)
+}

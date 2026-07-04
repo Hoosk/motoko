@@ -56,9 +56,11 @@ func ParseVersion(v string) (major, minor, patch int, prerelease string, err err
 
 // CompareVersions compares two semver strings: current and latest.
 // Returns:
-//   -1 if current < latest (latest is newer)
-//    0 if current == latest
-//    1 if current > latest
+//
+//	-1 if current < latest (latest is newer)
+//	 0 if current == latest
+//	 1 if current > latest
+//
 // If either version is invalid (e.g. "dev"), they are considered equal (returns 0).
 func CompareVersions(current, latest string) int {
 	curMajor, curMinor, curPatch, curPre, err1 := ParseVersion(current)

@@ -1,4 +1,4 @@
-package app
+package taskman
 
 import (
 	"context"
@@ -8,35 +8,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Hoosk/motoko/internal/app/types"
 )
 
 const taskTimeout = 20 * time.Minute
 
-type TaskState struct {
-	Started  time.Time
-	cancel   context.CancelFunc
-	ID       string
-	Command  string
-	Output   string
-	ExitCode int
-	Running  bool
-}
-
-type TaskManager struct {
+type Manager struct {
 	active map[string]*TaskState
-	events chan TaskEvent
+	events chan types.TaskEvent
 	seq    int
 	mu     sync.RWMutex
 }
 
-func NewTaskManager() *TaskManager {
-	return &TaskManager{
+func NewManager() *Manager {
+	return &Manager{
 		active: make(map[string]*TaskState),
-		events: make(chan TaskEvent, 64),
+		events: make(chan types.TaskEvent, 64),
 	}
 }
 
-func (m *TaskManager) Launch(ctx context.Context, command string) (string, error) {
+func (m *Manager) Launch(ctx context.Context, command string) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", fmt.Errorf("empty command")
@@ -64,7 +56,7 @@ func (m *TaskManager) Launch(ctx context.Context, command string) (string, error
 	m.active[id] = state
 	m.mu.Unlock()
 
-	m.publish(TaskEvent{ID: id, Command: command, Done: false})
+	m.publish(types.TaskEvent{ID: id, Command: command, Done: false})
 
 	go func() {
 		start := time.Now()
@@ -107,13 +99,13 @@ func (m *TaskManager) Launch(ctx context.Context, command string) (string, error
 		delete(m.active, id)
 		m.mu.Unlock()
 
-		m.publish(TaskEvent{ID: id, Command: command, Done: true, ExitCode: exitCode, Output: trimmed, Duration: time.Since(start)})
+		m.publish(types.TaskEvent{ID: id, Command: command, Done: true, ExitCode: exitCode, Output: trimmed, Duration: time.Since(start)})
 	}()
 
 	return id, nil
 }
 
-func (m *TaskManager) Terminate(id string) error {
+func (m *Manager) Terminate(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state, ok := m.active[id]
@@ -129,7 +121,7 @@ func (m *TaskManager) Terminate(id string) error {
 	return nil
 }
 
-func (m *TaskManager) List() []*TaskState {
+func (m *Manager) List() []*TaskState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	list := make([]*TaskState, 0, len(m.active))
@@ -139,19 +131,19 @@ func (m *TaskManager) List() []*TaskState {
 	return list
 }
 
-func (m *TaskManager) Next(ctx context.Context) TaskEventResult {
+func (m *Manager) Next(ctx context.Context) types.TaskEventResult {
 	if m == nil {
-		return TaskEventResult{}
+		return types.TaskEventResult{}
 	}
 	select {
 	case <-ctx.Done():
-		return TaskEventResult{}
+		return types.TaskEventResult{}
 	case ev := <-m.events:
-		return TaskEventResult{Event: ev, OK: true}
+		return types.TaskEventResult{Event: ev, OK: true}
 	}
 }
 
-func (m *TaskManager) ActiveTasks() int {
+func (m *Manager) ActiveTasks() int {
 	if m == nil {
 		return 0
 	}
@@ -160,7 +152,7 @@ func (m *TaskManager) ActiveTasks() int {
 	return len(m.active)
 }
 
-func (m *TaskManager) publish(event TaskEvent) {
+func (m *Manager) publish(event types.TaskEvent) {
 	select {
 	case m.events <- event:
 	default:

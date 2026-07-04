@@ -14,10 +14,10 @@ func TestMaxToolOutputBytes(t *testing.T) {
 		{"unknown window defaults to 12000", 0, 12000},
 		{"negative window defaults to 12000", -1, 12000},
 		{"small window hits floor", 2000, 1000}, // 2000 * 4 * 0.02 = 160 -> 1000
-		{"standard 8k window", 8192, 1000}, // 8192 * 4 * 0.02 = 655 -> 1000
-		{"medium window", 32768, 2621}, // 32768 * 4 * 0.02 = 2621.44 -> 2621
-		{"large window", 128000, 10240}, // 128000 * 4 * 0.02 = 10240
-		{"huge window", 1048576, 83886}, // 1048576 * 4 * 0.02 = 83886
+		{"standard 8k window", 8192, 1000},      // 8192 * 4 * 0.02 = 655 -> 1000
+		{"medium window", 32768, 2621},          // 32768 * 4 * 0.02 = 2621.44 -> 2621
+		{"large window", 128000, 10240},         // 128000 * 4 * 0.02 = 10240
+		{"huge window", 1048576, 83886},         // 1048576 * 4 * 0.02 = 83886
 	}
 
 	for _, tt := range tests {
@@ -39,8 +39,8 @@ func TestPreserveHistoryTokens(t *testing.T) {
 		{"unknown window defaults to 8000", 0, 8000},
 		{"negative window defaults to 8000", -1, 8000},
 		{"small window hits floor", 2048, 1000}, // 204.8 -> 1000
-		{"standard 8k hits floor", 8192, 1000}, // 819.2 -> 1000
-		{"medium window", 32768, 3276}, // 3276.8 -> 3276
+		{"standard 8k hits floor", 8192, 1000},  // 819.2 -> 1000
+		{"medium window", 32768, 3276},          // 3276.8 -> 3276
 		{"large window hits cap", 128000, 8000}, // 12800 -> 8000
 		{"huge window hits cap", 1048576, 8000}, // 104857 -> 8000
 	}

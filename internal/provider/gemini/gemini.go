@@ -16,7 +16,6 @@ import (
 
 const keyInput = "input"
 
-
 func init() {
 	provider.Register(config.ProviderKindGemini, NewClient)
 }
@@ -220,9 +219,10 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 		cfg.HTTPOptions = &genai.HTTPOptions{
 			Headers: make(http.Header),
 		}
-		cfg.HTTPOptions.Headers.Set("X-Session-ID", sessionID)
-		if requestID != "" {
-			cfg.HTTPOptions.Headers.Set("X-Request-ID", requestID)
+		telemetryHeaders := map[string]string{}
+		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+		for k, v := range telemetryHeaders {
+			cfg.HTTPOptions.Headers.Set(k, v)
 		}
 	}
 
@@ -287,45 +287,45 @@ func toGenAIContent(messages []provider.ConversationItem) []*genai.Content {
 		}
 
 		var msgParts []*genai.Part
-		if call, ok := provider.ParseAssistantToolCallContent(msg.Content); ok {
-			if len(call.Raw) > 0 {
-				var sdkPart genai.Part
-				if err := json.Unmarshal(call.Raw, &sdkPart); err == nil {
-					if len(sdkPart.ThoughtSignature) == 0 {
-						var rawMap map[string]any
-						if err := json.Unmarshal(call.Raw, &rawMap); err == nil {
-							if sigVal, ok := rawMap["thought_signature"]; ok {
-								if sigStr, ok := sigVal.(string); ok {
-									if decoded, err := base64.StdEncoding.DecodeString(sigStr); err == nil {
-										sdkPart.ThoughtSignature = decoded
-									} else {
-										sdkPart.ThoughtSignature = []byte(sigStr)
+		if len(msg.ToolCalls) > 0 {
+			if strings.TrimSpace(msg.Content) != "" {
+				msgParts = append(msgParts, genai.NewPartFromText(msg.Content))
+			}
+			for _, call := range msg.ToolCalls {
+				if len(call.Raw) > 0 {
+					var sdkPart genai.Part
+					if err := json.Unmarshal(call.Raw, &sdkPart); err == nil {
+						if len(sdkPart.ThoughtSignature) == 0 {
+							var rawMap map[string]any
+							if err := json.Unmarshal(call.Raw, &rawMap); err == nil {
+								if sigVal, ok := rawMap["thought_signature"]; ok {
+									if sigStr, ok := sigVal.(string); ok {
+										if decoded, err := base64.StdEncoding.DecodeString(sigStr); err == nil {
+											sdkPart.ThoughtSignature = decoded
+										} else {
+											sdkPart.ThoughtSignature = []byte(sigStr)
+										}
 									}
 								}
 							}
 						}
-					}
-					if sdkPart.FunctionCall == nil && call.Name != "" {
-						var args map[string]any
-						if len(call.Arguments) > 0 {
-							_ = json.Unmarshal(call.Arguments, &args)
+						if sdkPart.FunctionCall == nil && call.Name != "" {
+							var args map[string]any
+							if len(call.Arguments) > 0 {
+								_ = json.Unmarshal(call.Arguments, &args)
+							}
+							if args == nil && call.Input != "" {
+								args = map[string]any{keyInput: call.Input}
+							}
+							sdkPart.FunctionCall = &genai.FunctionCall{ID: call.CallID, Name: call.Name, Args: args}
 						}
-						if args == nil && call.Input != "" {
-							args = map[string]any{keyInput: call.Input}
+						if sdkPart.FunctionCall != nil || len(sdkPart.ThoughtSignature) > 0 {
+							msgParts = append(msgParts, &sdkPart)
+							continue
 						}
-						sdkPart.FunctionCall = &genai.FunctionCall{
-							ID:   call.CallID,
-							Name: call.Name,
-							Args: args,
-						}
-					}
-					if sdkPart.FunctionCall != nil || len(sdkPart.ThoughtSignature) > 0 {
-						msgParts = append(msgParts, &sdkPart)
 					}
 				}
-			}
 
-			if len(msgParts) == 0 {
 				var args map[string]any
 				if len(call.Arguments) > 0 {
 					_ = json.Unmarshal(call.Arguments, &args)
@@ -333,23 +333,16 @@ func toGenAIContent(messages []provider.ConversationItem) []*genai.Content {
 				if args == nil && call.Input != "" {
 					args = map[string]any{keyInput: call.Input}
 				}
-				msgParts = append(msgParts, &genai.Part{
-					FunctionCall: &genai.FunctionCall{
-						ID:   call.CallID,
-						Name: call.Name,
-						Args: args,
-					},
-				})
+				msgParts = append(msgParts, &genai.Part{FunctionCall: &genai.FunctionCall{ID: call.CallID, Name: call.Name, Args: args}})
 			}
 		} else if msg.Role == provider.RoleTool {
 			role = "user"
-			call, output := provider.ParseToolResultContent(msg.Content)
 			msgParts = append(msgParts, &genai.Part{
 				FunctionResponse: &genai.FunctionResponse{
-					ID:   call.CallID,
-					Name: call.Name,
+					ID:   msg.ToolCallID,
+					Name: msg.ToolName,
 					Response: map[string]any{
-						"output": output,
+						"output": msg.Content,
 					},
 				},
 			})
@@ -436,24 +429,24 @@ func responseFromGenAIResponse(resp *genai.GenerateContentResponse) provider.Res
 		reasoning = int(resp.UsageMetadata.ThoughtsTokenCount)
 	}
 
+	pending := toolInvocationsFromGenAI(resp)
 	result := provider.Response{
-		FinalText: text,
+		FinalText:    text,
+		PendingCalls: pending,
 		Usage: provider.Usage{
-			InputTokens:           input,
-			OutputTokens:          output,
-			TotalTokens:           total,
-			CacheReadInputTokens:  cacheRead,
-			ReasoningTokens:       reasoning,
+			InputTokens:          input,
+			OutputTokens:         output,
+			TotalTokens:          total,
+			CacheReadInputTokens: cacheRead,
+			ReasoningTokens:      reasoning,
 		},
 	}
 
-	if text != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(text)}
+	if text != "" || len(pending) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, "", pending)}
 	}
 
-	if pending := toolInvocationsFromGenAI(resp); len(pending) > 0 {
-		result.PendingCalls = pending
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(pending)...)
+	if len(pending) > 0 {
 		result.FinalText = ""
 	}
 	return result

@@ -97,12 +97,12 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 	filename := parts[0]
 	if strings.EqualFold(filename, "brain_read") {
 		if len(parts) == 1 {
-			return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 		}
 		parts = parts[1:]
 		filename = parts[0]
@@ -134,14 +134,14 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 	if len(parts) >= 2 {
 		value, err := strconv.Atoi(parts[1])
 		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("offset invalido: %s", parts[1])
+			return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
 		}
 		offset = value
 	}
 	if len(parts) >= 3 {
 		value, err := strconv.Atoi(parts[2])
 		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("limit invalido: %s", parts[2])
+			return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
 		}
 		limit = value
 	}
@@ -155,14 +155,14 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 	if len(paginatedLines) == 0 {
 		return Result{
 			Spec:    t.Spec(),
-			Summary: fmt.Sprintf("Sin contenido visible en %s desde la linea %d.", filename, offset),
+			Summary: fmt.Sprintf("No visible content in %s from line %d.", filename, offset),
 			Output:  "",
 		}, nil
 	}
 
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Archivo del brain %s leido desde linea %d (%d lineas).", filename, offset, len(paginatedLines)),
+		Summary: fmt.Sprintf("Brain file %s read from line %d (%d lines).", filename, offset, len(paginatedLines)),
 		Output:  strings.Join(paginatedLines, "\n"),
 	}, nil
 }

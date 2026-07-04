@@ -86,7 +86,7 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 		CallID: "call_abc",
 	}
 	messages = []provider.ConversationItem{
-		{Role: provider.RoleAssistant, Content: provider.FormatAssistantToolCallContent(call)},
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
 	}
 	got = toSDKMessages(messages)
 	if len(got) != 1 || got[0].Role != sdk.MessageParamRoleAssistant {
@@ -118,6 +118,62 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 	trBlocks := b.OfToolResult.Content
 	if len(trBlocks) != 1 || trBlocks[0].OfText == nil || trBlocks[0].OfText.Text != "result_text" {
 		t.Fatalf("unexpected tool_result content: %#v", trBlocks)
+	}
+}
+
+func TestToSDKMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
+	call := provider.ToolInvocation{
+		Kind:   provider.InvokeCustomTool,
+		Name:   "bash",
+		Input:  "ls",
+		CallID: "call_abc",
+	}
+	messages := []provider.ConversationItem{
+		provider.UserText("first"),
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
+		provider.UserText("last"),
+	}
+
+	got := toSDKMessages(messages)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(got))
+	}
+	if got[0].Content[0].OfText.CacheControl != (sdk.CacheControlEphemeralParam{}) {
+		t.Fatalf("expected first message cache control to be empty, got %#v", got[0].Content[0].OfText.CacheControl)
+	}
+	if got[1].Content[0].OfToolUse == nil || got[1].Content[0].OfToolUse.CacheControl == (sdk.CacheControlEphemeralParam{}) {
+		t.Fatalf("expected penultimate tool_use cache control, got %#v", got[1].Content[0])
+	}
+	if got[2].Content[0].OfText.CacheControl != (sdk.CacheControlEphemeralParam{}) {
+		t.Fatalf("expected last message cache control to be empty, got %#v", got[2].Content[0].OfText.CacheControl)
+	}
+}
+
+func TestToSDKBetaMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
+	call := provider.ToolInvocation{
+		Kind:   provider.InvokeCustomTool,
+		Name:   "bash",
+		Input:  "ls",
+		CallID: "call_abc",
+	}
+	messages := []provider.ConversationItem{
+		provider.UserText("first"),
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
+		provider.UserText("last"),
+	}
+
+	got := toSDKBetaMessages(messages)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(got))
+	}
+	if got[0].Content[0].OfText.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) {
+		t.Fatalf("expected first message cache control to be empty, got %#v", got[0].Content[0].OfText.CacheControl)
+	}
+	if got[1].Content[0].OfToolUse == nil || got[1].Content[0].OfToolUse.CacheControl == (sdk.BetaCacheControlEphemeralParam{}) {
+		t.Fatalf("expected penultimate beta tool_use cache control, got %#v", got[1].Content[0])
+	}
+	if got[2].Content[0].OfText.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) {
+		t.Fatalf("expected last message cache control to be empty, got %#v", got[2].Content[0].OfText.CacheControl)
 	}
 }
 

@@ -1,7 +1,7 @@
 package provider
 
 import (
-	"strings"
+	"context"
 	"testing"
 )
 
@@ -17,41 +17,60 @@ func TestNormalizeConversationRoleFallsBackToUser(t *testing.T) {
 	}
 }
 
-func TestFormatToolResultContentIncludesMetadata(t *testing.T) {
+func TestToolResultForInvocationUsesStructuredFields(t *testing.T) {
 	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
-	got := FormatToolResultContent(call, "ok")
-	if !strings.Contains(got, "tool_name=read") || !strings.Contains(got, "call_id=call_123") || !strings.Contains(got, "tool_input=README.md") {
-		t.Fatalf("expected metadata in formatted tool result, got %q", got)
+	got := ToolResultForInvocation(call, "ok")
+	if got.Role != RoleTool || got.ToolName != "read" || got.ToolCallID != "call_123" || got.Content != "ok" {
+		t.Fatalf("unexpected structured tool result: %#v", got)
 	}
 }
 
-func TestParseToolResultContentRoundTripsMetadata(t *testing.T) {
-	call := ToolInvocation{Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123"}
-	parsedCall, output := ParseToolResultContent(FormatToolResultContent(call, "ok"))
-	if parsedCall.Name != call.Name || parsedCall.Input != call.Input || parsedCall.CallID != call.CallID {
-		t.Fatalf("unexpected parsed tool call %#v", parsedCall)
+func TestAssistantTurnCarriesReasoningAndToolCalls(t *testing.T) {
+	call := ToolInvocation{Kind: InvokeCustomTool, Name: "read", CallID: "call_123"}
+	got := AssistantTurn("working", "thinking", []ToolInvocation{call})
+	if got.Role != RoleAssistant || got.Content != "working" || got.ReasoningContent != "thinking" {
+		t.Fatalf("unexpected assistant turn: %#v", got)
 	}
-	if string(parsedCall.Arguments) != string(call.Arguments) {
-		t.Fatalf("unexpected parsed arguments %s", string(parsedCall.Arguments))
-	}
-	if output != "ok" {
-		t.Fatalf("unexpected parsed output %q", output)
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Name != "read" {
+		t.Fatalf("expected tool calls to be preserved: %#v", got)
 	}
 }
 
-func TestAssistantToolCallContentRoundTrips(t *testing.T) {
-	call := ToolInvocation{Kind: InvokeCustomTool, Name: "read", Input: "README.md", Arguments: []byte(`{"input":"README.md"}`), CallID: "call_123", Raw: []byte(`{"id":"call_123","type":"function","function":{"name":"read","arguments":"{\"input\":\"README.md\"}"},"thought_signature":"sig"}`)}
-	parsed, ok := ParseAssistantToolCallContent(FormatAssistantToolCallContent(call))
-	if !ok {
-		t.Fatal("expected assistant tool call metadata")
+func TestTelemetryRoundTrip(t *testing.T) {
+	ctx := WithTelemetry(context.Background(), "sess-123", "req-456")
+	sessionID, requestID := GetTelemetry(ctx)
+	if sessionID != "sess-123" || requestID != "req-456" {
+		t.Fatalf("unexpected telemetry values session=%q request=%q", sessionID, requestID)
 	}
-	if parsed.Name != call.Name || parsed.Input != call.Input || parsed.CallID != call.CallID {
-		t.Fatalf("unexpected parsed call %#v", parsed)
+}
+
+func TestApplyTelemetryHeadersOpencode(t *testing.T) {
+	headers := map[string]string{}
+	ApplyTelemetryHeaders("opencode-go", headers, "sess-123", "req-456")
+	if headers["x-opencode-session"] != "sess-123" {
+		t.Fatalf("expected x-opencode-session, got %#v", headers)
 	}
-	if string(parsed.Arguments) != string(call.Arguments) {
-		t.Fatalf("unexpected parsed arguments %s", string(parsed.Arguments))
+	if headers["x-opencode-request"] != "req-456" {
+		t.Fatalf("expected x-opencode-request, got %#v", headers)
 	}
-	if string(parsed.Raw) != string(call.Raw) {
-		t.Fatalf("unexpected parsed raw payload %s", string(parsed.Raw))
+	if headers["x-opencode-client"] != "motoko" {
+		t.Fatalf("expected x-opencode-client=motoko, got %#v", headers)
+	}
+	if _, ok := headers["X-Session-ID"]; ok {
+		t.Fatalf("did not expect generic session header for opencode provider, got %#v", headers)
+	}
+}
+
+func TestApplyTelemetryHeadersFallback(t *testing.T) {
+	headers := map[string]string{}
+	ApplyTelemetryHeaders("deepseek", headers, "sess-123", "req-456")
+	if headers["X-Session-ID"] != "sess-123" || headers["X-Request-ID"] != "req-456" {
+		t.Fatalf("expected generic telemetry headers, got %#v", headers)
+	}
+	if headers["x-session-affinity"] != "sess-123" {
+		t.Fatalf("expected x-session-affinity, got %#v", headers)
+	}
+	if _, ok := headers["x-opencode-session"]; ok {
+		t.Fatalf("did not expect opencode headers for generic provider, got %#v", headers)
 	}
 }

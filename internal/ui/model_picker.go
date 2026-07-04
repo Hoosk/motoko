@@ -3,7 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,7 +27,7 @@ func (m modelFilterItem) Render(active bool) string {
 	if m.info.SupportsThinking {
 		indicator = " (1)"
 	}
-	return cursor + style.Render(m.info.ID + indicator)
+	return cursor + style.Render(m.info.ID+indicator)
 }
 
 type modelPickerState struct {
@@ -80,10 +79,10 @@ type thinkingPickerState struct {
 	active          bool
 }
 
-func (p *thinkingPickerState) Open(model provider.ModelInfo) {
+func (p *thinkingPickerState) Open(model provider.ModelInfo, currentBudget int) {
 	p.model = model
-	p.thinkingBudgets = app.ThinkingBudgetLevels
-	p.thinkingIndex = 0
+	p.thinkingBudgets = provider.GetThinkingBudgets(model)
+	p.thinkingIndex = thinkingBudgetIndex(p.thinkingBudgets, currentBudget)
 	p.active = true
 }
 
@@ -136,7 +135,7 @@ func (p thinkingPickerState) View() string {
 		"",
 	}
 
-	labels := provider.GetThinkingLabels(p.model.ID)
+	labels := provider.GetThinkingLabels(p.model)
 	for i := range p.thinkingBudgets {
 		cursor := "  "
 		style := styles.PopupFieldValueStyle
@@ -156,3 +155,20 @@ func (p thinkingPickerState) View() string {
 	return strings.Join(rows, "\n")
 }
 
+func thinkingBudgetIndex(budgets []int, currentBudget int) int {
+	if len(budgets) == 0 {
+		return 0
+	}
+	bestIndex := 0
+	bestBudget := budgets[0]
+	for i, budget := range budgets {
+		if budget == currentBudget {
+			return i
+		}
+		if budget <= currentBudget && budget >= bestBudget {
+			bestIndex = i
+			bestBudget = budget
+		}
+	}
+	return bestIndex
+}

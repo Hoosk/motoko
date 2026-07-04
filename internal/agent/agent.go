@@ -90,7 +90,12 @@ func (a *Agent) SystemPrompt(info system.ContextInfo) string {
 	if a == nil {
 		return ""
 	}
-	return buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
+	staticPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
+	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	if dynamicPrompt == "" {
+		return staticPrompt
+	}
+	return staticPrompt + "\n\n" + dynamicPrompt
 }
 
 func (a *Agent) Run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem) (Result, error) {
@@ -126,21 +131,6 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		currentHistory := make([]provider.ConversationItem, len(history))
 		copy(currentHistory, history)
 
-		userMsgIdx := len(priorHistory)
-		if userMsgIdx < len(currentHistory) {
-			if strings.EqualFold(info.ActiveMode, "plan") {
-				frag := system.LoadFragment("plan_active")
-				if frag != "" {
-					currentHistory[userMsgIdx].Content += "\n\n" + frag
-				}
-			} else if strings.EqualFold(info.ActiveMode, "build") {
-				frag := system.LoadFragment("build_switch")
-				if frag != "" {
-					currentHistory[userMsgIdx].Content += "\n\n" + frag
-				}
-			}
-		}
-
 		if i >= maxIterations-2 {
 			frag := system.LoadFragment("max_steps")
 			if frag != "" {
@@ -160,6 +150,10 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
 		totalUsage.CacheReadInputTokens += resp.Usage.CacheReadInputTokens
 		totalUsage.CacheWriteInputTokens += resp.Usage.CacheWriteInputTokens
+		totalUsage.SystemStaticChars += resp.Usage.SystemStaticChars
+		totalUsage.SystemDynamicChars += resp.Usage.SystemDynamicChars
+		totalUsage.ToolsChars += resp.Usage.ToolsChars
+		totalUsage.HistoryChars += resp.Usage.HistoryChars
 		if a.debug {
 			steps = append(steps, Step{Kind: "debug", Title: "provider", Content: fmt.Sprintf("completion %d tokens in:%d out:%d total:%d", i+1, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)})
 		}
@@ -305,21 +299,32 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	specs := a.tools.Specs(tCtx)
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
+	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
+		if dynamicPrompt != "" {
+			dynamicPrompt += "\n\n"
+		}
+		dynamicPrompt += modeFragment
+	}
+	providerMessages := append([]provider.ConversationItem(nil), messages...)
+	if dynamicPrompt != "" {
+		providerMessages = append(providerMessages, provider.UserText(dynamicPrompt))
+	}
 
 	var resp provider.Response
 	var err error
 	if onEvent == nil {
-		resp, err = a.provider.Complete(ctx, systemPrompt, messages, toolSet)
+		resp, err = a.provider.Complete(ctx, systemPrompt, providerMessages, toolSet)
 	} else {
-		resp, err = a.provider.StreamComplete(ctx, systemPrompt, messages, toolSet, func(delta provider.Delta) error {
+		resp, err = a.provider.StreamComplete(ctx, systemPrompt, providerMessages, toolSet, func(delta provider.Delta) error {
 			if delta.ReasoningContent != "" {
-				if err := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); err != nil {
-					return err
+				if evErr := onEvent(StreamEvent{Kind: "thinking_delta", ReasoningContent: delta.ReasoningContent}); evErr != nil {
+					return evErr
 				}
 			}
 			if delta.Content != "" {
-				if err := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); err != nil {
-					return err
+				if evErr := onEvent(StreamEvent{Kind: "assistant_delta", Content: delta.Content}); evErr != nil {
+					return evErr
 				}
 			}
 			return nil
@@ -331,15 +336,7 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	}
 
 	// Calculate character metrics
-	staticPrompt := systemPrompt
-	dynamicPrompt := ""
-	parts := strings.SplitN(systemPrompt, "--- DYNAMIC ---", 2)
-	if len(parts) == 2 {
-		staticPrompt = parts[0]
-		dynamicPrompt = parts[1]
-	}
-
-	resp.Usage.SystemStaticChars = len(staticPrompt)
+	resp.Usage.SystemStaticChars = len(systemPrompt)
 	resp.Usage.SystemDynamicChars = len(dynamicPrompt)
 
 	toolsSize := 0
@@ -349,12 +346,23 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	resp.Usage.ToolsChars = toolsSize
 
 	historySize := 0
-	for _, msg := range messages {
+	for _, msg := range providerMessages {
 		historySize += len(msg.Role) + len(msg.Content)
 	}
 	resp.Usage.HistoryChars = historySize
 
 	return resp, nil
+}
+
+func activeModeFragment(activeMode string) string {
+	switch {
+	case strings.EqualFold(activeMode, "plan"):
+		return system.LoadFragment("plan_active")
+	case strings.EqualFold(activeMode, "build"):
+		return system.LoadFragment("build_switch")
+	default:
+		return ""
+	}
 }
 
 func toolSet(specs []tools.Spec) provider.ToolSet {

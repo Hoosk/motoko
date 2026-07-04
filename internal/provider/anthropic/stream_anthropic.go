@@ -51,11 +51,12 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	reqOpts := []option.RequestOption{
 		option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
 	}
+	telemetryHeaders := map[string]string{}
 	if sessionID, requestID := provider.GetTelemetry(ctx); sessionID != "" {
-		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
-		}
+		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	}
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
 
 	stream := c.sdkClient.Messages.NewStreaming(ctx, params, reqOpts...)
@@ -164,13 +165,11 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	}
 
 	finalText := strings.TrimSpace(raw.String())
-	result := provider.Response{FinalText: finalText, Usage: usage}
-	if finalText != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(finalText)}
+	result := provider.Response{FinalText: finalText, Usage: usage, PendingCalls: pendingCalls}
+	if finalText != "" || len(pendingCalls) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(finalText, "", pendingCalls)}
 	}
-	result.PendingCalls = pendingCalls
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	return result, nil

@@ -57,7 +57,7 @@ func LoadWorkspaceAgents(workspace string) ([]AgentDef, error) {
 			if len(c.Frontmatter.ExcludeTools) > 0 {
 				perms.DeniedTools = c.Frontmatter.ExcludeTools
 			}
-			
+
 			allCustom = append(allCustom, AgentDef{
 				Name:        c.Name,
 				System:      c.System,

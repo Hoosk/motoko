@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/styles"
@@ -12,14 +13,38 @@ type FilterableItem interface {
 	Render(active bool) string
 }
 
+type CategorizedItem interface {
+	FilterableItem
+	Category() string
+}
+
+type HighlightableItem interface {
+	FilterableItem
+	RenderHighlighted(active bool, positions []int) string
+}
+
 type FilterList struct {
 	Title         string
 	Placeholder   string
 	SearchQuery   string
 	Items         []FilterableItem
 	Filtered      []FilterableItem
+	positions     [][]int
 	SelectedIndex int
 	Active        bool
+}
+
+type filteredItem struct {
+	Item     FilterableItem
+	Match    fuzzyMatch
+	Original int
+}
+
+type filterListRow struct {
+	Item      FilterableItem
+	Positions []int
+	Header    string
+	Index     int
 }
 
 func NewFilterList(title, placeholder string) *FilterList {
@@ -37,14 +62,29 @@ func (fl *FilterList) SetItems(items []FilterableItem) {
 func (fl *FilterList) Filter(query string) {
 	fl.SearchQuery = query
 	fl.Filtered = nil
+	fl.positions = nil
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 	if queryLower == "" {
-		fl.Filtered = fl.Items
+		fl.Filtered = append(fl.Filtered, fl.Items...)
+		fl.positions = make([][]int, len(fl.Filtered))
 	} else {
-		for _, item := range fl.Items {
-			if strings.Contains(strings.ToLower(item.FilterKey()), queryLower) {
-				fl.Filtered = append(fl.Filtered, item)
+		matches := make([]filteredItem, 0, len(fl.Items))
+		for i, item := range fl.Items {
+			match := scoreFuzzy(queryLower, item.FilterKey())
+			if match.Score == noFuzzyMatch {
+				continue
 			}
+			matches = append(matches, filteredItem{Item: item, Match: match, Original: i})
+		}
+		sort.SliceStable(matches, func(i, j int) bool {
+			if matches[i].Match.Score == matches[j].Match.Score {
+				return matches[i].Original < matches[j].Original
+			}
+			return matches[i].Match.Score > matches[j].Match.Score
+		})
+		for _, match := range matches {
+			fl.Filtered = append(fl.Filtered, match.Item)
+			fl.positions = append(fl.positions, match.Match.Positions)
 		}
 	}
 	if fl.SelectedIndex >= len(fl.Filtered) {
@@ -125,7 +165,7 @@ func (fl *FilterList) View() string {
 
 	rows := []string{
 		titleStyle.Render(fl.Title),
-		styles.PopupFieldLabelStyle.Render("Search: ") + styles.PopupSelectionStyle.Render(fl.SearchQuery + "█"),
+		styles.PopupFieldLabelStyle.Render("Search: ") + styles.PopupSelectionStyle.Render(fl.SearchQuery+"█"),
 		hintStyle.Render("↑↓ navigate  letters filter  Enter select  Esc cancel"),
 		"",
 	}
@@ -135,18 +175,19 @@ func (fl *FilterList) View() string {
 		return strings.Join(rows, "\n")
 	}
 
-	maxItems := 10
+	displayRows, selectedRow := fl.displayRows()
+	maxItems := 12
 	start := 0
-	end := len(fl.Filtered)
+	end := len(displayRows)
 
 	if end > maxItems {
-		start = fl.SelectedIndex - maxItems/2
+		start = selectedRow - maxItems/2
 		if start < 0 {
 			start = 0
 		}
 		end = start + maxItems
-		if end > len(fl.Filtered) {
-			end = len(fl.Filtered)
+		if end > len(displayRows) {
+			end = len(displayRows)
 			start = end - maxItems
 		}
 	}
@@ -156,14 +197,46 @@ func (fl *FilterList) View() string {
 	}
 
 	for i := start; i < end; i++ {
-		item := fl.Filtered[i]
-		isActive := (i == fl.SelectedIndex)
-		rows = append(rows, item.Render(isActive))
+		row := displayRows[i]
+		if row.Header != "" {
+			rows = append(rows, styles.PopupMutedStyle.Render("── "+row.Header+" ──"))
+			continue
+		}
+		isActive := row.Index == fl.SelectedIndex
+		if item, ok := row.Item.(HighlightableItem); ok {
+			rows = append(rows, item.RenderHighlighted(isActive, row.Positions))
+			continue
+		}
+		rows = append(rows, row.Item.Render(isActive))
 	}
 
-	if end < len(fl.Filtered) {
+	if end < len(displayRows) {
 		rows = append(rows, hintStyle.Render("   ▼ ... more items below ..."))
 	}
 
 	return strings.Join(rows, "\n")
+}
+
+func (fl *FilterList) displayRows() ([]filterListRow, int) {
+	rows := make([]filterListRow, 0, len(fl.Filtered)+4)
+	selectedRow := 0
+	lastCategory := ""
+	for i, item := range fl.Filtered {
+		if categoryItem, ok := item.(CategorizedItem); ok {
+			category := categoryItem.Category()
+			if category != "" && category != lastCategory {
+				rows = append(rows, filterListRow{Header: category})
+				lastCategory = category
+			}
+		}
+		if i == fl.SelectedIndex {
+			selectedRow = len(rows)
+		}
+		var positions []int
+		if i < len(fl.positions) {
+			positions = fl.positions[i]
+		}
+		rows = append(rows, filterListRow{Item: item, Positions: positions, Index: i})
+	}
+	return rows, selectedRow
 }

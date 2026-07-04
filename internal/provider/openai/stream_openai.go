@@ -1,4 +1,5 @@
 package openai
+
 import (
 	"bufio"
 	"bytes"
@@ -32,14 +33,13 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]openaioption.RequestOption, 0)
-	if sessionID != "" {
-		reqOpts = append(reqOpts, openaioption.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, openaioption.WithHeader("X-Request-ID", requestID))
-		}
+	telemetryHeaders := map[string]string{}
+	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
 	}
 	stream := c.sdkClient.Responses.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
@@ -94,6 +94,7 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 
 func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	var raw strings.Builder
+	var reasoning strings.Builder
 	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
@@ -103,8 +104,12 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
-		"temperature": 0.2,
-		"stream":      true,
+		"temperature":    0.2,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
+	}
+	if sessionID, _ := provider.GetTelemetry(ctx); sessionID != "" {
+		payload["prompt_cache_key"] = sessionID
 	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
@@ -114,12 +119,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 
 	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
@@ -133,6 +133,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 			delta := chunk.Choices[0].Delta
 			if delta.Content != "" || delta.ReasoningContent != "" {
 				raw.WriteString(delta.Content)
+				reasoning.WriteString(delta.ReasoningContent)
 				if onDelta != nil {
 					if err := onDelta(provider.Delta{
 						Content:          delta.Content,
@@ -153,7 +154,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 		return provider.Response{}, err
 	}
 	return responseFromChatCompletion(chatCompletionResponse{
-		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ReasoningContent: reasoning.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
 		Usage: chatCompletionUsage{
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,
@@ -173,11 +174,18 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		openai.SystemMessage(systemPrompt),
 	}
 	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(c.model),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.NewOpt(true),
+		},
+	}
+	if sessionID != "" {
+		params.PromptCacheKey = param.NewOpt(sessionID)
 	}
 	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
 		params.Tools = sdkTools
@@ -188,13 +196,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
@@ -204,6 +206,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	defer func() { _ = stream.Close() }()
 
 	var raw strings.Builder
+	var reasoning strings.Builder
 	usage := provider.Usage{}
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
@@ -213,9 +216,18 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		if len(chunk.Choices) > 0 {
 			choice := chunk.Choices[0]
 			delta := choice.Delta
+			reasoningText := rawReasoningContent(delta.RawJSON())
 			text := delta.Content
 			if text == "" {
 				text = delta.Refusal
+			}
+			if reasoningText != "" {
+				reasoning.WriteString(reasoningText)
+				if onDelta != nil {
+					if err := onDelta(provider.Delta{ReasoningContent: reasoningText}); err != nil {
+						return provider.Response{}, err
+					}
+				}
 			}
 			if text != "" {
 				raw.WriteString(text)
@@ -242,7 +254,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	}
 
 	return responseFromChatCompletion(chatCompletionResponse{
-		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
+		Choices: []chatCompletionChoice{{Message: chatCompletionMessage{Content: raw.String(), ReasoningContent: reasoning.String(), ToolCalls: sortedChatToolCalls(toolCalls)}}},
 		Usage: chatCompletionUsage{
 			InputTokens:  usage.InputTokens,
 			OutputTokens: usage.OutputTokens,

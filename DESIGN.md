@@ -51,7 +51,7 @@ The runtime is the operational core that connects the TUI to the agent, tools, a
 - `/trace` — Toggle trace logging (requires build tag)
 - `/context` — Show raw system prompt sent to the agent
 - `/provider` — Manage providers (list, add, use, remove)
-- `/models` — List or select models from the active provider
+- `/models` — List, inspect, or select models from the active provider (`list`, `use`, `info`; bare `/models <id>` remains a shortcut)
 - `/sessions` — Open session picker popup
 - `/tools` — Show all registered tools
 - `/tool <name> <args>` — Execute a specific tool manually
@@ -101,6 +101,7 @@ The agent loop handles the full LLM interaction cycle including tool calling.
 - **Built-in agents:** `plan`, `build`, `search` — each with a distinct system prompt
 - **Custom agents:** defined in a `.agents` INI file at the workspace root
 - **Agent switching:** via `/agent <name>`, `/plan`, `/build`, `/mode`, or `Ctrl+A`
+- **Command palette:** `Ctrl+K` opens a fuzzy command palette for slash commands and core shortcuts
 - **Tool filtering:** plan and search agents only get read-only tools; build agents get the full set
 - **Subagent delegation:** the `delegate` tool spawns a temporary sub-agent with its own context
 

@@ -33,16 +33,13 @@ func TestToGenAIContentConsecutiveMessagesAndSnakeCaseSignature(t *testing.T) {
 	messages := []provider.ConversationItem{
 		provider.UserText("hello"),
 		provider.AssistantText("let me think"),
-		{
-			Role: provider.RoleAssistant,
-			Content: provider.FormatAssistantToolCallContent(provider.ToolInvocation{
-				Kind:      provider.InvokeCustomTool,
-				Name:      "bash",
-				Arguments: json.RawMessage(`{"input":"ls"}`),
-				CallID:    "call_123",
-				Raw:       []byte(`{"id":"call_123","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls\"}"},"thought_signature":"c2lnbmF0dXJlX2Jhc2U2NA=="}`),
-			}),
-		},
+		provider.AssistantTurn("", "", []provider.ToolInvocation{{
+			Kind:      provider.InvokeCustomTool,
+			Name:      "bash",
+			Arguments: json.RawMessage(`{"input":"ls"}`),
+			CallID:    "call_123",
+			Raw:       []byte(`{"id":"call_123","type":"function","function":{"name":"bash","arguments":"{\"input\":\"ls\"}"},"thought_signature":"c2lnbmF0dXJlX2Jhc2U2NA=="}`),
+		}}),
 	}
 
 	contents := toGenAIContent(messages)

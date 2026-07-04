@@ -14,8 +14,7 @@ func responseFromOpenAI(resp *responses.Response) provider.Response {
 		return provider.Response{}
 	}
 	result := provider.Response{
-		FinalText:   strings.TrimSpace(resp.OutputText()),
-		OutputItems: outputItemsFromOpenAI(resp.Output),
+		FinalText: strings.TrimSpace(resp.OutputText()),
 		Usage: provider.Usage{
 			InputTokens:          int(resp.Usage.InputTokens),
 			OutputTokens:         int(resp.Usage.OutputTokens),
@@ -25,8 +24,11 @@ func responseFromOpenAI(resp *responses.Response) provider.Response {
 		},
 	}
 	result.PendingCalls = pendingCallsFromOpenAI(resp.Output)
+	reasoning := strings.TrimSpace(openAIReasoningText(resp.Output))
+	if result.FinalText != "" || reasoning != "" || len(result.PendingCalls) > 0 {
+		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(result.FinalText, reasoning, result.PendingCalls)}
+	}
 	if len(result.PendingCalls) > 0 {
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(result.PendingCalls)...)
 		result.FinalText = ""
 	}
 	if len(result.OutputItems) == 0 && result.FinalText != "" {
@@ -66,7 +68,7 @@ func outputItemsFromOpenAI(items []responses.ResponseOutputItemUnion) []provider
 		if text == "" {
 			continue
 		}
-		result = append(result, provider.AssistantText(text))
+		result = append(result, provider.AssistantTurn(text, "", nil))
 	}
 	return result
 }
@@ -82,6 +84,23 @@ func openAIMessageText(message responses.ResponseOutputMessage) string {
 			}
 		case "refusal":
 			text := strings.TrimSpace(content.Refusal)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func openAIReasoningText(items []responses.ResponseOutputItemUnion) string {
+	var parts []string
+	for _, item := range items {
+		if item.Type != "reasoning" {
+			continue
+		}
+		reasoning := item.AsReasoning()
+		for _, summary := range reasoning.Summary {
+			text := strings.TrimSpace(summary.Text)
 			if text != "" {
 				parts = append(parts, text)
 			}

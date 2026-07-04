@@ -22,7 +22,7 @@ func NewGrepTool() *GrepTool {
 func (t *GrepTool) Spec() Spec {
 	return Spec{
 		Name:    "grep",
-		Summary: "Busca texto por regex dentro de archivos del workspace.",
+		Summary: "Search text by regex inside workspace files.",
 		Usage:   "grep <regex> [include-glob]",
 	}
 }
@@ -30,7 +30,7 @@ func (t *GrepTool) Spec() Spec {
 func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	pattern := parts[0]
@@ -105,12 +105,12 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 
 	sort.Strings(matches)
 	if len(matches) == 0 {
-		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("Sin coincidencias para %s.", pattern), Output: ""}, nil
+		return Result{Spec: t.Spec(), Summary: fmt.Sprintf("No matches for %s.", pattern), Output: ""}, nil
 	}
 
-	summary := fmt.Sprintf("%d coincidencias para %s.", len(matches), pattern)
+	summary := fmt.Sprintf("%d matches for %s.", len(matches), pattern)
 	if include != "" {
-		summary = fmt.Sprintf("%d coincidencias para %s en %s.", len(matches), pattern, include)
+		summary = fmt.Sprintf("%d matches for %s in %s.", len(matches), pattern, include)
 	}
 
 	return Result{Spec: t.Spec(), Summary: summary, Output: strings.Join(matches, "\n")}, nil

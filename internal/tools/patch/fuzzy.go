@@ -7,7 +7,7 @@ import (
 
 func fuzzyReplace(current, search, replace string) (string, error) {
 	if search == "" {
-		return "", fmt.Errorf("SEARCH vacio solo se permite para crear archivos nuevos")
+		return "", fmt.Errorf("empty SEARCH block is only allowed for creating new files")
 	}
 
 	matches := countOverlappingMatches(current, search)
@@ -19,7 +19,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	}
 
 	if matches > 1 {
-		return "", fmt.Errorf("el bloque SEARCH aparece %d veces de forma exacta; la sustitucion debe ser unica. Proporciona mas contexto", matches)
+		return "", fmt.Errorf("the SEARCH block appears %d times exactly; the substitution must be unique. Provide more context", matches)
 	}
 
 	if err := validateFuzzySearchBlock(search); err != nil {
@@ -46,7 +46,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 
 	searchLines := strings.Split(strings.TrimSpace(search), "\n")
 	if len(searchLines) == 0 {
-		return "", fmt.Errorf("no se encontro el bloque SEARCH (vacio tras limpiar espacios)")
+		return "", fmt.Errorf("SEARCH block not found (empty after trimming whitespace)")
 	}
 
 	var matchIndices []int
@@ -88,7 +88,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 func validateFuzzySearchBlock(search string) error {
 	trimmed := strings.TrimSpace(search)
 	if trimmed == "" {
-		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+		return fmt.Errorf("the SEARCH block cannot be empty after trimming whitespace")
 	}
 	lines := strings.Split(trimmed, "\n")
 	meaningfulLines := 0
@@ -106,7 +106,7 @@ func validateFuzzySearchBlock(search string) error {
 		}
 	}
 	if meaningfulLines < 2 || nonWhitespace < 3 {
-		return fmt.Errorf("el bloque SEARCH es demasiado ambiguo para fuzzy replace; proporciona mas lineas de contexto unicas")
+		return fmt.Errorf("the SEARCH block is too ambiguous for fuzzy replace; provide more unique context lines")
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func validateFuzzySearchBlock(search string) error {
 func validateExactSearchBlock(search string) error {
 	trimmed := strings.TrimSpace(search)
 	if trimmed == "" {
-		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+		return fmt.Errorf("the SEARCH block cannot be empty after trimming whitespace")
 	}
 	lines := strings.Split(trimmed, "\n")
 	if len(lines) >= 2 {
@@ -122,7 +122,7 @@ func validateExactSearchBlock(search string) error {
 	}
 	line := strings.TrimSpace(lines[0])
 	if line == "" {
-		return fmt.Errorf("el bloque SEARCH no puede quedar vacio tras limpiar espacios")
+		return fmt.Errorf("the SEARCH block cannot be empty after trimming whitespace")
 	}
 	nonPunctuation := 0
 	for _, r := range line {
@@ -135,7 +135,7 @@ func validateExactSearchBlock(search string) error {
 		nonPunctuation++
 	}
 	if nonPunctuation < 3 {
-		return fmt.Errorf("el bloque SEARCH es demasiado ambiguo para fuzzy replace; proporciona mas lineas de contexto unicas")
+		return fmt.Errorf("the SEARCH block is too ambiguous for fuzzy replace; provide more unique context lines")
 	}
 	return nil
 }

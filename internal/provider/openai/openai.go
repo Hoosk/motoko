@@ -1,4 +1,5 @@
 package openai
+
 import (
 	"context"
 	"fmt"
@@ -102,14 +103,13 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 		return c.completeChat(ctx, systemPrompt, messages, tools)
 	}
 
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget)
 	sessionID, requestID := provider.GetTelemetry(ctx)
+	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]option.RequestOption, 0)
-	if sessionID != "" {
-		reqOpts = append(reqOpts, option.WithHeader("X-Session-ID", sessionID))
-		if requestID != "" {
-			reqOpts = append(reqOpts, option.WithHeader("X-Request-ID", requestID))
-		}
+	telemetryHeaders := map[string]string{}
+	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	for k, v := range telemetryHeaders {
+		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
 	resp, err := c.sdkClient.Responses.New(ctx, params, reqOpts...)
 	if err != nil {
@@ -128,6 +128,9 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 		}, toChatMessages(messages)...),
 		"temperature": 0.2,
 	}
+	if sessionID, _ := provider.GetTelemetry(ctx); sessionID != "" {
+		payload["prompt_cache_key"] = sessionID
+	}
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
@@ -136,19 +139,14 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 
 	if err := provider.PostJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
 		return provider.Response{}, err
 	}
 
 	if len(decoded.Choices) == 0 {
-		return provider.Response{}, fmt.Errorf("no hay respuesta del modelo")
+		return provider.Response{}, fmt.Errorf("no response from model")
 	}
 	return responseFromChatCompletion(decoded), nil
 }
@@ -158,11 +156,15 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 		openai.SystemMessage(systemPrompt),
 	}
 	sdkMessages = append(sdkMessages, toSDKChatMessages(messages)...)
+	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(c.model),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
+	}
+	if sessionID != "" {
+		params.PromptCacheKey = param.NewOpt(sessionID)
 	}
 	if sdkTools := toSDKChatTools(tools); len(sdkTools) > 0 {
 		params.Tools = sdkTools
@@ -173,13 +175,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 	}
 
 	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	sessionID, requestID := provider.GetTelemetry(ctx)
-	if sessionID != "" {
-		headers["X-Session-ID"] = sessionID
-		if requestID != "" {
-			headers["X-Request-ID"] = requestID
-		}
-	}
+	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
 	reqOpts := make([]option.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))
@@ -194,7 +190,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 
 func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
 	if !c.listReady() {
-		return nil, fmt.Errorf("provider no configurado")
+		return nil, fmt.Errorf("provider not configured")
 	}
 	var decoded struct {
 		Data []struct {
@@ -230,7 +226,7 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, er
 }
 
 func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	// Intento 1: Consulta de modelo individual vía SDK
+	// Attempt 1: Query the individual model via the SDK.
 	m, err := c.sdkClient.Models.Get(ctx, model)
 	if err == nil && m != nil {
 		if field, ok := m.JSON.ExtraFields["context_length"]; ok {
@@ -246,7 +242,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 		}
 	}
 
-	// Intento 2: Consulta de listado general en red (si la API no soporta consultas individuales o no devolvió el campo)
+	// Attempt 2: Query the full model list if the API does not support individual lookups or omitted the field.
 	list, err := c.ListModels(ctx)
 	if err == nil {
 		for _, item := range list {
@@ -256,7 +252,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 		}
 	}
 
-	// Intento 3: LookupModel (local catalog cache)
+	// Attempt 3: Fall back to the local catalog cache.
 	if info, ok := provider.LookupModel(c.providerName, model); ok {
 		return info, nil
 	}
@@ -275,7 +271,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 
 // buildResponseParams constructs ResponseNewParams for the OpenAI Responses API.
 // The system prompt goes into Instructions; messages become the Input item list.
-func buildResponseParams(model, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, thinkingBudget int) responses.ResponseNewParams {
+func buildResponseParams(model, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, thinkingBudget int, promptCacheKey string) responses.ResponseNewParams {
 	p := responses.ResponseNewParams{
 		Model:        model,
 		Instructions: param.NewOpt(systemPrompt),
@@ -287,6 +283,9 @@ func buildResponseParams(model, systemPrompt string, messages []provider.Convers
 				OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
 			},
 		},
+	}
+	if promptCacheKey != "" {
+		p.PromptCacheKey = param.NewOpt(promptCacheKey)
 	}
 	if toolDefs := responseTools(tools); len(toolDefs) > 0 {
 		p.Tools = toolDefs

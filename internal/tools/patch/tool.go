@@ -106,7 +106,7 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 
 	if os.IsNotExist(err) {
 		if request.Search != "" {
-			return Result{}, fmt.Errorf("el archivo %s no existe y el bloque SEARCH no esta vacio", relPath)
+			return Result{}, fmt.Errorf("file %s does not exist and the SEARCH block is not empty", relPath)
 		}
 		updated = request.Replace
 	} else {
@@ -124,14 +124,14 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	return Result{
-		Summary: fmt.Sprintf("Patch aplicado sobre %s.", relPath),
+		Summary: fmt.Sprintf("Patch applied to %s.", relPath),
 		Output:  diffPreview(request.Search, request.Replace),
 	}, nil
 }
 
 func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 	if len(requests) == 0 {
-		return Result{}, fmt.Errorf("no se proporcionaron mutaciones AST")
+		return Result{}, fmt.Errorf("no AST mutations provided")
 	}
 	absPath, relPath, err := resolveWorkspaceWritePath(requests[0].Path)
 	if err != nil {
@@ -147,7 +147,7 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 			continue
 		}
 		if request.Path != requests[0].Path {
-			return Result{}, fmt.Errorf("todas las mutaciones AST deben apuntar al mismo archivo en una request")
+			return Result{}, fmt.Errorf("all AST mutations must target the same file in one request")
 		}
 		if request.Action == "" {
 			request.Action = actionReplace
@@ -167,9 +167,9 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 		}
 		rendered = append(rendered, request.Render())
 	}
-	summary := fmt.Sprintf("%d mutaciones AST aplicadas sobre %s.", len(rendered), relPath)
+	summary := fmt.Sprintf("%d AST mutations applied to %s.", len(rendered), relPath)
 	if len(rendered) == 1 {
-		summary = fmt.Sprintf("AST patch aplicado sobre %s.", relPath)
+		summary = fmt.Sprintf("AST patch applied to %s.", relPath)
 	}
 	return Result{Summary: summary, Output: strings.Join(rendered, "\n\n")}, nil
 }
@@ -188,7 +188,7 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 		return Result{}, readErr
 	}
 	if os.IsNotExist(readErr) && patch.OldPath != devNull {
-		return Result{}, fmt.Errorf("el archivo %s no existe para aplicar el unified diff", relPath)
+		return Result{}, fmt.Errorf("file %s does not exist to apply the unified diff", relPath)
 	}
 	updated, err := applyUnifiedPatch(string(content), patch)
 	if err != nil {
@@ -201,7 +201,7 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 		return Result{}, err
 	}
 	return Result{
-		Summary: fmt.Sprintf("Unified diff aplicado sobre %s.", relPath),
+		Summary: fmt.Sprintf("Unified diff applied to %s.", relPath),
 		Output:  patch.Render(),
 	}, nil
 }

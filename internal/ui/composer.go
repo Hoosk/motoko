@@ -80,10 +80,6 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 		m.refreshSuggestions()
 
 	case tea.KeyMsg:
-		if m.thinking {
-			return m, nil
-		}
-
 		switch msg.String() {
 		case keyTab, keyRight:
 			if len(m.mentionSuggestions) > 0 {
@@ -209,6 +205,12 @@ func (m ComposerModel) View() string {
 func (m *ComposerModel) SetWidth(width int) {
 	m.width = width
 	m.syncLayout()
+}
+
+func (m *ComposerModel) SetInput(value string) {
+	m.textarea.SetValue(value)
+	m.textarea.CursorEnd()
+	m.refreshSuggestions()
 }
 
 func (m *ComposerModel) SyncLayout(width, height int) {
@@ -368,12 +370,20 @@ func (m ComposerModel) renderSuggestionsLine() string {
 				detail = "Direct shell active. Enter to execute. /chat to exit. Ctrl+T for tools."
 			}
 		} else {
-			if chromeWidth < 50 {
-				detail = "Tab: suggest • Ctrl+H: help"
-			} else if chromeWidth < 75 {
-				detail = "Tab: rotate suggestions • /provider add • /models"
+			if m.thinking {
+				if chromeWidth < 60 {
+					detail = "Enter: queue • Esc: cancel"
+				} else {
+					detail = "Agent busy. Enter queues your prompt. Esc cancels. Ctrl+Q manages queue."
+				}
 			} else {
-				detail = "Tab to rotate suggestions. /provider add for config. /models for selection."
+				if chromeWidth < 50 {
+					detail = "Tab: suggest • Ctrl+H: help"
+				} else if chromeWidth < 75 {
+					detail = "Tab: rotate suggestions • /provider add • /models list"
+				} else {
+					detail = "Tab to rotate suggestions. /provider add for config. /models list for selection."
+				}
 			}
 		}
 		detail = styles.InputHintStyle.Render(detail)
@@ -462,7 +472,6 @@ func shouldApplySuggestionOnEnter(current, suggestion string) bool {
 	}
 	return true
 }
-
 
 func (m ComposerModel) Height() int {
 	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)

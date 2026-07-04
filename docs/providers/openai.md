@@ -38,10 +38,13 @@ After activation, choose a model to run:
 
 ```bash
 # List available models
-/models
+/models list
 
 # Select the model
 /models use gpt-5.5
+
+# Inspect the model metadata
+/models info gpt-5.5
 ```
 
 > [!TIP]

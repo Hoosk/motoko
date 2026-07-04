@@ -18,14 +18,14 @@ import (
 )
 
 const (
-	keyTab    = "tab"
-	keyCtrlN  = "ctrl+n"
-	keyCtrlP  = "ctrl+p"
-	keyEnter  = "enter"
-	keyEsc    = "esc"
-	keyUp     = "up"
-	keyDown   = "down"
-	keyRight  = "right"
+	keyTab   = "tab"
+	keyCtrlN = "ctrl+n"
+	keyCtrlP = "ctrl+p"
+	keyEnter = "enter"
+	keyEsc   = "esc"
+	keyUp    = "up"
+	keyDown  = "down"
+	keyRight = "right"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -108,24 +108,6 @@ func renderToolList(specs []tools.Spec) string {
 
 func formatShortcut(key, desc string) string {
 	return fmt.Sprintf("%s %s", styles.BoldNeonStyle.Render(key), styles.GrayStyle.Render(desc))
-}
-
-func helpView() string {
-	rows := [][]string{
-		{formatShortcut("enter", "send"), formatShortcut("tab", "next suggestion")},
-		{formatShortcut("ctrl+p", "providers"), formatShortcut("ctrl+m", "models")},
-		{formatShortcut("ctrl+o", "sessions"), formatShortcut("ctrl+s", "sidebar")},
-		{formatShortcut("ctrl+a", "modes"), formatShortcut("ctrl+r", "toggle reasoning")},
-		{formatShortcut("ctrl+t", "tools"), formatShortcut("ctrl+h", "this help")},
-		{formatShortcut("/", "commands"), formatShortcut("@", "mention file")},
-	}
-
-	var formatted []string
-	for _, row := range rows {
-		formatted = append(formatted, strings.Join(row, "  "))
-	}
-
-	return styles.GrayStyle.Render(strings.Join(formatted, "\n"))
 }
 
 func renderTachikomaList(statuses map[string]string) string {

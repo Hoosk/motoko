@@ -64,8 +64,9 @@ type CompactResultMsg struct {
 }
 
 type AgentStreamBatchMsg struct {
-	Events []app.AgentStreamEvent
-	Done   bool
+	RequestID int
+	Events    []app.AgentStreamEvent
+	Done      bool
 }
 
 type SessionsMsg struct {

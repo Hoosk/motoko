@@ -12,10 +12,10 @@ func entriesForProviderModels(models []provider.ModelInfo, err error) []app.Entr
 		return []app.Entry{{Kind: app.EntryError, Text: err.Error()}}
 	}
 	if len(models) == 0 {
-		return []app.Entry{{Kind: app.EntrySystem, Text: "El provider no devolvio modelos."}}
+		return []app.Entry{{Kind: app.EntrySystem, Text: "The provider returned no models."}}
 	}
 	return []app.Entry{{
 		Kind: app.EntrySystem,
-		Text: fmt.Sprintf("%d modelos cargados. Usa /models para verlos o /models <modelo> para seleccionarlo.", len(models)),
+		Text: fmt.Sprintf("%d models loaded. Use /models list to see them or /models use <model> to select one.", len(models)),
 	}}
 }

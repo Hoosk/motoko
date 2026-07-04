@@ -127,4 +127,3 @@ func TestWebSearchToolRunFallback(t *testing.T) {
 		t.Errorf("expected output:\n%s\ngot:\n%s", expectedOutput, result.Output)
 	}
 }
-

@@ -32,10 +32,13 @@ Motoko supports **Google Gemini** natively using Google GenAI SDK. This provides
 
 ```bash
 # List available models
-/models
+/models list
 
 # Select the model
 /models use gemini-3.5-pro
+
+# Inspect the model metadata
+/models info gemini-3.5-pro
 ```
 
 > [!TIP]

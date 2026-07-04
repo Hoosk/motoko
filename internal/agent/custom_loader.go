@@ -57,16 +57,16 @@ func parseCustomAgentFile(path string) (CustomAgentDef, error) {
 
 	content := string(data)
 	lines := strings.Split(content, "\n")
-	
+
 	var frontmatter AgentFrontmatter
 	var systemPromptBuilder strings.Builder
-	
+
 	inFrontmatter := false
 	frontmatterDone := false
-	
+
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
-		
+
 		if !frontmatterDone && trimmedLine == "---" {
 			if !inFrontmatter {
 				inFrontmatter = true
@@ -76,21 +76,21 @@ func parseCustomAgentFile(path string) (CustomAgentDef, error) {
 			}
 			continue
 		}
-		
+
 		if inFrontmatter {
 			// Simple key-value parsing for frontmatter
 			parts := strings.SplitN(trimmedLine, ":", 2)
 			if len(parts) == 2 {
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
-				
+
 				// Strip quotes from value if present
 				if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
 					value = value[1 : len(value)-1]
 				} else if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") {
 					value = value[1 : len(value)-1]
 				}
-				
+
 				switch key {
 				case "name":
 					frontmatter.Name = value
@@ -109,7 +109,7 @@ func parseCustomAgentFile(path string) (CustomAgentDef, error) {
 			systemPromptBuilder.WriteString("\n")
 		}
 	}
-	
+
 	name := frontmatter.Name
 	if name == "" {
 		// Fallback to filename without extension
@@ -117,9 +117,9 @@ func parseCustomAgentFile(path string) (CustomAgentDef, error) {
 		name = strings.TrimSuffix(base, filepath.Ext(base))
 		frontmatter.Name = name
 	}
-	
+
 	systemPrompt := strings.TrimSpace(systemPromptBuilder.String())
-	
+
 	return CustomAgentDef{
 		AgentDef: AgentDef{
 			Name:   name,
@@ -138,7 +138,7 @@ func parseList(value string) []string {
 	if value == "" {
 		return nil
 	}
-	
+
 	parts := strings.Split(value, ",")
 	var result []string
 	for _, p := range parts {

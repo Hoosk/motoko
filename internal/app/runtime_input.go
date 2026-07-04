@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
 )
@@ -37,7 +38,7 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 			}
 		}
 	}
-	r.mentionedFiles = r.extractMentionedFiles(trimmed)
+	r.agOrch.SetMentionedFiles(r.extractMentionedFiles(trimmed))
 
 	if strings.HasPrefix(trimmed, "!") {
 		return r.handleCommand(strings.TrimSpace(trimmed[1:]))
@@ -57,7 +58,7 @@ func (r *Runtime) HandleInput(input string, info system.ContextInfo) Response {
 
 	return Response{Entries: []Entry{
 		{Kind: EntryUser, Text: trimmed},
-		{Kind: EntryAssistant, Text: "The runtime is operational but the agent is not ready. Configure a provider using /provider add and then select a model using /models <model>."},
+		{Kind: EntryAssistant, Text: "The runtime is operational but the agent is not ready. Configure a provider using /provider add and then select a model using /models use <model>."},
 	}}
 }
 
@@ -88,12 +89,12 @@ func (r *Runtime) HandleTaskResult(result TaskEvent) Response {
 		output = "(no output)"
 	}
 
-	if r.currentSession != nil {
-		r.currentSession.History = append(r.currentSession.History, provider.ConversationItem{
+	if r.sesMgr.CurrentSession() != nil {
+		r.sesMgr.CurrentSession().History = append(r.sesMgr.CurrentSession().History, provider.ConversationItem{
 			Role:    provider.RoleUser,
 			Content: fmt.Sprintf("[System: Task %s finished with exit code %d.\nOutput:\n%s]", result.ID, result.ExitCode, output),
 		})
-		_ = r.currentSession.Save()
+		_ = r.sesMgr.CurrentSession().Save()
 	}
 
 	if result.ExitCode == 0 {
@@ -110,7 +111,7 @@ func (r *Runtime) handleShell(command string) Response {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: "Missing command after !"}}}
 	}
 
-	decision := classifyShell(r.mode, command)
+	decision := shell.Classify(r.agOrch.Mode(), command)
 	if decision.Deny {
 		return Response{Entries: []Entry{{Kind: EntryError, Text: decision.Reason}}}
 	}
@@ -119,14 +120,14 @@ func (r *Runtime) handleShell(command string) Response {
 		r.pending = &pendingShell{Command: command}
 		return Response{Entries: []Entry{
 			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: fmt.Sprintf("Accion pendiente: %s Usa /approve o /deny.", decision.Reason)},
+			{Kind: EntrySystem, Text: fmt.Sprintf("Pending action: %s Use /approve or /deny.", decision.Reason)},
 		}}
 	}
 
 	return Response{
 		Entries: []Entry{
 			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: "Ejecutando comando..."},
+			{Kind: EntrySystem, Text: "Executing command..."},
 		},
 		Action: &Action{Type: ActionShell, ShellCommand: command},
 	}

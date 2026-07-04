@@ -52,7 +52,7 @@ func (m SidebarModel) View() string {
 	}
 
 	info := m.runtime.GetContextInfo()
-	contentWidth := m.width - 3 // Account for left border (1) and padding (2)
+	contentWidth := m.width - 3     // Account for left border (1) and padding (2)
 	usableWidth := contentWidth - 2 // Usable text width inside padding (1 on each side)
 
 	var content []string

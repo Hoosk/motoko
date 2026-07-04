@@ -15,23 +15,37 @@ import (
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
+const (
+	apiStyleAnthropic        = "anthropic"
+	apiStyleOpenAICompatible = "openai-compatible"
+	apiStyleOpenAI           = "openai"
+	apiStyleGemini           = "gemini"
+)
+
+type CatalogModelOverride struct {
+	NPM string `json:"npm"`
+}
+
 type CatalogModel struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Family    string `json:"family"`
-	Reasoning bool   `json:"reasoning"`
-	Limit     struct {
+	Provider         *CatalogModelOverride `json:"provider,omitempty"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Family           string                `json:"family"`
+	ReasoningOptions []ReasoningOption     `json:"reasoning_options,omitempty"`
+	Limit            struct {
 		Context int `json:"context"`
 		Output  int `json:"output"`
 	} `json:"limit"`
+	Reasoning bool `json:"reasoning"`
 }
 
 type CatalogProvider struct {
-	ID   string   `json:"id"`
-	Name string   `json:"name"`
-	API  string   `json:"api"`
-	NPM  string   `json:"npm"`
-	Env  []string `json:"env"`
+	Models map[string]CatalogModel `json:"models,omitempty"`
+	ID     string                  `json:"id"`
+	Name   string                  `json:"name"`
+	API    string                  `json:"api"`
+	NPM    string                  `json:"npm"`
+	Env    []string                `json:"env"`
 }
 
 type CatalogContainer struct {
@@ -40,10 +54,11 @@ type CatalogContainer struct {
 }
 
 var (
-	catalogMu      sync.RWMutex
-	catalogCache   = make(map[string]ModelInfo)
-	providersCache = make(map[string]CatalogProvider)
-	catalogLoaded  bool
+	catalogMu           sync.RWMutex
+	catalogCache        = make(map[string]ModelInfo)
+	providersCache      = make(map[string]CatalogProvider)
+	providerModelsCache = make(map[string]map[string]CatalogModel)
+	catalogLoaded       bool
 )
 
 // LoadCatalog loads the catalog from the daily cache or downloads it if expired.
@@ -149,18 +164,24 @@ func fallbackToCache(cachePath string) error {
 func parseAndPopulate(data []byte) error {
 	var container CatalogContainer
 	// Try parsing nested structure
-	if err := json.Unmarshal(data, &container); err == nil && len(container.Models) > 0 {
+	if err := json.Unmarshal(data, &container); err == nil && (len(container.Models) > 0 || len(container.Providers) > 0) {
 		catalogCache = make(map[string]ModelInfo)
 		for k, m := range container.Models {
-			catalogCache[strings.ToLower(k)] = ModelInfo{
-				ID:               m.ID,
-				ContextWindow:    m.Limit.Context,
-				SupportsThinking: m.Reasoning,
-			}
+			catalogCache[strings.ToLower(k)] = modelInfoFromCatalogModel(m)
 		}
 		providersCache = make(map[string]CatalogProvider)
+		providerModelsCache = make(map[string]map[string]CatalogModel)
 		for k, p := range container.Providers {
-			providersCache[strings.ToLower(k)] = p
+			provKey := strings.ToLower(k)
+			providersCache[provKey] = p
+			if len(p.Models) > 0 {
+				modelsLower := make(map[string]CatalogModel, len(p.Models))
+				for modelID, m := range p.Models {
+					modelsLower[strings.ToLower(modelID)] = m
+					mergeCatalogModelInfo(catalogKeyForProviderModel(provKey, modelID, m), m)
+				}
+				providerModelsCache[provKey] = modelsLower
+			}
 		}
 		tracelog.Logf("catalog: parsed nested catalog.json with %d models and %d providers", len(catalogCache), len(providersCache))
 		return nil
@@ -174,16 +195,147 @@ func parseAndPopulate(data []byte) error {
 
 	catalogCache = make(map[string]ModelInfo)
 	for k, m := range rawCatalog {
-		catalogCache[strings.ToLower(k)] = ModelInfo{
-			ID:               m.ID,
-			ContextWindow:    m.Limit.Context,
-			SupportsThinking: m.Reasoning,
-		}
+		catalogCache[strings.ToLower(k)] = modelInfoFromCatalogModel(m)
 	}
 	// Clear providers cache in legacy mode
 	providersCache = make(map[string]CatalogProvider)
+	providerModelsCache = make(map[string]map[string]CatalogModel)
 	tracelog.Logf("catalog: parsed legacy models.json with %d models", len(catalogCache))
 	return nil
+}
+
+func modelInfoFromCatalogModel(m CatalogModel) ModelInfo {
+	info := ModelInfo{
+		ID:               m.ID,
+		ContextWindow:    m.Limit.Context,
+		SupportsThinking: m.Reasoning,
+	}
+	applyReasoningOptions(&info, m.ReasoningOptions)
+	return info
+}
+
+func applyReasoningOptions(info *ModelInfo, options []ReasoningOption) {
+	if info == nil {
+		return
+	}
+	for _, option := range options {
+		switch strings.ToLower(strings.TrimSpace(option.Type)) {
+		case "effort":
+			if len(info.EffortPresets) == 0 && len(option.Values) > 0 {
+				info.EffortPresets = append([]string(nil), option.Values...)
+			}
+		case "budget_tokens":
+			if info.BudgetMin == 0 && option.Min > 0 {
+				info.BudgetMin = option.Min
+			}
+			if info.BudgetMax == 0 && option.Max > 0 {
+				info.BudgetMax = option.Max
+			}
+		}
+	}
+}
+
+func mergeCatalogModelInfo(key string, model CatalogModel) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return
+	}
+	merged := catalogCache[key]
+	if merged.ID == "" {
+		merged = modelInfoFromCatalogModel(model)
+	}
+	applyReasoningOptions(&merged, model.ReasoningOptions)
+	if merged.ID == "" {
+		merged.ID = model.ID
+	}
+	if merged.ContextWindow == 0 {
+		merged.ContextWindow = model.Limit.Context
+	}
+	merged.SupportsThinking = merged.SupportsThinking || model.Reasoning
+	catalogCache[key] = merged
+}
+
+func catalogKeyForProviderModel(providerID, modelID string, model CatalogModel) string {
+	if strings.TrimSpace(model.ID) != "" {
+		return strings.ToLower(strings.TrimSpace(model.ID))
+	}
+	return strings.ToLower(strings.TrimSpace(providerID) + "/" + strings.TrimSpace(modelID))
+}
+
+func normalizeAPIURL(raw string) string {
+	u := strings.ToLower(strings.TrimSpace(raw))
+	u = strings.TrimRight(u, "/")
+	u = strings.TrimSuffix(u, "/v1")
+	return u
+}
+
+func LookupProviderByAPI(baseURL string) (CatalogProvider, string, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	norm := normalizeAPIURL(baseURL)
+	for provID, p := range providersCache {
+		if normalizeAPIURL(p.API) == norm {
+			return p, provID, true
+		}
+	}
+	return CatalogProvider{}, "", false
+}
+
+func ResolveAPIStyle(baseURL, modelID string) (string, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+
+	norm := normalizeAPIURL(baseURL)
+	modelLower := strings.ToLower(strings.TrimSpace(modelID))
+
+	for provID, p := range providersCache {
+		if normalizeAPIURL(p.API) != norm {
+			continue
+		}
+
+		npm := p.NPM
+		if provModels, ok := providerModelsCache[provID]; ok {
+			if model, found := provModels[modelLower]; found && model.Provider != nil && model.Provider.NPM != "" {
+				npm = model.Provider.NPM
+			}
+		}
+
+		switch npm {
+		case "@ai-sdk/anthropic":
+			return apiStyleAnthropic, true
+		case "@ai-sdk/openai":
+			if provID == "openai" {
+				return apiStyleOpenAI, true
+			}
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/openai-compatible":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/google":
+			return apiStyleGemini, true
+		case "@openrouter/ai-sdk-provider":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/azure":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/cohere":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/xai":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/amazon-bedrock":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/amazon-bedrock/mantle":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/google-vertex":
+			return apiStyleOpenAICompatible, true
+		case "@ai-sdk/google-vertex/anthropic":
+			return apiStyleOpenAICompatible, true
+		case "ai-gateway-provider":
+			return apiStyleOpenAICompatible, true
+		default:
+			return apiStyleOpenAICompatible, true
+		}
+	}
+	return "", false
 }
 
 // LookupProvider searches for a provider in the catalog cache.
@@ -256,4 +408,28 @@ func LookupModel(providerName string, model string) (ModelInfo, bool) {
 	}
 
 	return ModelInfo{}, false
+}
+
+func EnrichModelInfo(providerName string, info ModelInfo) ModelInfo {
+	if strings.TrimSpace(info.ID) == "" {
+		return info
+	}
+	cached, ok := LookupModel(providerName, info.ID)
+	if !ok {
+		return info
+	}
+	if info.ContextWindow == 0 {
+		info.ContextWindow = cached.ContextWindow
+	}
+	info.SupportsThinking = info.SupportsThinking || cached.SupportsThinking
+	if len(info.EffortPresets) == 0 && len(cached.EffortPresets) > 0 {
+		info.EffortPresets = append([]string(nil), cached.EffortPresets...)
+	}
+	if info.BudgetMin == 0 {
+		info.BudgetMin = cached.BudgetMin
+	}
+	if info.BudgetMax == 0 {
+		info.BudgetMax = cached.BudgetMax
+	}
+	return info
 }
