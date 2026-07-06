@@ -388,6 +388,20 @@ func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Respo
 				sess.LastHistoryTokens,
 				float64(sess.LastHistoryTokens)/float64(lastInput)*100)
 		}
+		fmt.Fprintf(&sb, "- Output Tokens: %d\n", sess.LastOutputTokens)
+		if sess.LastOutputTokens > 0 && sess.LastReasoningTokens > 0 {
+			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n",
+				sess.LastReasoningTokens,
+				percentage(sess.LastReasoningTokens, sess.LastOutputTokens))
+		}
+		if lastInput > 0 && sess.LastCacheReadTokens > 0 {
+			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n",
+				sess.LastCacheReadTokens,
+				percentage(sess.LastCacheReadTokens, lastInput))
+		}
+		if sess.LastCacheWriteTokens > 0 {
+			fmt.Fprintf(&sb, "  * Cache Write: %d\n", sess.LastCacheWriteTokens)
+		}
 
 		sb.WriteString("\nCumulative Token Usage:\n")
 		totalInput := sess.TotalInputTokens
@@ -418,9 +432,42 @@ func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Respo
 		if sess.TotalOutputTokens > 0 && sess.TotalReasoningTokens > 0 {
 			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n",
 				sess.TotalReasoningTokens,
-				float64(sess.TotalReasoningTokens)/float64(sess.TotalOutputTokens)*100)
+				percentage(sess.TotalReasoningTokens, sess.TotalOutputTokens))
 		}
 		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", sess.TotalTokens)
+
+		if len(sess.Turns) > 0 {
+			sb.WriteString("\nRecent Turn Trend:\n")
+			for _, turn := range sess.Turns {
+				fmt.Fprintf(&sb, "- Turn %d", turn.Turn)
+				if turn.AgentLabel != "" {
+					fmt.Fprintf(&sb, " [%s]", turn.AgentLabel)
+				}
+				fmt.Fprintf(&sb, ": in=%d out=%d reasoning=%d total=%d", turn.InputTokens, turn.OutputTokens, turn.ReasoningTokens, turn.TotalTokens)
+				if turn.InputGrowth != 0 {
+					growthPct := growthPercentage(&turn)
+					fmt.Fprintf(&sb, " input_growth=%+d (%.1f%%)", turn.InputGrowth, growthPct)
+					if turn.InputGrowth > 0 && growthPct >= 15.0 {
+						sb.WriteString(" BLOAT")
+					}
+				}
+				if turn.CacheReadTokens > 0 || turn.CacheWriteTokens > 0 {
+					fmt.Fprintf(&sb, " cache=%d/%d", turn.CacheReadTokens, turn.CacheWriteTokens)
+				}
+				sb.WriteByte('\n')
+				for idx, iter := range turn.Iterations {
+					fmt.Fprintf(&sb, "  iter %d: in=%d out=%d reasoning=%d total=%d", idx+1, iter.InputTokens, iter.OutputTokens, iter.ReasoningTokens, iter.TotalTokens)
+					if idx > 0 {
+						delta := iter.InputTokens - turn.Iterations[idx-1].InputTokens
+						fmt.Fprintf(&sb, " input_delta=%+d", delta)
+					}
+					if iter.CacheReadInputTokens > 0 || iter.CacheWriteInputTokens > 0 {
+						fmt.Fprintf(&sb, " cache=%d/%d", iter.CacheReadInputTokens, iter.CacheWriteInputTokens)
+					}
+					sb.WriteByte('\n')
+				}
+			}
+		}
 		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: sb.String()}}}
 	}
 
@@ -446,6 +493,20 @@ func (d *Dispatcher) helpResponse() types.Response {
 	)
 
 	return types.Response{Entries: []types.Entry{{Kind: types.EntryHelp, Text: strings.Join(lines, "\n")}}}
+}
+
+func percentage(value, total int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(value) / float64(total) * 100
+}
+
+func growthPercentage(turn *session.TurnUsage) float64 {
+	if turn == nil || len(turn.Iterations) == 0 {
+		return 0
+	}
+	return percentage(turn.InputGrowth, turn.Iterations[0].InputTokens)
 }
 
 func (d *Dispatcher) statusText(info system.ContextInfo) string {

@@ -17,15 +17,34 @@ import (
 
 var SessionsBaseDir string
 
+const maxTrackedTurns = 20
+
+type TurnUsage struct {
+	Turn             int              `json:"turn"`
+	AgentLabel       string           `json:"agent_label,omitempty"`
+	InputTokens      int              `json:"input_tokens,omitempty"`
+	OutputTokens     int              `json:"output_tokens,omitempty"`
+	TotalTokens      int              `json:"total_tokens,omitempty"`
+	ReasoningTokens  int              `json:"reasoning_tokens,omitempty"`
+	CacheReadTokens  int              `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int              `json:"cache_write_tokens,omitempty"`
+	InputGrowth      int              `json:"input_growth,omitempty"`
+	Iterations       []provider.Usage `json:"iterations,omitempty"`
+}
+
 type Session struct {
-	ID              string                      `json:"id"`
-	Title           string                      `json:"title"`
-	WorkspaceID     string                      `json:"workspace_id"`
-	Workspace       string                      `json:"workspace"`
-	CreatedAt       time.Time                   `json:"created_at"`
-	UpdatedAt       time.Time                   `json:"updated_at"`
-	History         []provider.ConversationItem `json:"history,omitempty"`
-	LastInputTokens int                         `json:"last_input_tokens,omitempty"`
+	ID                   string                      `json:"id"`
+	Title                string                      `json:"title"`
+	WorkspaceID          string                      `json:"workspace_id"`
+	Workspace            string                      `json:"workspace"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+	History              []provider.ConversationItem `json:"history,omitempty"`
+	LastInputTokens      int                         `json:"last_input_tokens,omitempty"`
+	LastOutputTokens     int                         `json:"last_output_tokens,omitempty"`
+	LastReasoningTokens  int                         `json:"last_reasoning_tokens,omitempty"`
+	LastCacheReadTokens  int                         `json:"last_cache_read_tokens,omitempty"`
+	LastCacheWriteTokens int                         `json:"last_cache_write_tokens,omitempty"`
 
 	TotalInputTokens      int `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens     int `json:"total_output_tokens,omitempty"`
@@ -41,10 +60,11 @@ type Session struct {
 	TotalHistoryTokens       int `json:"total_history_tokens,omitempty"`
 
 	// Last turn estimated token usage per component
-	LastSystemStaticTokens  int `json:"last_system_static_tokens,omitempty"`
-	LastSystemDynamicTokens int `json:"last_system_dynamic_tokens,omitempty"`
-	LastToolsTokens         int `json:"last_tools_tokens,omitempty"`
-	LastHistoryTokens       int `json:"last_history_tokens,omitempty"`
+	LastSystemStaticTokens  int         `json:"last_system_static_tokens,omitempty"`
+	LastSystemDynamicTokens int         `json:"last_system_dynamic_tokens,omitempty"`
+	LastToolsTokens         int         `json:"last_tools_tokens,omitempty"`
+	LastHistoryTokens       int         `json:"last_history_tokens,omitempty"`
+	Turns                   []TurnUsage `json:"turns,omitempty"`
 }
 
 func WorkspaceIDFor(path string) string {
@@ -114,6 +134,22 @@ func (s *Session) CompactWith(summary string) {
 		provider.AssistantText("Entendido, continuo desde este resumen."),
 	}
 	s.LastInputTokens = 0
+	s.LastOutputTokens = 0
+	s.LastReasoningTokens = 0
+	s.LastCacheReadTokens = 0
+	s.LastCacheWriteTokens = 0
+}
+
+func (s *Session) AddTurn(turn TurnUsage) {
+	if s == nil {
+		return
+	}
+	turn.Iterations = append([]provider.Usage(nil), turn.Iterations...)
+	s.Turns = append(s.Turns, turn)
+	if len(s.Turns) <= maxTrackedTurns {
+		return
+	}
+	s.Turns = append([]TurnUsage(nil), s.Turns[len(s.Turns)-maxTrackedTurns:]...)
 }
 
 func Load(workspaceID, id string) (*Session, error) {

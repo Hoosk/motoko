@@ -15,13 +15,17 @@ import (
 	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
-const defaultMaxToolIterations = 250
+const (
+	defaultMaxToolIterations = 250
+	inputBloatThresholdPct   = 15.0
+)
 
 type Result struct {
 	Context    ContextSnapshot
 	Assistant  string
 	AgentLabel string
 	Steps      []Step
+	Iterations []provider.Usage
 	History    []provider.ConversationItem
 	Usage      provider.Usage
 	Duration   time.Duration
@@ -115,6 +119,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 	history := append([]provider.ConversationItem{}, priorHistory...)
 	history = append(history, provider.UserText(userInput))
 	steps := []Step{{Kind: "user", Title: "prompt", Content: userInput}}
+	iterations := make([]provider.Usage, 0, max(1, maxToolIterations(ctx)))
 	totalUsage := provider.Usage{}
 	seenToolCalls := make(map[string]struct{})
 	contextSnapshot := ContextSnapshot{
@@ -149,7 +154,30 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			tracelog.Logf("agent completion error=%v", err)
 			return Result{}, err
 		}
-		tracelog.Logf("agent completion tool=%t usage_in=%d usage_out=%d usage_total=%d", len(resp.PendingCalls) > 0, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)
+		iterations = append(iterations, resp.Usage)
+		tracelog.Logf(
+			"agent completion iteration=%d tool=%t usage_in=%d usage_out=%d usage_total=%d reasoning=%d cache_read=%d cache_write=%d",
+			i+1,
+			len(resp.PendingCalls) > 0,
+			resp.Usage.InputTokens,
+			resp.Usage.OutputTokens,
+			resp.Usage.TotalTokens,
+			resp.Usage.ReasoningTokens,
+			resp.Usage.CacheReadInputTokens,
+			resp.Usage.CacheWriteInputTokens,
+		)
+		if len(iterations) > 1 {
+			prevInput := iterations[len(iterations)-2].InputTokens
+			inputDelta := resp.Usage.InputTokens - prevInput
+			pct := percentDelta(inputDelta, prevInput)
+			tracelog.Logf(
+				"agent iteration=%d input_delta=%+d input_delta_pct=%.1f input_bloat=%t",
+				i+1,
+				inputDelta,
+				pct,
+				inputDelta > 0 && pct >= inputBloatThresholdPct,
+			)
+		}
 		totalUsage.InputTokens += resp.Usage.InputTokens
 		totalUsage.OutputTokens += resp.Usage.OutputTokens
 		totalUsage.TotalTokens += resp.Usage.TotalTokens
@@ -170,13 +198,14 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 			if message == "" {
 				message = "No useful response yet."
 			}
+			logIterationBloatSummary(iterations)
 			if len(resp.OutputItems) > 0 {
 				history = append(history, resp.OutputItems...)
 			} else {
 				history = append(history, provider.AssistantText(message))
 			}
 			steps = append(steps, Step{Kind: "assistant", Title: "answer", Content: message})
-			return Result{Assistant: message, Steps: steps, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot, History: history}, nil
+			return Result{Assistant: message, Steps: steps, Iterations: iterations, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot, History: history}, nil
 		}
 
 		if len(resp.OutputItems) > 0 {
@@ -396,4 +425,28 @@ func toolSet(specs []tools.Spec) provider.ToolSet {
 		})
 	}
 	return provider.ToolSet{Local: result}
+}
+
+func percentDelta(delta, base int) float64 {
+	if base <= 0 {
+		return 0
+	}
+	return float64(delta) / float64(base) * 100
+}
+
+func logIterationBloatSummary(iterations []provider.Usage) {
+	if len(iterations) == 0 {
+		return
+	}
+	firstInput := iterations[0].InputTokens
+	lastInput := iterations[len(iterations)-1].InputTokens
+	growth := lastInput - firstInput
+	pct := percentDelta(growth, firstInput)
+	tracelog.Logf(
+		"agent turn done iterations=%d input_growth=%+d input_growth_pct=%.1f input_bloat=%t",
+		len(iterations),
+		growth,
+		pct,
+		growth > 0 && pct >= inputBloatThresholdPct,
+	)
 }

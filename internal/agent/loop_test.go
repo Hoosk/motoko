@@ -60,9 +60,16 @@ func (f *fakeMultiProvider) StreamComplete(ctx context.Context, systemPrompt str
 func (f *fakeMultiProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
 	f.count++
 	if f.count == 1 {
-		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "1", Input: "a"}, {Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "2", Input: "b"}}}, nil
+		return provider.Response{
+			PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "1", Input: "a"}, {Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "2", Input: "b"}},
+			Usage:        provider.Usage{InputTokens: 100, OutputTokens: 25, TotalTokens: 125, ReasoningTokens: 10},
+		}, nil
 	}
-	return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
+	return provider.Response{
+		FinalText:   "ok",
+		OutputItems: []provider.ConversationItem{provider.AssistantText("ok")},
+		Usage:       provider.Usage{InputTokens: 140, OutputTokens: 30, TotalTokens: 170, ReasoningTokens: 12},
+	}, nil
 }
 
 func TestRunDetectsRepeatedToolLoop(t *testing.T) {
@@ -133,5 +140,14 @@ func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
 	}
 	if len(result.History) < 4 {
 		t.Fatalf("expected tool history entries persisted, got %#v", result.History)
+	}
+	if len(result.Iterations) != 2 {
+		t.Fatalf("expected 2 iterations, got %#v", result.Iterations)
+	}
+	if result.Iterations[0].InputTokens != 100 || result.Iterations[1].InputTokens != 140 {
+		t.Fatalf("unexpected iteration usage %#v", result.Iterations)
+	}
+	if result.Usage.ReasoningTokens != 22 {
+		t.Fatalf("expected cumulative reasoning tokens, got %#v", result.Usage)
 	}
 }

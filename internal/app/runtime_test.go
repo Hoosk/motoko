@@ -860,6 +860,9 @@ func TestSlashCommandMetrics(t *testing.T) {
 	r.sesMgr.SetCurrentSession(session.New(r.sesMgr.WorkspaceID(), "/workspace"))
 	r.sesMgr.CurrentSession().TotalInputTokens = 1000
 	r.sesMgr.CurrentSession().TotalOutputTokens = 500
+	r.sesMgr.CurrentSession().TotalReasoningTokens = 125
+	r.sesMgr.CurrentSession().TotalCacheReadTokens = 60
+	r.sesMgr.CurrentSession().TotalCacheWriteTokens = 20
 	r.sesMgr.CurrentSession().TotalTokens = 1500
 	r.sesMgr.CurrentSession().TotalSystemStaticTokens = 500
 	r.sesMgr.CurrentSession().TotalSystemDynamicTokens = 300
@@ -867,10 +870,24 @@ func TestSlashCommandMetrics(t *testing.T) {
 	r.sesMgr.CurrentSession().TotalHistoryTokens = 100
 
 	r.sesMgr.CurrentSession().LastInputTokens = 500
+	r.sesMgr.CurrentSession().LastOutputTokens = 200
+	r.sesMgr.CurrentSession().LastReasoningTokens = 75
+	r.sesMgr.CurrentSession().LastCacheReadTokens = 25
+	r.sesMgr.CurrentSession().LastCacheWriteTokens = 10
 	r.sesMgr.CurrentSession().LastSystemStaticTokens = 250
 	r.sesMgr.CurrentSession().LastSystemDynamicTokens = 150
 	r.sesMgr.CurrentSession().LastToolsTokens = 50
 	r.sesMgr.CurrentSession().LastHistoryTokens = 50
+	r.sesMgr.CurrentSession().Turns = []session.TurnUsage{{
+		Turn:            1,
+		AgentLabel:      "fake:test",
+		InputTokens:     500,
+		OutputTokens:    200,
+		ReasoningTokens: 75,
+		TotalTokens:     700,
+		InputGrowth:     100,
+		Iterations:      []provider.Usage{{InputTokens: 400, OutputTokens: 75, TotalTokens: 475, ReasoningTokens: 25}, {InputTokens: 500, OutputTokens: 125, TotalTokens: 625, ReasoningTokens: 50}},
+	}}
 
 	resp = r.handleSlashCommand("/metrics", system.ContextInfo{})
 	if len(resp.Entries) == 0 {
@@ -885,6 +902,15 @@ func TestSlashCommandMetrics(t *testing.T) {
 	}
 	if !strings.Contains(text, "Cumulative Token Usage") {
 		t.Errorf("expected Cumulative section, got %q", text)
+	}
+	if !strings.Contains(text, "Recent Turn Trend") {
+		t.Errorf("expected recent turn trend, got %q", text)
+	}
+	if !strings.Contains(text, "Reasoning (Thinking) Tokens: 75") {
+		t.Errorf("expected last-turn reasoning tokens, got %q", text)
+	}
+	if !strings.Contains(text, "iter 2: in=500 out=125 reasoning=50 total=625 input_delta=+100") {
+		t.Errorf("expected per-iteration metrics, got %q", text)
 	}
 	if !strings.Contains(text, "System Prompt (Static):  500 (50.0% of input)") {
 		t.Errorf("expected static prompt breakdown, got %q", text)

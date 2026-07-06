@@ -425,9 +425,26 @@ func TestHandleMetricsWithSession(t *testing.T) {
 	deps := baseDeps()
 	deps.SessionFn = func() *session.Session {
 		return &session.Session{
-			TotalInputTokens:  1000,
-			TotalOutputTokens: 500,
-			TotalTokens:       1500,
+			LastInputTokens:       200,
+			LastOutputTokens:      80,
+			LastReasoningTokens:   20,
+			LastCacheReadTokens:   15,
+			LastCacheWriteTokens:  5,
+			TotalInputTokens:      1000,
+			TotalOutputTokens:     500,
+			TotalReasoningTokens:  120,
+			TotalCacheReadTokens:  60,
+			TotalCacheWriteTokens: 20,
+			TotalTokens:           1500,
+			Turns: []session.TurnUsage{{
+				Turn:            1,
+				InputTokens:     200,
+				OutputTokens:    80,
+				ReasoningTokens: 20,
+				TotalTokens:     280,
+				InputGrowth:     40,
+				Iterations:      []provider.Usage{{InputTokens: 160, OutputTokens: 30, TotalTokens: 190, ReasoningTokens: 10}, {InputTokens: 200, OutputTokens: 50, TotalTokens: 250, ReasoningTokens: 10}},
+			}},
 		}
 	}
 	d := newDispatcher(deps)
@@ -436,7 +453,7 @@ func TestHandleMetricsWithSession(t *testing.T) {
 		t.Fatal("expected metrics output")
 	}
 	text := resp.Entries[0].Text
-	for _, want := range []string{"Current Session Metrics", "Input Tokens", "Output Tokens", "Total Tokens"} {
+	for _, want := range []string{"Current Session Metrics", "Input Tokens", "Output Tokens", "Total Tokens", "Reasoning (Thinking) Tokens", "Recent Turn Trend", "iter 1:"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected %q in metrics, got: %s", want, text)
 		}
