@@ -212,9 +212,9 @@ func TestTimelineMouseContentCoordsRespectFrameOffsets(t *testing.T) {
 	m.SyncLayout(60, 12)
 
 	if _, _, ok := m.MouseContentCoords(0, 0); ok {
-		t.Fatalf("expected border area to be outside content")
+		t.Fatalf("expected padding area to be outside content")
 	}
-	x, y, ok := m.MouseContentCoords(2, 1)
+	x, y, ok := m.MouseContentCoords(1, 0)
 	if !ok {
 		t.Fatalf("expected first content cell to be addressable")
 	}
@@ -256,6 +256,40 @@ func TestTimelineSelectionStartsAfterCompactStartup(t *testing.T) {
 	y := assistantLine - int(m.model.Viewport.YOffset)
 	if !m.BeginSelection(0, y) {
 		t.Fatalf("expected selection to start after compact startup block")
+	}
+}
+
+func TestTimelineMouseDragSelectionCopiesText(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(60, 16)
+	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryAssistant, Text: "texto util"}}}})
+
+	assistantLine := lineWithSubstring(m.model.RenderLines, "texto util")
+	if assistantLine < 0 {
+		t.Fatalf("expected assistant line in render map")
+	}
+
+	pressY := assistantLine - int(m.model.Viewport.YOffset) + timeline.TimelineMouseOffsetY
+	pressX := timeline.TimelineMouseOffsetX + timeline.AssistantContentX
+
+	m.Update(tea.MouseMsg{X: pressX, Y: pressY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if !m.model.Selecting {
+		t.Fatalf("expected mouse press to begin selection")
+	}
+
+	m.Update(tea.MouseMsg{X: pressX + 5, Y: pressY, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
+	if !m.model.SelectionDragged {
+		t.Fatalf("expected mouse drag to extend selection")
+	}
+
+	cmd := m.Update(tea.MouseMsg{X: pressX + 5, Y: pressY, Action: tea.MouseActionRelease, Button: tea.MouseButtonNone})
+	if cmd == nil {
+		t.Fatalf("expected mouse release to produce copy command")
+	}
+
+	selected, ok := m.model.SelectedText()
+	if !ok || !strings.Contains(selected, "texto") {
+		t.Fatalf("expected selected text to include assistant content, got %q", selected)
 	}
 }
 

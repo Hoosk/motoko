@@ -621,7 +621,7 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 			break
 		}
 	}
-	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets))
+	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d on_demand=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets), len(info.OnDemandSignals))
 
 	if info.Path != "" {
 		agentsPath := filepath.Join(info.Path, "AGENTS.md")

@@ -119,12 +119,20 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 	}
 	hasTask := false
 	hasBash := false
+	hasPatch := false
+	hasInspect := false
 	for _, spec := range specs {
 		if spec.Name == "task" {
 			hasTask = true
 		}
 		if spec.Name == "bash" {
 			hasBash = true
+		}
+		if spec.Name == "patch" {
+			hasPatch = true
+		}
+		if spec.Name == "inspect" {
+			hasInspect = true
 		}
 	}
 
@@ -134,6 +142,20 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 			note += " For those, use the 'bash' tool instead."
 		}
 		note += " Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task."
+		lines = append(lines, note)
+	}
+	if hasPatch {
+		note := "  - patch: Supports three modes: SEARCH/REPLACE, unified diff (---/+++), and AST-based patches. AST format requires EXACT markers:\n"
+		note += "    <<<<<<< AST\n    <selector keys>\n    =======\n    <replacement>\n    >>>>>>> REPLACE\n"
+		note += "    Selector keys (key: value): type, name, query, capture, action, contains, index. Must provide 'type:' or 'query:'.\n"
+		note += "    For multi-line tree-sitter queries, use 'query:' on its own line followed by the query on subsequent lines.\n"
+		note += "    Example:\n    path/file.js\n    <<<<<<< AST\n    type: function_declaration\n    name: parseSize\n    =======\n    function parseSize() { return 0; }\n    >>>>>>> REPLACE"
+		lines = append(lines, note)
+	}
+	if hasInspect {
+		note := "  - inspect: PREFERRED way to access on-demand Tachikoma data. Use 'inspect <worker_name>' BEFORE falling back to read/grep/search when a background worker has on-demand signals.\n"
+		note += "    Valid worker names: GitTachikoma, CodeTachikoma, DiffTachikoma, SearchTachikoma, DependencyTachikoma.\n"
+		note += "    Usage: 'inspect GitTachikoma' for branch/commit info, 'inspect CodeTachikoma' for semantic index, 'inspect DiffTachikoma' for recent change symbols, 'inspect SearchTachikoma' for code snippets."
 		lines = append(lines, note)
 	}
 	lines = append(lines,
@@ -165,7 +187,7 @@ func buildDynamicPrompt(providerKind string, info system.ContextInfo) string {
 		"<context>",
 		"  The following context was prepared automatically. Use it before doing blind searches.",
 		"  Some background information might be summarized as 'available on-demand' to save space.",
-		"  If you see an on-demand signal, use your tools (read, grep, etc.) to fetch the specific details you need.",
+		"  If you see an on-demand signal, use the 'inspect' tool with the worker name (e.g., inspect DiffTachikoma) to fetch details; only fall back to read/grep if inspect is insufficient.",
 		"",
 		fmt.Sprintf("  [Workspace]: %s (%s)", info.Workspace, info.Path),
 		fmt.Sprintf("  [Git Status]: %s", info.GitSummary()),

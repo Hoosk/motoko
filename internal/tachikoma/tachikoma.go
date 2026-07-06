@@ -108,7 +108,7 @@ func (m *Manager) GetContextInfo() system.ContextInfo {
 				fullSummary := snapshot.Summary()
 				if len(fullSummary) > 500 {
 					info.OnDemandSignals[update.Name] = "Detailed semantic index of the codebase is ready."
-					info.SemanticSummary = "Codebase indexed (heavy). Use search/read tools for details."
+					info.SemanticSummary = "Codebase indexed (heavy). Use 'inspect CodeTachikoma' for details."
 				} else {
 					info.SemanticSummary = fullSummary
 					info.Signals[update.Name] = update.Status

@@ -114,3 +114,62 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 		t.Fatalf("expected input slice to remain unmodified, got %#v", messages)
 	}
 }
+
+func TestBuildSystemPromptIncludesPatchFormatNote(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace: "motoko",
+		Path:      "/tmp/motoko",
+	}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "patch", Summary: "Applies changes", Usage: "patch <path>"},
+	}, "")
+
+	if !strings.Contains(prompt, "<<<<<<< AST") {
+		t.Fatalf("prompt missing AST patch format markers: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Selector keys (key: value)") {
+		t.Fatalf("prompt missing AST selector keys documentation: %s", prompt)
+	}
+	if !strings.Contains(prompt, "type, name, query, capture, action, contains, index") {
+		t.Fatalf("prompt missing valid AST selector keys: %s", prompt)
+	}
+	if !strings.Contains(prompt, "function_declaration") {
+		t.Fatalf("prompt missing AST format example: %s", prompt)
+	}
+}
+
+func TestBuildSystemPromptIncludesInspectNote(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace: "motoko",
+		Path:      "/tmp/motoko",
+	}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "inspect", Summary: "Get Tachikoma data", Usage: "inspect <worker>"},
+	}, "")
+
+	if !strings.Contains(prompt, "PREFERRED way to access on-demand Tachikoma data") {
+		t.Fatalf("prompt missing inspect preference statement: %s", prompt)
+	}
+	if !strings.Contains(prompt, "GitTachikoma, CodeTachikoma, DiffTachikoma, SearchTachikoma, DependencyTachikoma") {
+		t.Fatalf("prompt missing valid inspect worker names: %s", prompt)
+	}
+	if !strings.Contains(prompt, "inspect CodeTachikoma") {
+		t.Fatalf("prompt missing inspect example for CodeTachikoma: %s", prompt)
+	}
+}
+
+func TestBuildDynamicPromptOnDemandSignalUsesInspect(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace:       "motoko",
+		Path:            "/tmp/motoko",
+		OnDemandSignals: map[string]string{"DiffTachikoma": "changes available"},
+	}
+	prompt := buildDynamicPrompt("default", info)
+
+	if !strings.Contains(prompt, "use the 'inspect' tool with the worker name") {
+		t.Fatalf("dynamic prompt should instruct use of inspect for on-demand signals: %s", prompt)
+	}
+	if strings.Contains(prompt, "use your tools (read, grep, etc.)") {
+		t.Fatalf("dynamic prompt should not use old generic tool instruction: %s", prompt)
+	}
+}

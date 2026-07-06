@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	TimelineMouseOffsetX = 2
-	TimelineMouseOffsetY = 1
+	TimelineMouseOffsetX = 1
+	TimelineMouseOffsetY = 0
 	AssistantContentX    = 2
 	ReasoningContentX    = 2
 	UserContentX         = 4

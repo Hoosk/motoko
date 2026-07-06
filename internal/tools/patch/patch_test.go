@@ -194,3 +194,75 @@ func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestParseASTSelectorErrorsIncludeFormatHints(t *testing.T) {
+	tests := []struct {
+		name    string
+		block   string
+		wantErr string
+	}{
+		{
+			name:    "invalid line without colon",
+			block:   "function parseSizeMeters(sizeStr) {",
+			wantErr: "invalid AST line",
+		},
+		{
+			name:    "invalid line with format hint",
+			block:   "just some text",
+			wantErr: "key: value",
+		},
+		{
+			name:    "unsupported key lists valid keys",
+			block:   "unknownkey: value",
+			wantErr: "unsupported AST key",
+		},
+		{
+			name:    "unsupported key lists valid keys explicitly",
+			block:   "unknownkey: value",
+			wantErr: "valid keys:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseASTSelector(tt.block)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q missing expected substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseASTPatchInputErrorMentionsValidMarkers(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "missing divider mentions exact match",
+			body: "<<<<<<< AST\ntype: function_declaration\n>>>>>>>> REPLACE",
+			want: "EXACTLY",
+		},
+		{
+			name: "wrong start marker lists options",
+			body: "<<<<<<< INVALID\ntype: function_declaration\n=======\ncode\n>>>>>>> REPLACE",
+			want: "<<<<<<< AST, <<<<<<< SEARCH, or use unified diff",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseASTPatchInput("test.js", tt.body)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error %q missing expected substring %q", err.Error(), tt.want)
+			}
+		})
+	}
+}

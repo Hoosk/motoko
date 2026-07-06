@@ -3,6 +3,7 @@ package tachikoma
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,5 +111,39 @@ func TestManagerNextReturnsPublishedUpdate(t *testing.T) {
 func TestMockTachikomaName(t *testing.T) {
 	if got := NewMockTachikoma("x").Name(); got != "x" {
 		t.Fatalf("unexpected mock tachikoma name %q", got)
+	}
+}
+
+func TestGetContextInfoCodeTachikomaHintUsesInspect(t *testing.T) {
+	mgr := NewManager()
+
+	langCounts := make(map[string]int)
+	for i := 0; i < 20; i++ {
+		langCounts["verylonglanguagenamethatforceslargesummary_"+string(rune('a'+i))] = 1000 + i
+	}
+
+	snapshot := &semantic.Snapshot{}
+	snapshot.Files = []semantic.FileSummary{{Path: "main.go", Language: "go"}}
+	snapshot.LanguageCounts = langCounts
+
+	u := Update{
+		Name:    "CodeTachikoma",
+		Status:  "ready",
+		Payload: snapshot,
+	}
+	mgr.mu.Lock()
+	mgr.state[u.Name] = u
+	mgr.mu.Unlock()
+
+	info := mgr.GetContextInfo()
+
+	if !strings.Contains(info.SemanticSummary, "inspect CodeTachikoma") {
+		t.Fatalf("CodeTachikoma semantic summary should mention 'inspect CodeTachikoma', got: %q", info.SemanticSummary)
+	}
+	if strings.Contains(info.SemanticSummary, "Use search/read") {
+		t.Fatalf("CodeTachikoma semantic summary should not mention old 'search/read' hint, got: %q", info.SemanticSummary)
+	}
+	if _, ok := info.OnDemandSignals["CodeTachikoma"]; !ok {
+		t.Fatalf("expected CodeTachikoma on-demand signal")
 	}
 }
