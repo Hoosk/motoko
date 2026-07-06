@@ -244,11 +244,12 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		ContextWindowFn: func() int { return r.contextWindow },
 	})
 	r.cplDeps = completions.Deps{
-		AgentNamesFn:      func() []string { return r.agOrch.AgentNames() },
-		SemanticFn:        func() *semantic.Index { return r.semantic },
-		InputModeFn:       func() types.InputMode { return r.inputMode },
-		ToolSuggestionsFn: func(prefix string) []tools.Spec { return r.ToolSuggestions(prefix) },
-		ActiveConfigFn:    func() (config.ProviderConfig, bool) { return r.config.Active() },
+		AgentNamesFn:          func() []string { return r.agOrch.AgentNames() },
+		SemanticFn:            func() *semantic.Index { return r.semantic },
+		InputModeFn:           func() types.InputMode { return r.inputMode },
+		ToolSuggestionsFn:     func(prefix string) []tools.Spec { return r.ToolSuggestions(prefix) },
+		ActiveConfigFn:        func() (config.ProviderConfig, bool) { return r.config.Active() },
+		ConfiguredProvidersFn: func() []config.ProviderConfig { return r.ConfiguredProviders() },
 	}
 
 	if r.config.Theme != "" {

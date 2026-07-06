@@ -13,11 +13,12 @@ import (
 
 func noopDeps() Deps {
 	return Deps{
-		AgentNamesFn:      func() []string { return nil },
-		SemanticFn:        func() *semantic.Index { return nil },
-		InputModeFn:       func() types.InputMode { return types.InputModeChat },
-		ToolSuggestionsFn: func(prefix string) []tools.Spec { return nil },
-		ActiveConfigFn:    func() (config.ProviderConfig, bool) { return config.ProviderConfig{}, false },
+		AgentNamesFn:          func() []string { return nil },
+		SemanticFn:            func() *semantic.Index { return nil },
+		InputModeFn:           func() types.InputMode { return types.InputModeChat },
+		ToolSuggestionsFn:     func(prefix string) []tools.Spec { return nil },
+		ActiveConfigFn:        func() (config.ProviderConfig, bool) { return config.ProviderConfig{}, false },
+		ConfiguredProvidersFn: func() []config.ProviderConfig { return nil },
 	}
 }
 
@@ -172,6 +173,76 @@ func TestCompletionsModelsUseSubcommand(t *testing.T) {
 	}
 	got := Completions(d, "/models use gpt")
 	want := []string{"/models use gpt-4.1", "/models use gpt-3.5-turbo"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsProviderSubcommand(t *testing.T) {
+	d := noopDeps()
+	d.ConfiguredProvidersFn = func() []config.ProviderConfig {
+		return []config.ProviderConfig{
+			{Name: "openai"},
+			{Name: "deepseek"},
+		}
+	}
+	got := Completions(d, "/provider ")
+	want := []string{"/provider list", "/provider add", "/provider use ", "/provider remove "}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsProviderSubcommandPrefix(t *testing.T) {
+	d := noopDeps()
+	got := Completions(d, "/provider u")
+	want := []string{"/provider use"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsProviderUseFiltersPrefix(t *testing.T) {
+	d := noopDeps()
+	d.ConfiguredProvidersFn = func() []config.ProviderConfig {
+		return []config.ProviderConfig{
+			{Name: "openai"},
+			{Name: "deepseek"},
+			{Name: "anthropic"},
+		}
+	}
+	got := Completions(d, "/provider use ")
+	want := []string{"/provider use openai", "/provider use deepseek", "/provider use anthropic"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsProviderUsePrefixFilter(t *testing.T) {
+	d := noopDeps()
+	d.ConfiguredProvidersFn = func() []config.ProviderConfig {
+		return []config.ProviderConfig{
+			{Name: "openai"},
+			{Name: "deepseek"},
+		}
+	}
+	got := Completions(d, "/provider use d")
+	want := []string{"/provider use deepseek"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestCompletionsProviderRemovePrefixFilter(t *testing.T) {
+	d := noopDeps()
+	d.ConfiguredProvidersFn = func() []config.ProviderConfig {
+		return []config.ProviderConfig{
+			{Name: "openai"},
+			{Name: "deepseek"},
+		}
+	}
+	got := Completions(d, "/provider remove o")
+	want := []string{"/provider remove openai"}
 	if !slicesEqual(got, want) {
 		t.Fatalf("expected %v, got %v", want, got)
 	}

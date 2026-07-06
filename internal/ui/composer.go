@@ -474,7 +474,7 @@ func shouldApplySuggestionOnEnter(current, suggestion string) bool {
 }
 
 func (m ComposerModel) Height() int {
-	height := m.textarea.Height() + 6 // base height: textarea(2) + suggestions(2) + chrome(4)
+	height := m.textarea.Height() + 2 // separator(1) + suggestions line(1)
 	if len(m.mentionSuggestions) > 0 {
 		// MarginTop(1) = 1 line
 		// Title "Mentions" = 1 line

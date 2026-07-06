@@ -175,16 +175,23 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		switch msg.Action {
 		case tea.MouseActionPress:
 			if msg.Button == tea.MouseButtonLeft {
-				if m.BeginSelection(msg.X, msg.Y) {
+				cx, cy, ok := m.MouseContentCoords(msg.X, msg.Y)
+				if !ok {
+					if m.CancelSelection() {
+						return nil
+					}
+				} else if m.BeginSelection(cx, cy) {
 					return nil
 				}
 			}
 		case tea.MouseActionMotion:
-			if m.UpdateSelection(msg.X, msg.Y) {
+			cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
+			if m.UpdateSelection(cx, cy) {
 				return nil
 			}
 		case tea.MouseActionRelease:
-			if cmd := m.EndSelection(msg.X, msg.Y); cmd != nil {
+			cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
+			if cmd := m.EndSelection(cx, cy); cmd != nil {
 				return cmd
 			}
 		}
