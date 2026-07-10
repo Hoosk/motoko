@@ -43,6 +43,9 @@ func (t *ActivateSkillTool) DynamicSpec(ctx ToolContext) Spec {
 func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
 	args = strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		args = jsonStr(parsed, "name", "skill", "skill_name", "skillName")
+	}
 	if args == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

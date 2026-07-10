@@ -38,6 +38,9 @@ func (t *WebSearchTool) Spec() Spec {
 
 func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
 	query := strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		query = jsonStr(parsed, "query", "search")
+	}
 	if query == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

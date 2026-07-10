@@ -52,6 +52,14 @@ func TestActivateSkillTool(t *testing.T) {
 		t.Errorf("expected case-insensitive output to contain skill body")
 	}
 
+	resJSON, err := tool.Run(context.Background(), `{"name":"test-skill"}`)
+	if err != nil {
+		t.Fatalf("failed JSON run: %v", err)
+	}
+	if !strings.Contains(resJSON.Output, "Test skill instructions body") {
+		t.Errorf("expected JSON output to contain skill body")
+	}
+
 	// Test run with empty args
 	_, errEmpty := tool.Run(context.Background(), "")
 	if errEmpty == nil {

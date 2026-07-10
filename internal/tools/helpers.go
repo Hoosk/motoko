@@ -2,16 +2,87 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
 )
+
+func parseJSONArgs(args string) map[string]any {
+	args = strings.TrimSpace(args)
+	if !strings.HasPrefix(args, "{") {
+		return nil
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		return nil
+	}
+	return parsed
+}
+
+func jsonStr(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		text, ok := value.(string)
+		if ok {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
+}
+
+func jsonRawStr(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		text, ok := value.(string)
+		if ok {
+			return text
+		}
+	}
+	return ""
+}
+
+func jsonInt(m map[string]any, keys ...string) (int, bool) {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		switch n := value.(type) {
+		case float64:
+			return int(n), true
+		case string:
+			i, err := strconv.Atoi(strings.TrimSpace(n))
+			if err == nil {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func jsonHas(m map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := m[key]; ok {
+			return true
+		}
+	}
+	return false
+}
 
 func resolveWorkspacePath(target string) (string, string, error) {
 	workspace, err := os.Getwd()

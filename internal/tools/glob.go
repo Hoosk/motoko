@@ -25,6 +25,9 @@ func (t *GlobTool) Spec() Spec {
 func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
 	pattern := strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		pattern = jsonStr(parsed, "pattern", "glob")
+	}
 	if pattern == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

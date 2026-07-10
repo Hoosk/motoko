@@ -160,6 +160,52 @@ func TestQuestionPopupSwitchesBetweenListAndCustomFocus(t *testing.T) {
 	}
 }
 
+func TestQuestionPopupKeepsAgentStreamPollingAlive(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.requestID = 7
+	m.agentStream = make(chan app.AgentStreamEvent, 1)
+	m.questionPopup.Open(&tools.PendingQuestion{Question: tools.Question{
+		Header:   "Decision",
+		Question: "Pick one",
+		Options:  []tools.QuestionOption{{Label: "one"}},
+	}})
+
+	updated, cmd := m.Update(AgentStreamBatchMsg{
+		RequestID: 7,
+		Events:    []app.AgentStreamEvent{{Kind: "assistant_delta", Content: "hola"}},
+		Done:      false,
+	})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected waitAgentStream to be re-armed while question popup is active")
+	}
+	if !m.questionPopup.active {
+		t.Fatal("expected question popup to remain active")
+	}
+}
+
+func TestQuestionPopupKeepsThinkingTickAlive(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.timeline.SetThinking(true)
+	m.footer.SetThinking(true)
+	m.questionPopup.Open(&tools.PendingQuestion{Question: tools.Question{
+		Header:   "Decision",
+		Question: "Pick one",
+		Options:  []tools.QuestionOption{{Label: "one"}},
+	}})
+
+	updated, cmd := m.Update(ThinkingTickMsg{})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected thinking tick to be re-armed while question popup is active")
+	}
+	if !m.questionPopup.active {
+		t.Fatal("expected question popup to remain active")
+	}
+}
+
 func TestModelMouseDragSelectionCopiesText(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 80

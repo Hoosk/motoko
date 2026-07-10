@@ -171,6 +171,45 @@ func TestReadToolReadsFileAndDirectory(t *testing.T) {
 	}
 }
 
+func TestReadToolParsesJSONArgs(t *testing.T) {
+	withTempWorkspace(t)
+	result, err := NewReadTool().Run(context.Background(), `{"path":"internal/system/context.go","offset":"1","limit":"2"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "package system") {
+		t.Fatalf("expected file contents from JSON args, got %q", result.Output)
+	}
+}
+
+func TestGlobGrepAndBashAcceptJSONArgs(t *testing.T) {
+	withTempWorkspace(t)
+
+	globResult, err := NewGlobTool().Run(context.Background(), `{"pattern":"internal/app/*.go"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(globResult.Output, "internal/app/runtime.go") {
+		t.Fatalf("expected glob JSON args to match runtime.go, got %q", globResult.Output)
+	}
+
+	grepResult, err := NewGrepTool().Run(context.Background(), `{"pattern":"ContextInfo","include":"internal/system/*.go"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(grepResult.Output, "internal/system/context.go") {
+		t.Fatalf("expected grep JSON args to match context.go, got %q", grepResult.Output)
+	}
+
+	bashResult, err := NewBashTool().Run(context.Background(), `{"command":"printf hola"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bashResult.Output != "hola" {
+		t.Fatalf("expected bash JSON args output hola, got %#v", bashResult)
+	}
+}
+
 func TestReadToolConcurrentInjectedInstructions(t *testing.T) {
 	root := withTempWorkspace(t)
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# agent guidance"), 0o644); err != nil {

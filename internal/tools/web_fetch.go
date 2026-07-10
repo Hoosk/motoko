@@ -32,6 +32,9 @@ func (t *WebFetchTool) Spec() Spec {
 
 func (t *WebFetchTool) Run(ctx context.Context, args string) (Result, error) {
 	targetURL := strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		targetURL = jsonStr(parsed, "url")
+	}
 	if targetURL == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

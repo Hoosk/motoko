@@ -61,6 +61,19 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("unexpected summary: %s", res.Summary)
 	}
 
+	// 3a. Write plan via JSON args
+	_, err = writeTool.Run(ctx, `{"filename":"json-plan.md","content":"JSON plan"}`)
+	if err != nil {
+		t.Fatalf("json write failed: %v", err)
+	}
+	res, err = readTool.Run(ctx, `{"filename":"json-plan.md"}`)
+	if err != nil {
+		t.Fatalf("json read failed: %v", err)
+	}
+	if res.Output != "JSON plan" {
+		t.Errorf("got %q, want %q", res.Output, "JSON plan")
+	}
+
 	// 3b. Preserve leading and trailing spaces in content
 	res, err = writeTool.Run(ctx, "notes.md  line with leading and trailing spaces  ")
 	if err != nil {
@@ -99,6 +112,14 @@ func TestBrainTools(t *testing.T) {
 	}
 	if !strings.Contains(res.Summary, "read from line 2") {
 		t.Errorf("unexpected summary: %s", res.Summary)
+	}
+
+	res, err = readTool.Run(ctx, `{"filename":"multi.md","offset":2,"limit":2}`)
+	if err != nil {
+		t.Fatalf("json paginated read failed: %v", err)
+	}
+	if res.Output != expectedOutput {
+		t.Errorf("json read got %q, want %q", res.Output, expectedOutput)
 	}
 
 	// 5. List files

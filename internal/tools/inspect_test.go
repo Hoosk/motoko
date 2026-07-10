@@ -98,4 +98,30 @@ func TestInspectTool_Run(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("WorkerFoundViaJSONArgs", func(t *testing.T) {
+		mgr := tachikoma.NewManager()
+		mock := &mockDepTachikoma{payload: tachikoma.ProjectDependencies{}}
+		mgr.Add(mock)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		mgr.Start(ctx)
+		for i := 0; i < 50; i++ {
+			if _, ok := mgr.Query("DependencyTachikoma"); ok {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cancel()
+		mgr.Wait()
+
+		tool := NewInspectTool(mgr)
+		res, err := tool.Run(context.Background(), `{"worker_name":"DependencyTachikoma"}`)
+		if err != nil {
+			t.Fatalf("unexpected error running inspect tool with JSON args: %v", err)
+		}
+		if !strings.Contains(res.Output, "Worker: DependencyTachikoma") {
+			t.Fatalf("expected inspected worker output, got:\n%s", res.Output)
+		}
+	})
 }

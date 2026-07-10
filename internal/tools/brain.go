@@ -32,6 +32,33 @@ func (t *BrainWriteTool) Spec() Spec {
 
 func (t *BrainWriteTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
+	if parsed := parseJSONArgs(args); parsed != nil {
+		filename := jsonStr(parsed, "filename", "file", "name")
+		content := jsonRawStr(parsed, "content", "text", "body")
+		if filename == "" || content == "" {
+			return Result{}, fmt.Errorf("usage: brain_write <filename> <content>")
+		}
+
+		br := GetBrain(ctx)
+		if br == nil {
+			br = t.provider.GetBrain()
+		}
+		if br == nil {
+			return Result{}, fmt.Errorf("session brain not initialized")
+		}
+
+		err := br.Write(filename, content)
+		if err != nil {
+			return Result{}, err
+		}
+
+		return Result{
+			Spec:    t.Spec(),
+			Summary: fmt.Sprintf("Successfully wrote to brain file %s", filename),
+			Output:  fmt.Sprintf("Wrote %d bytes to %s", len(content), filename),
+		}, nil
+	}
+
 	args = strings.TrimLeft(args, " \t\n\r")
 	idx := strings.IndexFunc(args, func(c rune) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
@@ -95,6 +122,69 @@ func (t *BrainReadTool) Spec() Spec {
 
 func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
+	if parsed := parseJSONArgs(args); parsed != nil {
+		filename := jsonStr(parsed, "filename", "file", "name")
+		if filename == "" {
+			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+		}
+
+		br := GetBrain(ctx)
+		if br == nil {
+			br = t.provider.GetBrain()
+		}
+		if br == nil {
+			return Result{}, fmt.Errorf("session brain not initialized")
+		}
+
+		content, err := br.Read(filename)
+		if err != nil {
+			return Result{}, err
+		}
+
+		offset := 1
+		limit := 200
+		if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
+			if value < 1 {
+				return Result{}, fmt.Errorf("invalid offset: %d", value)
+			}
+			offset = value
+		}
+		if value, ok := jsonInt(parsed, "limit", "lines", "count"); ok {
+			if value < 1 {
+				return Result{}, fmt.Errorf("invalid limit: %d", value)
+			}
+			limit = value
+		}
+
+		if offset == 1 && limit == 200 && !jsonHas(parsed, "offset", "line", "start") && !jsonHas(parsed, "limit", "lines", "count") {
+			return Result{
+				Spec:    t.Spec(),
+				Summary: fmt.Sprintf("Successfully read brain file %s", filename),
+				Output:  content,
+			}, nil
+		}
+
+		lines := strings.Split(content, "\n")
+		var paginatedLines []string
+		for i := offset - 1; i < len(lines) && len(paginatedLines) < limit; i++ {
+			paginatedLines = append(paginatedLines, fmt.Sprintf("%d: %s", i+1, lines[i]))
+		}
+
+		if len(paginatedLines) == 0 {
+			return Result{
+				Spec:    t.Spec(),
+				Summary: fmt.Sprintf("No visible content in %s from line %d.", filename, offset),
+				Output:  "",
+			}, nil
+		}
+
+		return Result{
+			Spec:    t.Spec(),
+			Summary: fmt.Sprintf("Successfully read brain file %s from line %d", filename, offset),
+			Output:  strings.Join(paginatedLines, "\n"),
+		}, nil
+	}
+
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)

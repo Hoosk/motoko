@@ -181,6 +181,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 	if m.questionPopup.active {
+		switch msg := msg.(type) {
+		case AgentStreamBatchMsg:
+			if msg.RequestID == m.requestID {
+				m.timeline.ApplyStreamBatch(msg.Events)
+				if msg.Done && m.agentBuffer != nil {
+					m.agentBuffer.mu.Lock()
+					m.agentBuffer.done = true
+					m.agentBuffer.mu.Unlock()
+				}
+				if !msg.Done && m.agentStream != nil {
+					cmds = append(cmds, m.waitAgentStream(m.agentStream, msg.RequestID))
+				} else if msg.Done {
+					m.agentStream = nil
+				}
+			}
+			return m, tea.Batch(cmds...)
+		case ThinkingTickMsg:
+			if m.timeline.model.Thinking || m.footer.thinking {
+				cmds = append(cmds, m.thinkingTick())
+			}
+			m.timeline.Update(msg)
+			m.footer.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
 		if done := m.questionPopup.Update(msg); done {
 			cmds = append(cmds, m.waitQuestion())
 		}
@@ -432,7 +456,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionsMsg:
 		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
 
-		case SessionLoadedMsg:
+	case SessionLoadedMsg:
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
 		} else {
