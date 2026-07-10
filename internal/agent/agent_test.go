@@ -64,9 +64,11 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 
 func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 	var capturedMessages []provider.ConversationItem
+	var capturedSystemPrompt string
 	var capturedTools provider.ToolSet
 	p := &fakeProviderClient{summary: "fake:capture", models: []provider.ModelInfo{{ID: "capture"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 		capturedMessages = append([]provider.ConversationItem(nil), messages...)
+		capturedSystemPrompt = systemPrompt
 		capturedTools = tools
 		return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
 	}}
@@ -90,8 +92,14 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 	if !strings.Contains(capturedMessages[1].Content, "<environment>") {
 		t.Fatalf("expected dynamic tail to include environment context, got %q", capturedMessages[1].Content)
 	}
-	if !strings.Contains(capturedMessages[1].Content, "PLAN MODE") {
-		t.Fatalf("expected dynamic tail to include active mode fragment/context, got %q", capturedMessages[1].Content)
+	if strings.Contains(capturedMessages[1].Content, "PLAN MODE") {
+		t.Fatalf("mode fragment should not be in the dynamic tail, got %q", capturedMessages[1].Content)
+	}
+	if !strings.Contains(capturedSystemPrompt, "PLAN MODE") {
+		t.Fatalf("expected system prompt to include active mode fragment, got %q", capturedSystemPrompt)
+	}
+	if !strings.Contains(capturedSystemPrompt, "<operational_mode>") {
+		t.Fatalf("expected system prompt to wrap mode fragment in <operational_mode> block, got %q", capturedSystemPrompt)
 	}
 	if len(capturedTools.Local) != len(specs) {
 		t.Fatalf("expected captured tool set to match computed specs")

@@ -10,6 +10,28 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
+func activeModeFragment(activeMode string) string {
+	switch {
+	case strings.EqualFold(activeMode, "plan"):
+		return system.LoadFragment("plan_active")
+	case strings.EqualFold(activeMode, "build"):
+		return system.LoadFragment("build_switch")
+	default:
+		return ""
+	}
+}
+
+func thinkingVerbosityFragment(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "concise":
+		return system.LoadFragment("thinking_concise")
+	case "caveman":
+		return system.LoadFragment("thinking_caveman")
+	default:
+		return system.LoadFragment("thinking_default")
+	}
+}
+
 // buildSystemPrompt assembles the stable, cache-friendly system prompt.
 func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
@@ -73,6 +95,14 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 
 	if agentSystem != "" {
 		lines = append(lines, agentSystem, "")
+	}
+
+	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
+		lines = append(lines, "<operational_mode>", modeFragment, "</operational_mode>", "")
+	}
+
+	if verbosityFragment := thinkingVerbosityFragment(info.ThinkingVerbosity); verbosityFragment != "" {
+		lines = append(lines, "<reasoning_style>", verbosityFragment, "</reasoning_style>", "")
 	}
 
 	if len(info.AvailableSkills) > 0 {

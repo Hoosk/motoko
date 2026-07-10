@@ -40,3 +40,54 @@ func TestBuildSystemPromptNoAgentModeWhenEmpty(t *testing.T) {
 		t.Fatalf("did not expect agent system content when agentSystem is empty")
 	}
 }
+
+func TestBuildSystemPromptInjectsOperationalModeForBuild(t *testing.T) {
+	info := system.ContextInfo{Workspace: "test", Path: "/tmp/test", ActiveMode: "build"}
+	prompt := buildSystemPrompt("default", info, nil, "")
+	if !strings.Contains(prompt, "<operational_mode>") {
+		t.Fatalf("expected <operational_mode> block in system prompt, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "OPERATIONAL DIRECTIVE — BUILD MODE") {
+		t.Fatalf("expected build_switch content in system prompt, got:\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPromptInjectsOperationalModeForPlan(t *testing.T) {
+	info := system.ContextInfo{Workspace: "test", Path: "/tmp/test", ActiveMode: "plan"}
+	prompt := buildSystemPrompt("default", info, nil, "")
+	if !strings.Contains(prompt, "<operational_mode>") {
+		t.Fatalf("expected <operational_mode> block in system prompt, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "OPERATIONAL DIRECTIVE — PLAN MODE") {
+		t.Fatalf("expected plan_active content in system prompt, got:\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPromptInjectsReasoningStyle(t *testing.T) {
+	cases := []struct {
+		verbosity string
+		contains  string
+	}{
+		{"concise", "REASONING STYLE — concise"},
+		{"caveman", "REASONING STYLE — caveman"},
+		{"normal", "REASONING STYLE — default"},
+		{"", "REASONING STYLE — default"},
+		{"unknown_mode", "REASONING STYLE — default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.verbosity, func(t *testing.T) {
+			info := system.ContextInfo{
+				Workspace:         "test",
+				Path:              "/tmp/test",
+				ThinkingVerbosity: tc.verbosity,
+			}
+			prompt := buildSystemPrompt("default", info, nil, "")
+			if !strings.Contains(prompt, "<reasoning_style>") {
+				t.Fatalf("expected <reasoning_style> block in system prompt for verbosity=%q, got:\n%s", tc.verbosity, prompt)
+			}
+			if !strings.Contains(prompt, tc.contains) {
+				t.Fatalf("expected verbosity=%q to inject %q, got:\n%s", tc.verbosity, tc.contains, prompt)
+			}
+		})
+	}
+}

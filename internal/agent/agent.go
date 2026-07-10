@@ -332,18 +332,6 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
 	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
-	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
-		if dynamicPrompt != "" {
-			dynamicPrompt += "\n\n"
-		}
-		dynamicPrompt += modeFragment
-	}
-	if verbosityFragment := thinkingVerbosityFragment(info.ThinkingVerbosity); verbosityFragment != "" {
-		if dynamicPrompt != "" {
-			dynamicPrompt += "\n\n"
-		}
-		dynamicPrompt += verbosityFragment
-	}
 	providerMessages := append([]provider.ConversationItem(nil), messages...)
 	if dynamicPrompt != "" {
 		providerMessages = append(providerMessages, provider.UserText(dynamicPrompt))
@@ -390,28 +378,6 @@ func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages 
 	resp.Usage.HistoryChars = historySize
 
 	return resp, nil
-}
-
-func activeModeFragment(activeMode string) string {
-	switch {
-	case strings.EqualFold(activeMode, "plan"):
-		return system.LoadFragment("plan_active")
-	case strings.EqualFold(activeMode, "build"):
-		return system.LoadFragment("build_switch")
-	default:
-		return ""
-	}
-}
-
-func thinkingVerbosityFragment(level string) string {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "concise":
-		return system.LoadFragment("thinking_concise")
-	case "caveman":
-		return system.LoadFragment("thinking_caveman")
-	default:
-		return system.LoadFragment("thinking_normal")
-	}
 }
 
 func toolSet(specs []tools.Spec) provider.ToolSet {
