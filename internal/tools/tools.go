@@ -60,6 +60,7 @@ func NewRegistry() *Registry {
 	r.Register(NewGlobTool())
 	r.Register(NewGrepTool())
 	r.Register(NewBashTool())
+	r.Register(NewWriteTool())
 	r.Register(NewPatchTool())
 	r.Register(NewWebSearchTool())
 	r.Register(NewWebFetchTool())
@@ -164,7 +165,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 // IsWriteTool returns true if the tool modifies the codebase.
 func IsWriteTool(name string) bool {
 	n := strings.ToLower(name)
-	return n == toolNameBash || n == "patch"
+	return n == toolNameBash || n == "patch" || n == "write"
 }
 
 // Registry filtering for sandboxing
