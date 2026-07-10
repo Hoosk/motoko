@@ -153,7 +153,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 	f, err := os.CreateTemp("", "motoko-tool-output-*.txt")
 	if err == nil {
 		_, _ = f.WriteString(output)
-		f.Close()
+		_ = f.Close()
 		suffix := fmt.Sprintf("\n...[output truncated. Full output saved to %s]", f.Name())
 		return output[:maxOutput] + suffix
 	}

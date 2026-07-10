@@ -936,7 +936,7 @@ func TestSchedulePersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected persisted schedule content: %q", content)
 	}
 
-	parsed := parseScheduleBrain(content)
+	parsed := scheduleman.ParseScheduleBrain(content)
 	if len(parsed) != 1 {
 		t.Fatalf("expected one parsed schedule, got %#v", parsed)
 	}
@@ -960,7 +960,7 @@ func TestLoadSessionRestoresSchedulesFromBrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := formatScheduleBrain([]scheduleman.Definition{{ID: "sched-7", Instruction: "run tests", Interval: time.Minute}})
+	content := scheduleman.FormatScheduleBrain([]scheduleman.Definition{{ID: "sched-7", Instruction: "run tests", Interval: time.Minute}})
 	if err := b.Write("schedule", content); err != nil {
 		t.Fatal(err)
 	}

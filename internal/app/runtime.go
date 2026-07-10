@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -520,7 +519,7 @@ func (r *Runtime) restoreSchedules() {
 	if err != nil {
 		return
 	}
-	r.scheduleMgr.Restore(parseScheduleBrain(content))
+	r.scheduleMgr.Restore(scheduleman.ParseScheduleBrain(content))
 }
 
 func (r *Runtime) persistSchedules(defs []scheduleman.Definition) {
@@ -531,69 +530,7 @@ func (r *Runtime) persistSchedules(defs []scheduleman.Definition) {
 		_ = r.sesMgr.Brain().Delete("schedule")
 		return
 	}
-	_ = r.sesMgr.Brain().Write("schedule", formatScheduleBrain(defs))
-}
-
-func formatScheduleBrain(defs []scheduleman.Definition) string {
-	type persistedSchedule struct {
-		ID          string `json:"id"`
-		Instruction string `json:"instruction"`
-		Interval    string `json:"interval"`
-		OneShot     bool   `json:"one_shot,omitempty"`
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# Schedule\n")
-	for _, def := range defs {
-		encoded, err := json.Marshal(persistedSchedule{
-			ID:          def.ID,
-			Instruction: def.Instruction,
-			Interval:    def.Interval.String(),
-			OneShot:     def.OneShot,
-		})
-		if err != nil {
-			continue
-		}
-		sb.Write(encoded)
-		sb.WriteByte('\n')
-	}
-	return sb.String()
-}
-
-func parseScheduleBrain(content string) []scheduleman.Definition {
-	type persistedSchedule struct {
-		ID          string `json:"id"`
-		Instruction string `json:"instruction"`
-		Interval    string `json:"interval"`
-		OneShot     bool   `json:"one_shot,omitempty"`
-	}
-
-	lines := strings.Split(content, "\n")
-	defs := make([]scheduleman.Definition, 0)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		var persisted persistedSchedule
-		if err := json.Unmarshal([]byte(line), &persisted); err != nil {
-			continue
-		}
-		if strings.TrimSpace(persisted.ID) == "" || strings.TrimSpace(persisted.Instruction) == "" {
-			continue
-		}
-		interval, err := time.ParseDuration(strings.TrimSpace(persisted.Interval))
-		if err != nil {
-			continue
-		}
-		defs = append(defs, scheduleman.Definition{
-			ID:          strings.TrimSpace(persisted.ID),
-			Instruction: strings.TrimSpace(persisted.Instruction),
-			Interval:    interval,
-			OneShot:     persisted.OneShot,
-		})
-	}
-	return defs
+	_ = r.sesMgr.Brain().Write("schedule", scheduleman.FormatScheduleBrain(defs))
 }
 
 func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {

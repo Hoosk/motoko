@@ -54,7 +54,7 @@ func (u *Updater) Update(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("download request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned status %s", resp.Status)
@@ -67,7 +67,7 @@ func (u *Updater) Update(ctx context.Context) error {
 	}
 	tmpPath := tmpFile.Name()
 	defer func() {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 	}()
 
@@ -76,7 +76,7 @@ func (u *Updater) Update(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("init gzip reader: %w", err)
 	}
-	defer gzipReader.Close()
+	defer func() { _ = gzipReader.Close() }()
 
 	tarReader := tar.NewReader(gzipReader)
 	found := false
