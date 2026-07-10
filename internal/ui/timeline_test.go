@@ -214,7 +214,7 @@ func TestTimelineMouseContentCoordsRespectFrameOffsets(t *testing.T) {
 	if _, _, ok := m.MouseContentCoords(0, 0); ok {
 		t.Fatalf("expected padding area to be outside content")
 	}
-	x, y, ok := m.MouseContentCoords(1, 0)
+	x, y, ok := m.MouseContentCoords(1, 1)
 	if !ok {
 		t.Fatalf("expected first content cell to be addressable")
 	}

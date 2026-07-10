@@ -36,12 +36,6 @@ func (d *DiffTachikoma) Name() string {
 }
 
 func (d *DiffTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
-	ticker := time.NewTicker(d.interval)
-	defer ticker.Stop()
-
-	// Reactive watching
-	events, _ := WatchHelper(ctx, []string{"."}, 1*time.Second)
-
 	refresh := func() {
 		diff, err := d.computeSemanticDiff(ctx)
 		var status string
@@ -61,19 +55,7 @@ func (d *DiffTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 		publish(Update{Name: d.Name(), Status: status, Payload: payload})
 	}
 
-	// Initial check
-	refresh()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			refresh()
-		case <-events:
-			refresh()
-		}
-	}
+	return runRefreshLoop(ctx, d.interval, []string{"."}, time.Second, refresh)
 }
 
 func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, error) {

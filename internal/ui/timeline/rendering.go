@@ -183,5 +183,5 @@ func (m *Model) ClampMouseContentCoords(x, y int) (int, int) {
 	if m.Viewport.Width <= 0 || m.Viewport.Height <= 0 {
 		return 0, 0
 	}
-	return clamp(x, 0, m.Viewport.Width-1), clamp(y, 0, m.Viewport.Height-1)
+	return clamp(x, m.Viewport.Width-1), clamp(y, m.Viewport.Height-1)
 }

@@ -151,10 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.lastCtrlC = time.Now()
-			m.notificationShow = true
-			m.notificationText = "Press Ctrl+C again to exit"
-			m.notificationTime = time.Now()
-			return m, m.hideNotification()
+			return m, m.showNotification("Press Ctrl+C again to exit")
 		}
 	}
 
@@ -223,28 +220,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CopySelectionMsg:
 		if msg.Err == nil {
-			m.notificationShow = true
-			m.notificationText = "Copied to clipboard"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Copied to clipboard"))
 		} else {
-			m.notificationShow = true
-			m.notificationText = "Copy failed: " + msg.Err.Error()
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Copy failed: "+msg.Err.Error()))
 		}
 
 	case NotificationMsg:
-		m.notificationShow = true
-		m.notificationText = msg.Text
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification(msg.Text))
 
 	case UpdateAvailableMsg:
-		m.notificationShow = true
-		m.notificationText = "⬆ " + msg.Info.NewVersion + " available — motoko --update"
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("⬆ "+msg.Info.NewVersion+" available — motoko --update"))
 
 	case hideNotificationMsg:
 		if time.Since(m.notificationTime) >= 3*time.Second {
@@ -447,7 +432,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionsMsg:
 		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
 
-	case SessionLoadedMsg:
+		case SessionLoadedMsg:
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
 		} else {
@@ -457,10 +442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeline.appendEntry(entry)
 			}
 			m.timeline.renderMessages()
-			m.notificationShow = true
-			m.notificationText = "Session loaded"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Session loaded"))
 		}
 
 	case CompactResultMsg:
@@ -472,23 +454,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeline.appendEntry(entry)
 			}
 			m.timeline.renderMessages()
-			m.notificationShow = true
-			m.notificationText = "Session compacted"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Session compacted"))
 		}
 
 	case AgentChangedMsg:
-		m.notificationShow = true
-		m.notificationText = "Agent switched to " + msg.Name
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("Agent switched to "+msg.Name))
 
 	case ModelChangedMsg:
-		m.notificationShow = true
-		m.notificationText = "Model switched to " + msg.Model
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("Model switched to "+msg.Model))
 
 	case PaletteSelectedMsg:
 		if msg.SessionID != "" {
@@ -512,13 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showTools = true
 			case "ctrl+s":
 				if _, allowed := m.sidebarLayout(); allowed {
-					m.showSidebar = !m.showSidebar
-					if m.showSidebar {
-						m.sidebarPref = sidebarForceShow
-					} else {
-						m.sidebarPref = sidebarForceHide
-					}
-					m.SyncLayout()
+					m.toggleSidebar()
 				}
 			case "cancel-request":
 				if m.timeline.model.Thinking && m.cancelCurrent != nil {
@@ -542,10 +509,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.queueFocus = false
 				return m, nil
 			case keyUp, keyCtrlP:
-				m.queueSel = clamp(m.queueSel-1, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel-1, max(0, len(m.promptQueue)-1))
 				return m, nil
 			case keyDown, keyCtrlN:
-				m.queueSel = clamp(m.queueSel+1, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel+1, max(0, len(m.promptQueue)-1))
 				return m, nil
 			case "backspace", "delete":
 				m.removeQueuedAt(m.queueSel)
@@ -576,7 +543,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+q":
 			if len(m.promptQueue) > 0 {
 				m.queueFocus = !m.queueFocus
-				m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
 				return m, nil
 			}
 		case "ctrl+m":
@@ -586,19 +553,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.listSessions())
 		case "ctrl+s", "alt+s":
 			if _, allowed := m.sidebarLayout(); !allowed {
-				m.notificationShow = true
-				m.notificationText = "Sidebar disabled: terminal width too small (min 40)"
-				m.notificationTime = time.Now()
-				cmds = append(cmds, m.hideNotification())
+				cmds = append(cmds, m.showNotification("Sidebar disabled: terminal width too small (min 40)"))
 			} else {
-				if m.showSidebar {
-					m.sidebarPref = sidebarForceHide
-					m.showSidebar = false
-				} else {
-					m.sidebarPref = sidebarForceShow
-					m.showSidebar = true
-				}
-				m.SyncLayout()
+				m.toggleSidebar()
 			}
 		case "ctrl+a":
 			m.modePopup.Open(m.runtime)
@@ -619,10 +576,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.timeline.model.ShowReasoning {
 				stateStr = "visible"
 			}
-			m.notificationShow = true
-			m.notificationText = "Reasoning is now " + stateStr
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Reasoning is now "+stateStr))
 		}
 	}
 	// 4. Delegate to standard components
@@ -787,7 +741,7 @@ func (m Model) View() string {
 		popup := widePopupStyle.Render(m.commandPalette.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.showTools {
-		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
+		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs()))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
@@ -807,7 +761,7 @@ func (m Model) View() string {
 			BorderForeground(styles.MainNeon).
 			Render(styles.BoldNeonStyle.Render("✓ ") +
 				styles.WhiteStyle.Render(m.notificationText))
-		base = overlayBase(base, toast, m.width, m.height)
+		base = overlayBase(base, toast, m.width)
 	}
 
 	lines := strings.Split(base, "\n")
@@ -898,7 +852,7 @@ func (m Model) paletteContext() paletteContext {
 
 func (m *Model) enqueuePrompt(prompt string) {
 	m.promptQueue = append(m.promptQueue, prompt)
-	m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+	m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
 }
 
 func (m *Model) dequeuePrompt() (string, bool) {
@@ -913,7 +867,7 @@ func (m *Model) dequeuePrompt() (string, bool) {
 		m.queueSel = 0
 		m.queueFocus = false
 	} else {
-		m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+		m.queueSel = clamp(m.queueSel, len(m.promptQueue)-1)
 	}
 	return prompt, true
 }
@@ -1003,19 +957,37 @@ func (m *Model) removeQueuedAt(index int) {
 		m.queueFocus = false
 		return
 	}
-	m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+	m.queueSel = clamp(m.queueSel, len(m.promptQueue)-1)
 }
 
 func (m *Model) moveQueued(index, delta int) {
 	if index < 0 || index >= len(m.promptQueue) {
 		return
 	}
-	target := clamp(index+delta, 0, len(m.promptQueue)-1)
+	target := clamp(index+delta, len(m.promptQueue)-1)
 	if target == index {
 		return
 	}
 	m.promptQueue[index], m.promptQueue[target] = m.promptQueue[target], m.promptQueue[index]
 	m.queueSel = target
+}
+
+func (m *Model) showNotification(text string) tea.Cmd {
+	m.notificationShow = true
+	m.notificationText = text
+	m.notificationTime = time.Now()
+	return m.hideNotification()
+}
+
+func (m *Model) toggleSidebar() {
+	if m.showSidebar {
+		m.sidebarPref = sidebarForceHide
+		m.showSidebar = false
+	} else {
+		m.sidebarPref = sidebarForceShow
+		m.showSidebar = true
+	}
+	m.SyncLayout()
 }
 
 func (m Model) queuePanelHeight(width int) int {

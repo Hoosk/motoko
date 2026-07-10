@@ -273,8 +273,8 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 	})
 	aClient := client.(*anthropicClient)
 	sdkClient := sdk.NewClient(
-		option.WithAPIKey(aClient.apiKey),
-		option.WithBaseURL(aClient.baseURL),
+		option.WithAPIKey(aClient.APIKey()),
+		option.WithBaseURL(aClient.BaseURL()),
 		option.WithHTTPClient(httpClient),
 	)
 	aClient.sdkClient = &sdkClient
@@ -309,8 +309,8 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 		}, nil
 	})}
 	sdkClientFallback := sdk.NewClient(
-		option.WithAPIKey(aClientFallback.apiKey),
-		option.WithBaseURL(aClientFallback.baseURL),
+		option.WithAPIKey(aClientFallback.APIKey()),
+		option.WithBaseURL(aClientFallback.BaseURL()),
 		option.WithHTTPClient(fallbackHTTPClient),
 	)
 	aClientFallback.sdkClient = &sdkClientFallback

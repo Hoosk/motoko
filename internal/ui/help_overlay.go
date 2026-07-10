@@ -137,7 +137,7 @@ func (h helpOverlayState) renderBody(lines []string) string {
 		return styles.PopupMutedStyle.Render("Nothing to show.")
 	}
 	maxOffset := max(0, len(lines)-h.viewHeight)
-	offset := clamp(h.offset, 0, maxOffset)
+	offset := clamp(h.offset, maxOffset)
 	end := min(len(lines), offset+h.viewHeight)
 	visible := lines[offset:end]
 	if offset > 0 {

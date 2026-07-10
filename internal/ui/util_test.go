@@ -15,7 +15,7 @@ func TestUtilityHelpers(t *testing.T) {
 	if got := trimLastRune("hola"); got != "hol" {
 		t.Fatalf("unexpected trimLastRune result %q", got)
 	}
-	if got := clamp(10, 0, 5); got != 5 {
+	if got := clamp(10, 5); got != 5 {
 		t.Fatalf("unexpected clamp result %d", got)
 	}
 	if got := stripANSI("\x1b[31mboom\x1b[0m"); got != "boom" {
@@ -33,7 +33,7 @@ func TestRenderHelpers(t *testing.T) {
 	if !strings.Contains(tachikomaList, "Git") || !strings.Contains(tachikomaList, "clean") {
 		t.Fatalf("unexpected tachikoma list %q", tachikomaList)
 	}
-	palette := renderToolPalette(specs, map[string]string{"Git": "clean"})
+	palette := renderToolPalette(specs)
 	if !strings.Contains(palette, "read") {
 		t.Fatalf("expected tool palette content, got %q", palette)
 	}

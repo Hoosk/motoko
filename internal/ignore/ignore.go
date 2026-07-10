@@ -171,10 +171,10 @@ const maxGitIgnoreWalkDepth = 6
 // loadGitIgnoreFiles walks the workspace tree and parses every .gitignore
 // file found up to maxGitIgnoreWalkDepth deep.
 func (m *Matcher) loadGitIgnoreFiles(root string) {
-	m.walkForGitIgnore(root, root, "", 0)
+	m.walkForGitIgnore(root, "", 0)
 }
 
-func (m *Matcher) walkForGitIgnore(root, dir, relBase string, depth int) {
+func (m *Matcher) walkForGitIgnore(dir, relBase string, depth int) {
 	if depth > maxGitIgnoreWalkDepth {
 		return
 	}
@@ -198,7 +198,7 @@ func (m *Matcher) walkForGitIgnore(root, dir, relBase string, depth int) {
 		if relBase != "" {
 			childRel = relBase + "/" + name
 		}
-		m.walkForGitIgnore(root, filepath.Join(dir, name), childRel, depth+1)
+		m.walkForGitIgnore(filepath.Join(dir, name), childRel, depth+1)
 	}
 }
 

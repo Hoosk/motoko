@@ -21,11 +21,8 @@ func init() {
 }
 
 type anthropicClient struct {
+	provider.BaseClient
 	sdkClient          *sdk.Client
-	baseURL            string
-	apiKey             string
-	model              string
-	providerName       string
 	thinkingBudget     int
 	mu                 sync.Mutex
 	capabilitiesLoaded bool
@@ -38,10 +35,7 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 	model := strings.TrimSpace(cfg.Model)
 
 	c := &anthropicClient{
-		baseURL:        baseURL,
-		apiKey:         apiKey,
-		model:          model,
-		providerName:   cfg.Name,
+		BaseClient:     provider.NewBaseClient(cfg.Name, baseURL, apiKey, model),
 		thinkingBudget: cfg.ThinkingBudget,
 	}
 	sdkClient := sdk.NewClient(
@@ -51,36 +45,6 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 	c.sdkClient = &sdkClient
 	return c
 }
-
-func (c *anthropicClient) Configured() bool {
-	return c.baseURL != "" && c.apiKey != "" && c.model != ""
-}
-
-func (c *anthropicClient) ConfigurationError() error {
-	if c.baseURL == "" {
-		return fmt.Errorf("provider not configured: empty base URL")
-	}
-	if c.apiKey == "" {
-		return fmt.Errorf("provider not configured: empty API Key")
-	}
-	if c.model == "" {
-		return fmt.Errorf("provider not configured: model not specified")
-	}
-	return nil
-}
-
-func (c *anthropicClient) listReady() bool {
-	return c.baseURL != "" && c.apiKey != ""
-}
-
-func (c *anthropicClient) ProviderKind() string {
-	return c.providerName
-}
-
-func (c *anthropicClient) Summary() string {
-	return fmt.Sprintf("%s:%s", c.providerName, c.model)
-}
-
 func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
 	c.mu.Lock()
 	if c.capabilitiesLoaded {
@@ -91,11 +55,11 @@ func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
 	c.mu.Unlock()
 
 	fallback := true
-	if !c.listReady() {
+	if !c.ListReady() {
 		return fallback
 	}
 
-	modelInfo, err := c.sdkClient.Models.Get(ctx, c.model, sdk.ModelGetParams{})
+	modelInfo, err := c.sdkClient.Models.Get(ctx, c.Model(), sdk.ModelGetParams{})
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -126,29 +90,21 @@ func buildAnthropicBetaSystemBlocks(systemPrompt string) []sdk.BetaTextBlockPara
 	}
 }
 
-func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
-	if err := c.ConfigurationError(); err != nil {
-		return provider.Response{}, err
-	}
-
+func (c *anthropicClient) buildMessageParams(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (sdk.MessageNewParams, []option.RequestOption) {
 	maxTokens := 4096
-	if c.thinkingBudget > 0 {
-		if c.thinkingBudget >= maxTokens {
-			maxTokens = c.thinkingBudget + 1024
-		}
+	if c.thinkingBudget > 0 && c.thinkingBudget >= maxTokens {
+		maxTokens = c.thinkingBudget + 1024
 	}
 
 	params := sdk.MessageNewParams{
-		Model:     sdk.Model(c.model),
+		Model:     sdk.Model(c.Model()),
 		MaxTokens: int64(maxTokens),
 		System:    buildAnthropicSystemBlocks(systemPrompt),
 		Messages:  toSDKMessages(messages),
 	}
-
 	if sdkTools := toSDKTools(tools); len(sdkTools) > 0 {
 		params.Tools = sdkTools
 	}
-
 	if c.thinkingBudget > 0 {
 		params.OutputConfig = sdk.OutputConfigParam{
 			Effort: provider.BudgetToAnthropicEffort(c.thinkingBudget),
@@ -169,11 +125,20 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	}
 	telemetryHeaders := map[string]string{}
 	if sessionID, requestID := provider.GetTelemetry(ctx); sessionID != "" {
-		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+		provider.ApplyTelemetryHeaders(c.ProviderKind(), telemetryHeaders, sessionID, requestID)
 	}
 	for k, v := range telemetryHeaders {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
+	return params, reqOpts
+}
+
+func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+	if err := c.ConfigurationError(); err != nil {
+		return provider.Response{}, err
+	}
+
+	params, reqOpts := c.buildMessageParams(ctx, systemPrompt, messages, tools)
 
 	resp, err := c.sdkClient.Messages.New(ctx, params, reqOpts...)
 	if err != nil {
@@ -184,7 +149,7 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 }
 
 func (c *anthropicClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	if !c.listReady() {
+	if !c.ListReady() {
 		return nil, fmt.Errorf("provider no configurado")
 	}
 
@@ -229,7 +194,7 @@ func (c *anthropicClient) CreateBatch(ctx context.Context, requests []provider.B
 	sdkReqs := make([]sdk.BetaMessageBatchNewParamsRequest, 0, len(requests))
 	for _, req := range requests {
 		params := sdk.BetaMessageBatchNewParamsRequestParams{
-			Model:     sdk.Model(c.model),
+			Model:     sdk.Model(c.Model()),
 			MaxTokens: 4096,
 			System:    buildAnthropicBetaSystemBlocks(req.SystemPrompt),
 			Messages:  toSDKBetaMessages(req.Messages),
@@ -570,12 +535,5 @@ func responseFromSDK(decoded *sdk.Message) provider.Response {
 		CacheWriteInputTokens: int(decoded.Usage.CacheCreationInputTokens),
 	}
 
-	result := provider.Response{FinalText: finalText, Usage: usage, PendingCalls: pendingCalls}
-	if finalText != "" || len(pendingCalls) > 0 {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(finalText, "", pendingCalls)}
-	}
-	if len(result.PendingCalls) > 0 {
-		result.FinalText = ""
-	}
-	return result
+	return provider.FinalizeResponse(finalText, "", pendingCalls, usage)
 }

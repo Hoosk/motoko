@@ -114,364 +114,253 @@ func (d *Dispatcher) buildRegistry() *Registry {
 		def := def
 		r.Add(Command{
 			Definition: def,
-			Handler: func(inv Invocation) types.Response {
-				return d.dispatchCommand(def.Name, inv)
-			},
+			Handler:    d.handlerFor(def.Name),
 		})
 	}
 	return r
 }
 
-func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Response {
-	parts := append([]string{command}, inv.Args...)
-	input := inv.RawInput
-	info := inv.Info
-
+func (d *Dispatcher) handlerFor(command string) Handler {
 	switch command {
 	case "help":
-		return d.helpResponse()
+		return func(inv Invocation) types.Response { return d.helpResponse() }
 	case "exit", "quit":
-		return types.Response{Signal: "quit"}
+		return func(inv Invocation) types.Response { return types.Response{Signal: "quit"} }
 	case "themes":
-		if len(parts) < 2 {
-			current := d.deps.ThemeFn()
-			if current == "" {
-				current = DefaultTheme
-			}
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf(
-				"Current theme: %s\n"+
-					"Available themes:\n"+
-					"  cyberpunk    Default dark neon green (default)\n"+
-					"  ghost-cyber  Restrained dark cyberpunk with precise accents\n"+
-					"  neon-shadow  Dramatic high-contrast magenta and cyan\n"+
-					"  black-ice    Cold technical with ice-blue accents\n"+
-					"  nord         Arctic blue palette\n"+
-					"  dracula      Classic purple and green\n"+
-					"  monochrome   Pure green-on-black terminal\n"+
-					"Usage: /themes <name>",
-				current)}}}
-		}
-		themeName := strings.ToLower(parts[1])
-		switch themeName {
-		case ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
-			if err := d.deps.SetThemeFn(themeName); err != nil {
-				return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
-			}
-			styles.SetTheme(themeName)
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Theme changed to: " + themeName}}}
-		default:
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown theme: %s. Available: cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome", themeName)}}}
-		}
+		return d.handleThemesCommand
 	case CmdClear:
-		if sess := d.deps.SessionFn(); sess != nil {
-			sess.History = nil
-			sess.LastInputTokens = 0
-			_ = d.deps.SaveSessionFn()
-		}
-		return types.Response{Clear: true, Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Timeline reset."}}}
+		return func(inv Invocation) types.Response { return d.handleClearCommand() }
 	case "compact":
-		return types.Response{
-			Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Compacting session..."}},
-			Action:  &types.Action{Type: types.ActionCompact},
+		return func(inv Invocation) types.Response {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Compacting session..."}}, Action: &types.Action{Type: types.ActionCompact}}
 		}
-	case string(types.ModePlan):
-		d.deps.SetAgentModeFn(string(types.ModePlan))
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
-	case string(types.ModeBuild):
-		d.deps.SetAgentModeFn(string(types.ModeBuild))
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
+	case string(types.ModePlan), string(types.ModeBuild):
+		return d.handleModePresetCommand(command)
 	case "learn":
-		d.deps.SetAgentModeFn("learn")
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: learn"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: learnPrompt()}}
+		return func(inv Invocation) types.Response {
+			d.deps.SetAgentModeFn("learn")
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: learn"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: learnPrompt()}}
+		}
 	case "teamwork-preview":
-		goal := strings.TrimSpace(strings.Join(inv.Args, " "))
-		d.deps.SetAgentModeFn("teamwork")
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: teamwork"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: teamworkPreviewPrompt(goal)}}
+		return func(inv Invocation) types.Response {
+			goal := strings.TrimSpace(strings.Join(inv.Args, " "))
+			d.deps.SetAgentModeFn("teamwork")
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: teamwork"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: teamworkPreviewPrompt(goal)}}
+		}
 	case "grill-me":
-		d.deps.SetAgentModeFn("grill")
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: grill"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: grillMePrompt()}}
+		return func(inv Invocation) types.Response {
+			d.deps.SetAgentModeFn("grill")
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: grill"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: grillMePrompt()}}
+		}
+	case "agent":
+		return d.handleAgentCommand
+	case "mode":
+		return func(inv Invocation) types.Response { return types.Response{Signal: "open-mode-popup"} }
+	case "shell", "chat":
+		return d.handleInputModeCommand(command)
+	case CmdStatus:
+		return func(inv Invocation) types.Response { return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: d.statusText(inv.Info)}}} }
+	case "debug":
+		return func(inv Invocation) types.Response { return d.handleDebugCommand() }
+	case "context":
+		return func(inv Invocation) types.Response { return d.handleContextCommand(inv.Info) }
+	case "provider":
+		return func(inv Invocation) types.Response { return d.deps.ProvMgr.HandleProviderCommand(inv.Args) }
+	case "models":
+		return func(inv Invocation) types.Response { return d.deps.ProvMgr.HandleModelsCommand(inv.Args) }
+	case "sessions":
+		return func(inv Invocation) types.Response { return types.Response{Signal: "open-sessions-popup"} }
+	case "settings":
+		return func(inv Invocation) types.Response { return types.Response{Signal: "open-settings-popup"} }
+	case "tools":
+		return func(inv Invocation) types.Response { return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}} }
+	case CmdTool:
+		return d.handleToolCommand
+	case "approve", "deny":
+		return d.handleApprovalCommand(command)
+	case "trace":
+		return func(inv Invocation) types.Response { return d.handleTraceCommand() }
+	default:
+		return func(inv Invocation) types.Response { return d.dispatchCommand(command, inv) }
+	}
+}
+
+func (d *Dispatcher) dispatchCommand(command string, inv Invocation) types.Response {
+	switch command {
 	case "goal":
 		return d.handleGoalCommand(inv.Args)
 	case "schedule":
 		return d.handleScheduleCommand(inv.Args)
-	case "agent":
-		if len(parts) < 2 {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Active agent: %s. Available agents: %s", d.deps.AgentNameFn(), strings.Join(d.deps.AgentNamesFn(), ", "))}}}
-		}
-		agentName := parts[1]
-		found := false
-		for _, name := range d.deps.AgentNamesFn() {
-			if strings.EqualFold(name, agentName) {
-				d.deps.SetAgentModeFn(name)
-				found = true
-				break
-			}
-		}
-		if !found {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown agent: %s", agentName)}}}
-		}
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Agent switched to: %s", d.deps.AgentNameFn())}}}
-	case "mode":
-		return types.Response{Signal: "open-mode-popup"}
-	case "shell":
-		d.deps.SetInputModeFn(types.InputModeShell)
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Input mode: shell. Any line not starting with / will be executed as a command."}}}
-	case "chat":
-		d.deps.SetInputModeFn(types.InputModeChat)
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Input mode: chat. Normal input will be treated as a prompt."}}}
-	case CmdStatus:
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: d.statusText(info)}}}
-	case "debug":
-		newDebug := !d.deps.DebugFn()
-		d.deps.SetDebugFn(newDebug)
-		if ag := d.deps.AgentFn(); ag != nil {
-			ag.SetDebug(newDebug)
-		}
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Agent debug: %t", newDebug)}}}
-	case "context":
-		rawPrompt := d.deps.SystemPromptFn(info)
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "--- RAW AGENT SYSTEM PROMPT ---\n\n" + rawPrompt}}}
-	case "provider":
-		return d.deps.ProvMgr.HandleProviderCommand(parts[1:])
-	case "models":
-		return d.deps.ProvMgr.HandleModelsCommand(parts[1:])
-	case "sessions":
-		return types.Response{Signal: "open-sessions-popup"}
-	case "settings":
-		return types.Response{Signal: "open-settings-popup"}
-	case "tools":
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}}
-	case CmdTool:
-		if len(parts) < 2 {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
-		}
-
-		toolName := parts[1]
-		toolArgs := ""
-		rawTrimmed := strings.TrimPrefix(input, "/")
-		idx := 0
-		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
-			idx++
-		}
-		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
-			idx++
-		}
-		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
-			idx++
-		}
-		for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
-			idx++
-		}
-		for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
-			idx++
-		}
-		if idx < len(rawTrimmed) {
-			toolArgs = rawTrimmed[idx:]
-		}
-
-		if strings.EqualFold(toolName, "bash") {
-			return d.handleShell(toolArgs)
-		}
-
-		runCtx := tools.WithBrain(context.Background(), d.deps.BrainFn())
-		runCtx = tools.WithConfig(runCtx, d.deps.ConfigFn())
-		runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(d.deps.ContextWindowFn()))
-		result, err := d.deps.RunToolFn(runCtx, toolName, toolArgs)
-		if err != nil {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
-		}
-
-		entries := []types.Entry{
-			{Kind: types.EntryCommand, Text: fmt.Sprintf("tool %s %s", toolName, strings.TrimSpace(toolArgs))},
-			{Kind: types.EntrySystem, Text: result.Summary},
-		}
-		if strings.TrimSpace(result.Output) != "" {
-			entries = append(entries, types.Entry{Kind: types.EntryOutput, Text: result.Output})
-		}
-		return types.Response{Entries: entries}
-	case "approve":
-		pending := d.deps.PendingFn()
-		if pending == "" {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No pending action."}}}
-		}
-
-		cleared := d.deps.ClearPendingFn()
-		return types.Response{
-			Entries: []types.Entry{
-				{Kind: types.EntryCommand, Text: "$ " + cleared},
-				{Kind: types.EntrySystem, Text: "Approval received. Executing command..."},
-			},
-			Action: &types.Action{Type: types.ActionShell, ShellCommand: cleared},
-		}
-	case "deny":
-		pending := d.deps.PendingFn()
-		if pending == "" {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No pending action."}}}
-		}
-
-		cleared := d.deps.ClearPendingFn()
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", cleared)}}}
-	case "trace":
-		if !tracelog.Available() {
-			return types.Response{}
-		}
-		enabled := tracelog.SetEnabled(!tracelog.Enabled())
-		if enabled {
-			tracelog.Logf("=== TRACE ENABLED ===")
-		}
-		return types.Response{}
 	case "task":
-		if len(parts) < 2 {
-			tasks := d.deps.ListTasksFn()
-			if len(tasks) == 0 {
-				return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active background tasks."}}}
-			}
-			var sb strings.Builder
-			sb.WriteString("Active tasks:\n")
-			for _, t := range tasks {
-				fmt.Fprintf(&sb, "- %s: %q (started %s ago)\n", t.ID, t.Command, time.Since(t.Started).Round(time.Second))
-			}
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.TrimSpace(sb.String())}}}
-		}
-
-		subcmd := strings.ToLower(parts[1])
-		switch subcmd {
-		case CmdList:
-			tasks := d.deps.ListTasksFn()
-			if len(tasks) == 0 {
-				return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active background tasks."}}}
-			}
-			var sb strings.Builder
-			sb.WriteString("Active tasks:\n")
-			for _, t := range tasks {
-				fmt.Fprintf(&sb, "- %s: %q (started %s ago)\n", t.ID, t.Command, time.Since(t.Started).Round(time.Second))
-			}
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.TrimSpace(sb.String())}}}
-		case "terminate":
-			if len(parts) < 3 {
-				return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /task terminate <idTask>"}}}
-			}
-			id := parts[2]
-			if err := d.deps.TerminateTaskFn(id); err != nil {
-				return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
-			}
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Task %s terminated.", id)}}}
-		default:
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown subcommand: %s. Usage: /task or /task terminate <idTask>", subcmd)}}}
-		}
+		return d.handleTaskCommand(append([]string{command}, inv.Args...))
 	case "brain":
-		return d.handleBrainCommand(parts[1:])
+		return d.handleBrainCommand(inv.Args)
 	case "metrics":
-		sess := d.deps.SessionFn()
-		if sess == nil {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active session."}}}
-		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", sess.ID)
-		fmt.Fprintf(&sb, "- Created at: %s\n", sess.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(&sb, "- History Messages: %d\n", len(sess.History))
-
-		sb.WriteString("\nLast Turn Token Usage:\n")
-		lastInput := sess.LastInputTokens
-		fmt.Fprintf(&sb, "- Input Tokens: %d\n", lastInput)
-		if lastInput > 0 {
-			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
-				sess.LastSystemStaticTokens,
-				float64(sess.LastSystemStaticTokens)/float64(lastInput)*100)
-			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
-				sess.LastSystemDynamicTokens,
-				float64(sess.LastSystemDynamicTokens)/float64(lastInput)*100)
-			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
-				sess.LastToolsTokens,
-				float64(sess.LastToolsTokens)/float64(lastInput)*100)
-			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
-				sess.LastHistoryTokens,
-				float64(sess.LastHistoryTokens)/float64(lastInput)*100)
-		}
-		fmt.Fprintf(&sb, "- Output Tokens: %d\n", sess.LastOutputTokens)
-		if sess.LastOutputTokens > 0 && sess.LastReasoningTokens > 0 {
-			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n",
-				sess.LastReasoningTokens,
-				percentage(sess.LastReasoningTokens, sess.LastOutputTokens))
-		}
-		if lastInput > 0 && sess.LastCacheReadTokens > 0 {
-			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n",
-				sess.LastCacheReadTokens,
-				percentage(sess.LastCacheReadTokens, lastInput))
-		}
-		if sess.LastCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Cache Write: %d\n", sess.LastCacheWriteTokens)
-		}
-
-		sb.WriteString("\nCumulative Token Usage:\n")
-		totalInput := sess.TotalInputTokens
-		fmt.Fprintf(&sb, "- Input Tokens: %d\n", totalInput)
-		if totalInput > 0 {
-			fmt.Fprintf(&sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n",
-				sess.TotalSystemStaticTokens,
-				float64(sess.TotalSystemStaticTokens)/float64(totalInput)*100)
-			fmt.Fprintf(&sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n",
-				sess.TotalSystemDynamicTokens,
-				float64(sess.TotalSystemDynamicTokens)/float64(totalInput)*100)
-			fmt.Fprintf(&sb, "  * Tool Definitions:       %d (%.1f%% of input)\n",
-				sess.TotalToolsTokens,
-				float64(sess.TotalToolsTokens)/float64(totalInput)*100)
-			fmt.Fprintf(&sb, "  * History & Query:        %d (%.1f%% of input)\n",
-				sess.TotalHistoryTokens,
-				float64(sess.TotalHistoryTokens)/float64(totalInput)*100)
-		}
-		if totalInput > 0 && sess.TotalCacheReadTokens > 0 {
-			fmt.Fprintf(&sb, "  * Cache Read:  %d (%.1f%% of input)\n",
-				sess.TotalCacheReadTokens,
-				float64(sess.TotalCacheReadTokens)/float64(totalInput)*100)
-		}
-		if sess.TotalCacheWriteTokens > 0 {
-			fmt.Fprintf(&sb, "  * Cache Write: %d\n", sess.TotalCacheWriteTokens)
-		}
-		fmt.Fprintf(&sb, "- Output Tokens: %d\n", sess.TotalOutputTokens)
-		if sess.TotalOutputTokens > 0 && sess.TotalReasoningTokens > 0 {
-			fmt.Fprintf(&sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n",
-				sess.TotalReasoningTokens,
-				percentage(sess.TotalReasoningTokens, sess.TotalOutputTokens))
-		}
-		fmt.Fprintf(&sb, "- Total Tokens:  %d\n", sess.TotalTokens)
-
-		if len(sess.Turns) > 0 {
-			sb.WriteString("\nRecent Turn Trend:\n")
-			for _, turn := range sess.Turns {
-				fmt.Fprintf(&sb, "- Turn %d", turn.Turn)
-				if turn.AgentLabel != "" {
-					fmt.Fprintf(&sb, " [%s]", turn.AgentLabel)
-				}
-				fmt.Fprintf(&sb, ": in=%d out=%d reasoning=%d total=%d", turn.InputTokens, turn.OutputTokens, turn.ReasoningTokens, turn.TotalTokens)
-				if turn.InputGrowth != 0 {
-					growthPct := growthPercentage(&turn)
-					fmt.Fprintf(&sb, " input_growth=%+d (%.1f%%)", turn.InputGrowth, growthPct)
-					if turn.InputGrowth > 0 && growthPct >= 15.0 {
-						sb.WriteString(" BLOAT")
-					}
-				}
-				if turn.CacheReadTokens > 0 || turn.CacheWriteTokens > 0 {
-					fmt.Fprintf(&sb, " cache=%d/%d", turn.CacheReadTokens, turn.CacheWriteTokens)
-				}
-				sb.WriteByte('\n')
-				for idx, iter := range turn.Iterations {
-					fmt.Fprintf(&sb, "  iter %d: in=%d out=%d reasoning=%d total=%d", idx+1, iter.InputTokens, iter.OutputTokens, iter.ReasoningTokens, iter.TotalTokens)
-					if idx > 0 {
-						delta := iter.InputTokens - turn.Iterations[idx-1].InputTokens
-						fmt.Fprintf(&sb, " input_delta=%+d", delta)
-					}
-					if iter.CacheReadInputTokens > 0 || iter.CacheWriteInputTokens > 0 {
-						fmt.Fprintf(&sb, " cache=%d/%d", iter.CacheReadInputTokens, iter.CacheWriteInputTokens)
-					}
-					sb.WriteByte('\n')
-				}
-			}
-		}
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: sb.String()}}}
+		return d.handleMetricsCommand()
 	}
 
 	return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
+}
+
+func (d *Dispatcher) handleThemesCommand(inv Invocation) types.Response {
+	parts := append([]string{"themes"}, inv.Args...)
+	if len(parts) < 2 {
+		current := d.deps.ThemeFn()
+		if current == "" {
+			current = DefaultTheme
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf(
+			"Current theme: %s\n"+
+				"Available themes:\n"+
+				"  cyberpunk    Default dark neon green (default)\n"+
+				"  ghost-cyber  Restrained dark cyberpunk with precise accents\n"+
+				"  neon-shadow  Dramatic high-contrast magenta and cyan\n"+
+				"  black-ice    Cold technical with ice-blue accents\n"+
+				"  nord         Arctic blue palette\n"+
+				"  dracula      Classic purple and green\n"+
+				"  monochrome   Pure green-on-black terminal\n"+
+				"Usage: /themes <name>",
+			current)}}}
+	}
+	themeName := strings.ToLower(parts[1])
+	switch themeName {
+	case ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome":
+		if err := d.deps.SetThemeFn(themeName); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		styles.SetTheme(themeName)
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Theme changed to: " + themeName}}}
+	default:
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown theme: %s. Available: cyberpunk, ghost-cyber, neon-shadow, black-ice, nord, dracula, monochrome", themeName)}}}
+	}
+}
+
+func (d *Dispatcher) handleClearCommand() types.Response {
+	if sess := d.deps.SessionFn(); sess != nil {
+		sess.History = nil
+		sess.LastInputTokens = 0
+		_ = d.deps.SaveSessionFn()
+	}
+	return types.Response{Clear: true, Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Timeline reset."}}}
+}
+
+func (d *Dispatcher) handleModePresetCommand(command string) Handler {
+	return func(inv Invocation) types.Response {
+		d.deps.SetAgentModeFn(command)
+		if command == string(types.ModePlan) {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: plan. Shell commands require explicit approval."}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Mode set to: build. Safe commands run directly; sensitive ones require approval."}}}
+	}
+}
+
+func (d *Dispatcher) handleAgentCommand(inv Invocation) types.Response {
+	parts := append([]string{"agent"}, inv.Args...)
+	if len(parts) < 2 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Active agent: %s. Available agents: %s", d.deps.AgentNameFn(), strings.Join(d.deps.AgentNamesFn(), ", "))}}}
+	}
+	agentName := parts[1]
+	for _, name := range d.deps.AgentNamesFn() {
+		if strings.EqualFold(name, agentName) {
+			d.deps.SetAgentModeFn(name)
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Agent switched to: %s", d.deps.AgentNameFn())}}}
+		}
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown agent: %s", agentName)}}}
+}
+
+func (d *Dispatcher) handleInputModeCommand(command string) Handler {
+	return func(inv Invocation) types.Response {
+		if command == "shell" {
+			d.deps.SetInputModeFn(types.InputModeShell)
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Input mode: shell. Any line not starting with / will be executed as a command."}}}
+		}
+		d.deps.SetInputModeFn(types.InputModeChat)
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Input mode: chat. Normal input will be treated as a prompt."}}}
+	}
+}
+
+func (d *Dispatcher) handleDebugCommand() types.Response {
+	newDebug := !d.deps.DebugFn()
+	d.deps.SetDebugFn(newDebug)
+	if ag := d.deps.AgentFn(); ag != nil {
+		ag.SetDebug(newDebug)
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Agent debug: %t", newDebug)}}}
+}
+
+func (d *Dispatcher) handleContextCommand(info system.ContextInfo) types.Response {
+	rawPrompt := d.deps.SystemPromptFn(info)
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "--- RAW AGENT SYSTEM PROMPT ---\n\n" + rawPrompt}}}
+}
+
+func (d *Dispatcher) handleToolCommand(inv Invocation) types.Response {
+	parts := append([]string{"tool"}, inv.Args...)
+	if len(parts) < 2 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /tool <name> <args>. Use /tools to list available ones."}}}
+	}
+	toolName := parts[1]
+	toolArgs := ""
+	rawTrimmed := strings.TrimPrefix(inv.RawInput, "/")
+	idx := 0
+	for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+		idx++
+	}
+	for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
+		idx++
+	}
+	for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+		idx++
+	}
+	for idx < len(rawTrimmed) && rawTrimmed[idx] != ' ' && rawTrimmed[idx] != '\t' && rawTrimmed[idx] != '\n' && rawTrimmed[idx] != '\r' {
+		idx++
+	}
+	for idx < len(rawTrimmed) && (rawTrimmed[idx] == ' ' || rawTrimmed[idx] == '\t' || rawTrimmed[idx] == '\n' || rawTrimmed[idx] == '\r') {
+		idx++
+	}
+	if idx < len(rawTrimmed) {
+		toolArgs = rawTrimmed[idx:]
+	}
+	if strings.EqualFold(toolName, "bash") {
+		return d.handleShell(toolArgs)
+	}
+	runCtx := tools.WithBrain(context.Background(), d.deps.BrainFn())
+	runCtx = tools.WithConfig(runCtx, d.deps.ConfigFn())
+	runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(d.deps.ContextWindowFn()))
+	result, err := d.deps.RunToolFn(runCtx, toolName, toolArgs)
+	if err != nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+	}
+	entries := []types.Entry{{Kind: types.EntryCommand, Text: fmt.Sprintf("tool %s %s", toolName, strings.TrimSpace(toolArgs))}, {Kind: types.EntrySystem, Text: result.Summary}}
+	if strings.TrimSpace(result.Output) != "" {
+		entries = append(entries, types.Entry{Kind: types.EntryOutput, Text: result.Output})
+	}
+	return types.Response{Entries: entries}
+}
+
+func (d *Dispatcher) handleApprovalCommand(command string) Handler {
+	return func(inv Invocation) types.Response {
+		pending := d.deps.PendingFn()
+		if pending == "" {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No pending action."}}}
+		}
+		cleared := d.deps.ClearPendingFn()
+		if command == "approve" {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryCommand, Text: "$ " + cleared}, {Kind: types.EntrySystem, Text: "Approval received. Executing command..."}}, Action: &types.Action{Type: types.ActionShell, ShellCommand: cleared}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", cleared)}}}
+	}
+}
+
+func (d *Dispatcher) handleTraceCommand() types.Response {
+	if !tracelog.Available() {
+		return types.Response{}
+	}
+	enabled := tracelog.SetEnabled(!tracelog.Enabled())
+	if enabled {
+		tracelog.Logf("=== TRACE ENABLED ===")
+	}
+	return types.Response{}
 }
 
 func (d *Dispatcher) helpResponse() types.Response {
@@ -507,6 +396,109 @@ func growthPercentage(turn *session.TurnUsage) float64 {
 		return 0
 	}
 	return percentage(turn.InputGrowth, turn.Iterations[0].InputTokens)
+}
+
+func (d *Dispatcher) handleTaskCommand(parts []string) types.Response {
+	if len(parts) < 2 || strings.EqualFold(parts[1], CmdList) {
+		return d.formatTaskList()
+	}
+	subcmd := strings.ToLower(parts[1])
+	switch subcmd {
+	case "terminate":
+		if len(parts) < 3 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /task terminate <idTask>"}}}
+		}
+		id := parts[2]
+		if err := d.deps.TerminateTaskFn(id); err != nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Task %s terminated.", id)}}}
+	default:
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown subcommand: %s. Usage: /task or /task terminate <idTask>", subcmd)}}}
+	}
+}
+
+func (d *Dispatcher) formatTaskList() types.Response {
+	tasks := d.deps.ListTasksFn()
+	if len(tasks) == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active background tasks."}}}
+	}
+	var sb strings.Builder
+	sb.WriteString("Active tasks:\n")
+	for _, t := range tasks {
+		fmt.Fprintf(&sb, "- %s: %q (started %s ago)\n", t.ID, t.Command, time.Since(t.Started).Round(time.Second))
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.TrimSpace(sb.String())}}}
+}
+
+func writeTokenBreakdown(sb *strings.Builder, label string, input, static, dynamic, toolDefs, history, cacheRead, output, reasoning, cacheWrite int) {
+	fmt.Fprintf(sb, "\n%s:\n", label)
+	fmt.Fprintf(sb, "- Input Tokens: %d\n", input)
+	if input > 0 {
+		fmt.Fprintf(sb, "  * System Prompt (Static):  %d (%.1f%% of input)\n", static, percentage(static, input))
+		fmt.Fprintf(sb, "  * System Prompt (Dynamic): %d (%.1f%% of input)\n", dynamic, percentage(dynamic, input))
+		fmt.Fprintf(sb, "  * Tool Definitions:       %d (%.1f%% of input)\n", toolDefs, percentage(toolDefs, input))
+		fmt.Fprintf(sb, "  * History & Query:        %d (%.1f%% of input)\n", history, percentage(history, input))
+	}
+	if input > 0 && cacheRead > 0 {
+		fmt.Fprintf(sb, "  * Cache Read:  %d (%.1f%% of input)\n", cacheRead, percentage(cacheRead, input))
+	}
+	if cacheWrite > 0 {
+		fmt.Fprintf(sb, "  * Cache Write: %d\n", cacheWrite)
+	}
+	fmt.Fprintf(sb, "- Output Tokens: %d\n", output)
+	if output > 0 && reasoning > 0 {
+		fmt.Fprintf(sb, "  * Reasoning (Thinking) Tokens: %d (%.1f%% of output)\n", reasoning, percentage(reasoning, output))
+	}
+}
+
+func (d *Dispatcher) handleMetricsCommand() types.Response {
+	sess := d.deps.SessionFn()
+	if sess == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No active session."}}}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Current Session Metrics (%s):\n", sess.ID)
+	fmt.Fprintf(&sb, "- Created at: %s\n", sess.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&sb, "- History Messages: %d\n", len(sess.History))
+
+	writeTokenBreakdown(&sb, "Last Turn Token Usage", sess.LastInputTokens, sess.LastSystemStaticTokens, sess.LastSystemDynamicTokens, sess.LastToolsTokens, sess.LastHistoryTokens, sess.LastCacheReadTokens, sess.LastOutputTokens, sess.LastReasoningTokens, sess.LastCacheWriteTokens)
+	writeTokenBreakdown(&sb, "Cumulative Token Usage", sess.TotalInputTokens, sess.TotalSystemStaticTokens, sess.TotalSystemDynamicTokens, sess.TotalToolsTokens, sess.TotalHistoryTokens, sess.TotalCacheReadTokens, sess.TotalOutputTokens, sess.TotalReasoningTokens, sess.TotalCacheWriteTokens)
+	fmt.Fprintf(&sb, "- Total Tokens:  %d\n", sess.TotalTokens)
+
+	if len(sess.Turns) > 0 {
+		sb.WriteString("\nRecent Turn Trend:\n")
+		for _, turn := range sess.Turns {
+			fmt.Fprintf(&sb, "- Turn %d", turn.Turn)
+			if turn.AgentLabel != "" {
+				fmt.Fprintf(&sb, " [%s]", turn.AgentLabel)
+			}
+			fmt.Fprintf(&sb, ": in=%d out=%d reasoning=%d total=%d", turn.InputTokens, turn.OutputTokens, turn.ReasoningTokens, turn.TotalTokens)
+			if turn.InputGrowth != 0 {
+				growthPct := growthPercentage(&turn)
+				fmt.Fprintf(&sb, " input_growth=%+d (%.1f%%)", turn.InputGrowth, growthPct)
+				if turn.InputGrowth > 0 && growthPct >= 15.0 {
+					sb.WriteString(" BLOAT")
+				}
+			}
+			if turn.CacheReadTokens > 0 || turn.CacheWriteTokens > 0 {
+				fmt.Fprintf(&sb, " cache=%d/%d", turn.CacheReadTokens, turn.CacheWriteTokens)
+			}
+			sb.WriteByte('\n')
+			for idx, iter := range turn.Iterations {
+				fmt.Fprintf(&sb, "  iter %d: in=%d out=%d reasoning=%d total=%d", idx+1, iter.InputTokens, iter.OutputTokens, iter.ReasoningTokens, iter.TotalTokens)
+				if idx > 0 {
+					delta := iter.InputTokens - turn.Iterations[idx-1].InputTokens
+					fmt.Fprintf(&sb, " input_delta=%+d", delta)
+				}
+				if iter.CacheReadInputTokens > 0 || iter.CacheWriteInputTokens > 0 {
+					fmt.Fprintf(&sb, " cache=%d/%d", iter.CacheReadInputTokens, iter.CacheWriteInputTokens)
+				}
+				sb.WriteByte('\n')
+			}
+		}
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: sb.String()}}}
 }
 
 func (d *Dispatcher) statusText(info system.ContextInfo) string {

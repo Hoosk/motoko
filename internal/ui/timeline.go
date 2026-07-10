@@ -123,31 +123,7 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 					}
 				}
 			} else {
-				switch event.Kind {
-				case "tool":
-					m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "tool " + event.Title})
-					if strings.TrimSpace(event.Content) != "" {
-						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-					}
-				case "task_started":
-					m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + event.Title})
-					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
-				case "task_finished":
-					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-					if strings.TrimSpace(event.ReasoningContent) != "" {
-						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
-					}
-				case "output":
-					if event.Title == "web_search" || event.Title == "web_fetch" {
-						m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("[%s: %d characters]", event.Title, len(event.Content))})
-					} else {
-						m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
-					}
-				case "error":
-					m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
-				case "debug":
-					m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
-				}
+				m.appendStreamEvent(event)
 				if m.model.StreamEntryIndex != -1 {
 					m.model.StreamEntryIndex = -1
 					m.model.StreamedRunes = nil
@@ -205,7 +181,7 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 				if m.model.SelectedMessage < 0 {
 					m.model.SelectedMessage = len(m.model.Messages) - 1
 				} else {
-					m.model.SelectedMessage = clamp(m.model.SelectedMessage-1, 0, len(m.model.Messages)-1)
+					m.model.SelectedMessage = clamp(m.model.SelectedMessage-1, len(m.model.Messages)-1)
 				}
 				m.renderMessages()
 			}
@@ -215,7 +191,7 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 				if m.model.SelectedMessage < 0 {
 					m.model.SelectedMessage = 0
 				} else {
-					m.model.SelectedMessage = clamp(m.model.SelectedMessage+1, 0, len(m.model.Messages)-1)
+					m.model.SelectedMessage = clamp(m.model.SelectedMessage+1, len(m.model.Messages)-1)
 				}
 				m.renderMessages()
 			}
@@ -264,31 +240,7 @@ func (m *TimelineModel) ApplyStreamBatch(events []app.AgentStreamEvent) {
 			continue
 		}
 
-		switch event.Kind {
-		case "tool":
-			m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "tool " + event.Title})
-			if strings.TrimSpace(event.Content) != "" {
-				m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-			}
-		case "task_started":
-			m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + event.Title})
-			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
-		case "task_finished":
-			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
-			if strings.TrimSpace(event.ReasoningContent) != "" {
-				m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
-			}
-		case "output":
-			if event.Title == "web_search" || event.Title == "web_fetch" {
-				m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("[%s: %d characters]", event.Title, len(event.Content))})
-			} else {
-				m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
-			}
-		case "error":
-			m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
-		case "debug":
-			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
-		}
+		m.appendStreamEvent(event)
 		if m.model.StreamEntryIndex != -1 {
 			m.model.StreamEntryIndex = -1
 			m.model.StreamedRunes = nil
@@ -370,7 +322,7 @@ func (m *TimelineModel) renderMessages() {
 		m.model.Messages = append(m.model.Messages, m.model.RenderEntry(entry))
 	}
 	if m.model.SelectedMessage >= 0 && len(m.model.Messages) > 0 {
-		selectedIdx = clamp(m.model.SelectedMessage, 0, len(m.model.Messages)-1)
+		selectedIdx = clamp(m.model.SelectedMessage, len(m.model.Messages)-1)
 	}
 	for i, msg := range m.model.Messages {
 		rendered := msg
@@ -487,4 +439,32 @@ func (m TimelineModel) CopyRange(startIdx, endIdx int) tea.Cmd {
 	}
 
 	return copySelection(strings.Join(parts, "\n\n"))
+}
+
+func (m *TimelineModel) appendStreamEvent(event app.AgentStreamEvent) {
+	switch event.Kind {
+	case "tool":
+		m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "tool " + event.Title})
+		if strings.TrimSpace(event.Content) != "" {
+			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+		}
+	case "task_started":
+		m.appendEntry(app.Entry{Kind: app.EntryCommand, Text: "$ " + event.Title})
+		m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Task launched in background..."})
+	case "task_finished":
+		m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: event.Content})
+		if strings.TrimSpace(event.ReasoningContent) != "" {
+			m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.ReasoningContent})
+		}
+	case "output":
+		if event.Title == "web_search" || event.Title == "web_fetch" {
+			m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("[%s: %d characters]", event.Title, len(event.Content))})
+		} else {
+			m.appendEntry(app.Entry{Kind: app.EntryOutput, Text: event.Content})
+		}
+	case "error":
+		m.appendEntry(app.Entry{Kind: app.EntryError, Text: event.Content})
+	case "debug":
+		m.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "[debug] " + event.Content})
+	}
 }

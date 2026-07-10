@@ -65,7 +65,7 @@ func NewClient(cfg config.ProviderConfig) (Client, error) {
 	return factory(cfg), nil
 }
 
-type baseClient struct {
+type BaseClient struct {
 	httpClient   *http.Client
 	providerName string
 	baseURL      string
@@ -73,8 +73,8 @@ type baseClient struct {
 	model        string
 }
 
-func newBaseClient(providerName, baseURL, apiKey, model string) baseClient {
-	return baseClient{
+func NewBaseClient(providerName, baseURL, apiKey, model string) BaseClient {
+	return BaseClient{
 		providerName: providerName,
 		baseURL:      strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		apiKey:       strings.TrimSpace(apiKey),
@@ -85,11 +85,11 @@ func newBaseClient(providerName, baseURL, apiKey, model string) baseClient {
 	}
 }
 
-func (c baseClient) Configured() bool {
+func (c BaseClient) Configured() bool {
 	return c.baseURL != "" && c.apiKey != "" && c.model != ""
 }
 
-func (c baseClient) ConfigurationError() error {
+func (c BaseClient) ConfigurationError() error {
 	if c.baseURL == "" {
 		return fmt.Errorf("provider not configured: empty base URL")
 	}
@@ -102,14 +102,30 @@ func (c baseClient) ConfigurationError() error {
 	return nil
 }
 
-func (c baseClient) listReady() bool {
+func (c BaseClient) ListReady() bool {
 	return c.baseURL != "" && c.apiKey != ""
 }
 
-func (c baseClient) ProviderKind() string {
+func (c BaseClient) ProviderKind() string {
 	return c.providerName
 }
 
-func (c baseClient) Summary() string {
+func (c BaseClient) Summary() string {
 	return fmt.Sprintf("%s:%s", c.providerName, c.model)
+}
+
+func (c BaseClient) BaseURL() string {
+	return c.baseURL
+}
+
+func (c BaseClient) APIKey() string {
+	return c.apiKey
+}
+
+func (c BaseClient) Model() string {
+	return c.model
+}
+
+func (c BaseClient) HTTPClient() *http.Client {
+	return c.httpClient
 }

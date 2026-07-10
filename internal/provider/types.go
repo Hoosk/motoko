@@ -11,14 +11,6 @@ const (
 	RoleAssistant = "assistant"
 	RoleTool      = "tool"
 
-	schemaInput                = "input"
-	schemaDescription          = "description"
-	schemaObject               = "object"
-	schemaProperties           = "properties"
-	schemaRequired             = "required"
-	schemaAdditionalProperties = "additionalProperties"
-	schemaString               = "string"
-
 	keyRole     = "role"
 	schemaType  = "type"
 	keyModel    = "model"

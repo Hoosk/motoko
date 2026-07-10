@@ -29,9 +29,6 @@ func (d *DependencyTachikoma) Name() string {
 }
 
 func (d *DependencyTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
-	// Watch for changes in workspace
-	events, _ := WatchHelper(ctx, []string{"."}, 1*time.Second)
-
 	refresh := func() {
 		ecosystems := make(map[string][]string)
 
@@ -100,22 +97,7 @@ func (d *DependencyTachikoma) Run(ctx context.Context, publish func(Update) bool
 		})
 	}
 
-	// Initial refresh
-	refresh()
-
-	ticker := time.NewTicker(d.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			refresh()
-		case <-events:
-			refresh()
-		}
-	}
+	return runRefreshLoop(ctx, d.interval, []string{"."}, time.Second, refresh)
 }
 
 func parseGoMod(content string) (string, []string) {

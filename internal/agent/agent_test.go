@@ -62,31 +62,14 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 	}
 }
 
-type captureProvider struct {
-	messages []provider.ConversationItem
-	tools    provider.ToolSet
-}
-
-func (c *captureProvider) Configured() bool     { return true }
-func (c *captureProvider) ProviderKind() string { return "fake" }
-func (c *captureProvider) Summary() string      { return "fake:capture" }
-func (c *captureProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	return []provider.ModelInfo{{ID: "capture"}}, nil
-}
-func (c *captureProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	return provider.ModelInfo{ID: model}, nil
-}
-func (c *captureProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
-	c.messages = append([]provider.ConversationItem(nil), messages...)
-	c.tools = tools
-	return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
-}
-func (c *captureProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
-	return c.Complete(ctx, systemPrompt, messages, tools)
-}
-
 func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
-	p := &captureProvider{}
+	var capturedMessages []provider.ConversationItem
+	var capturedTools provider.ToolSet
+	p := &fakeProviderClient{summary: "fake:capture", models: []provider.ModelInfo{{ID: "capture"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		capturedMessages = append([]provider.ConversationItem(nil), messages...)
+		capturedTools = tools
+		return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
+	}}
 	a := New(p, tools.NewRegistry())
 	messages := []provider.ConversationItem{provider.UserText("haz algo")}
 	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko", ActiveMode: "plan"}
@@ -95,20 +78,23 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 	if _, err := a.complete(context.Background(), info, messages, nil, specs); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.messages) != 2 {
-		t.Fatalf("expected original message plus dynamic tail, got %#v", p.messages)
+	if len(capturedMessages) != 2 {
+		t.Fatalf("expected original message plus dynamic tail, got %#v", capturedMessages)
 	}
-	if p.messages[0].Content != "haz algo" {
-		t.Fatalf("expected original user message untouched, got %#v", p.messages[0])
+	if capturedMessages[0].Content != "haz algo" {
+		t.Fatalf("expected original user message untouched, got %#v", capturedMessages[0])
 	}
-	if p.messages[1].Role != provider.RoleUser {
-		t.Fatalf("expected dynamic tail to be a user message, got %#v", p.messages[1])
+	if capturedMessages[1].Role != provider.RoleUser {
+		t.Fatalf("expected dynamic tail to be a user message, got %#v", capturedMessages[1])
 	}
-	if !strings.Contains(p.messages[1].Content, "<environment>") {
-		t.Fatalf("expected dynamic tail to include environment context, got %q", p.messages[1].Content)
+	if !strings.Contains(capturedMessages[1].Content, "<environment>") {
+		t.Fatalf("expected dynamic tail to include environment context, got %q", capturedMessages[1].Content)
 	}
-	if !strings.Contains(p.messages[1].Content, "PLAN MODE") {
-		t.Fatalf("expected dynamic tail to include active mode fragment/context, got %q", p.messages[1].Content)
+	if !strings.Contains(capturedMessages[1].Content, "PLAN MODE") {
+		t.Fatalf("expected dynamic tail to include active mode fragment/context, got %q", capturedMessages[1].Content)
+	}
+	if len(capturedTools.Local) != len(specs) {
+		t.Fatalf("expected captured tool set to match computed specs")
 	}
 	if messages[0].Content != "haz algo" {
 		t.Fatalf("expected input slice to remain unmodified, got %#v", messages)

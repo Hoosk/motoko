@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
@@ -182,4 +183,32 @@ func (m *Manager) publishUpdate(update Update) bool {
 
 func (m *Manager) Updates() <-chan Update {
 	return m.updates
+}
+
+func runRefreshLoop(ctx context.Context, interval time.Duration, watchPaths []string, watchDebounce time.Duration, refresh func()) error {
+	var events <-chan struct{}
+	if len(watchPaths) > 0 {
+		events, _ = WatchHelper(ctx, watchPaths, watchDebounce)
+	}
+
+	refresh()
+
+	if interval <= 0 {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			refresh()
+		case <-events:
+			refresh()
+		}
+	}
 }
