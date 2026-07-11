@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
@@ -25,6 +26,7 @@ import (
 	"github.com/Hoosk/motoko/internal/app/commands"
 	"github.com/Hoosk/motoko/internal/app/completions"
 	"github.com/Hoosk/motoko/internal/app/providerman"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/app/sessionman"
 	"github.com/Hoosk/motoko/internal/app/taskman"
 	"github.com/Hoosk/motoko/internal/app/types"
@@ -91,11 +93,14 @@ type pendingShell struct {
 
 type Runtime struct {
 	backgroundCtx     context.Context
+	backgroundCancel  context.CancelFunc
+	updateMu          sync.RWMutex
 	updateErr         error
 	semantic          *semantic.Index
 	newProviderClient func(config.ProviderConfig) (provider.Client, error)
 	config            *config.AppConfig
 	taskMgr           *taskman.Manager
+	scheduleMgr       *scheduleman.Manager
 	sesMgr            *sessionman.Manager
 	provMgr           *providerman.Manager
 	agOrch            *agentorch.Orchestrator
@@ -109,6 +114,7 @@ type Runtime struct {
 	inputMode         InputMode
 	version           string
 	contextWindow     int
+	questionBroker    *tools.QuestionBroker
 }
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {
@@ -153,6 +159,8 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		semantic:          semantic.NewIndex(),
 		tachikomas:        tachikoma.NewManager(),
 		taskMgr:           taskman.NewManager(),
+		scheduleMgr:       scheduleman.NewManager(),
+		questionBroker:    tools.NewQuestionBroker(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
 	}
@@ -235,16 +243,22 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		ContextWindowFn: func() int { return r.contextWindow },
 	})
 	r.cplDeps = completions.Deps{
-		AgentNamesFn:      func() []string { return r.agOrch.AgentNames() },
-		SemanticFn:        func() *semantic.Index { return r.semantic },
-		InputModeFn:       func() types.InputMode { return r.inputMode },
-		ToolSuggestionsFn: func(prefix string) []tools.Spec { return r.ToolSuggestions(prefix) },
-		ActiveConfigFn:    func() (config.ProviderConfig, bool) { return r.config.Active() },
+		AgentNamesFn:          func() []string { return r.agOrch.AgentNames() },
+		SemanticFn:            func() *semantic.Index { return r.semantic },
+		InputModeFn:           func() types.InputMode { return r.inputMode },
+		ToolSuggestionsFn:     func(prefix string) []tools.Spec { return r.ToolSuggestions(prefix) },
+		ActiveConfigFn:        func() (config.ProviderConfig, bool) { return r.config.Active() },
+		ConfiguredProvidersFn: func() []config.ProviderConfig { return r.ConfiguredProviders() },
 	}
 
 	if r.config.Theme != "" {
 		styles.SetTheme(r.config.Theme)
 	}
+
+	r.scheduleMgr.SetOnChange(func(defs []scheduleman.Definition) {
+		r.persistSchedules(defs)
+	})
+	r.restoreSchedules()
 
 	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
 	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
@@ -255,6 +269,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))
 	r.tools.Register(tools.NewDelegateTool(r))
 	r.tools.Register(tools.NewTaskTool(r))
+	r.tools.Register(tools.NewQuestionTool(r.questionBroker))
 	r.tools.Register(tools.NewBrainWriteTool(r))
 	r.tools.Register(tools.NewBrainReadTool(r))
 	r.tools.Register(tools.NewBrainListTool(r))
@@ -369,6 +384,38 @@ func (r *Runtime) ActiveTasks() int {
 	return r.taskMgr.ActiveTasks()
 }
 
+func (r *Runtime) NextScheduleEvent(ctx context.Context) scheduleman.EventResult {
+	if r.scheduleMgr == nil {
+		return scheduleman.EventResult{}
+	}
+	return r.scheduleMgr.Next(ctx)
+}
+
+func (r *Runtime) AddSchedule(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error) {
+	if r.scheduleMgr == nil {
+		return scheduleman.Definition{}, fmt.Errorf("schedule manager not initialized")
+	}
+	return r.scheduleMgr.Add(instruction, interval, oneShot)
+}
+
+func (r *Runtime) RemoveSchedule(id string) error {
+	if r.scheduleMgr == nil {
+		return fmt.Errorf("schedule manager not initialized")
+	}
+	return r.scheduleMgr.Remove(id)
+}
+
+func (r *Runtime) ListSchedules() []scheduleman.Definition {
+	if r.scheduleMgr == nil {
+		return nil
+	}
+	return r.scheduleMgr.List()
+}
+
+func (r *Runtime) Config() *config.AppConfig { return r.config }
+
+func (r *Runtime) SaveConfig() error { return r.config.Save() }
+
 func (r *Runtime) ProviderSummary() string                  { return r.provMgr.ProviderSummary() }
 func (r *Runtime) ProviderPresets() []config.ProviderPreset { return r.provMgr.ProviderPresets() }
 func (r *Runtime) ConfiguredProviders() []config.ProviderConfig {
@@ -400,8 +447,14 @@ func (r *Runtime) SessionTitle() string                      { return r.sesMgr.S
 func (r *Runtime) StartupEntries() []Entry                   { return r.sesMgr.StartupEntries() }
 func (r *Runtime) GetBrain() *brain.Brain                    { return r.sesMgr.Brain() }
 func (r *Runtime) ListSessions() ([]*session.Session, error) { return r.sesMgr.ListSessions() }
-func (r *Runtime) LoadSession(id string) error               { return r.sesMgr.LoadSession(id) }
-func (r *Runtime) CurrentSessionEntries() []Entry            { return r.sesMgr.CurrentSessionEntries() }
+func (r *Runtime) LoadSession(id string) error {
+	if err := r.sesMgr.LoadSession(id); err != nil {
+		return err
+	}
+	r.restoreSchedules()
+	return nil
+}
+func (r *Runtime) CurrentSessionEntries() []Entry { return r.sesMgr.CurrentSessionEntries() }
 func (r *Runtime) CompactSession(ctx context.Context) Response {
 	return r.sesMgr.CompactSession(ctx, r.config, r.newProviderClient, r.contextWindow)
 }
@@ -409,21 +462,27 @@ func (r *Runtime) CompactSession(ctx context.Context) Response {
 func (r *Runtime) ActiveSubagents() []string                   { return r.agOrch.ActiveSubagents() }
 func (r *Runtime) SystemPrompt(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) }
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
+	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
 	return r.agOrch.RunAgent(ctx, info, input)
 }
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
+	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
 	return r.agOrch.RunAgentStream(ctx, info, input, func(ev types.AgentStreamEvent) error {
 		return onEvent(AgentStreamEvent(ev))
 	})
 }
 func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
+	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
 	return r.agOrch.RunSubagent(ctx, cfg)
 }
 
 func (r *Runtime) Start(ctx context.Context) {
-	r.backgroundCtx = ctx
+	r.backgroundCtx, r.backgroundCancel = context.WithCancel(ctx)
+	if r.scheduleMgr != nil {
+		r.scheduleMgr.AttachContext(r.backgroundCtx)
+	}
 	if r.tachikomas != nil {
-		r.tachikomas.Start(ctx)
+		r.tachikomas.Start(r.backgroundCtx)
 	}
 	_ = provider.LoadCatalog(context.Background())
 	r.agOrch.RefreshAgent()
@@ -437,7 +496,9 @@ func (r *Runtime) Start(ctx context.Context) {
 			GOOS:           runtime.GOOS,
 			GOARCH:         runtime.GOARCH,
 		})
-		info, err := upd.CheckVersion(ctx)
+		info, err := upd.CheckVersion(r.backgroundCtx)
+		r.updateMu.Lock()
+		defer r.updateMu.Unlock()
 		if err != nil {
 			r.updateErr = err
 			return
@@ -446,20 +507,65 @@ func (r *Runtime) Start(ctx context.Context) {
 	}()
 }
 
+func (r *Runtime) restoreSchedules() {
+	if r.scheduleMgr == nil || r.sesMgr == nil || r.sesMgr.Brain() == nil {
+		return
+	}
+	if !r.sesMgr.Brain().Exists("schedule") {
+		r.scheduleMgr.Restore(nil)
+		return
+	}
+	content, err := r.sesMgr.Brain().Read("schedule")
+	if err != nil {
+		return
+	}
+	r.scheduleMgr.Restore(scheduleman.ParseScheduleBrain(content))
+}
+
+func (r *Runtime) persistSchedules(defs []scheduleman.Definition) {
+	if r.sesMgr == nil || r.sesMgr.Brain() == nil {
+		return
+	}
+	if len(defs) == 0 {
+		_ = r.sesMgr.Brain().Delete("schedule")
+		return
+	}
+	_ = r.sesMgr.Brain().Write("schedule", scheduleman.FormatScheduleBrain(defs))
+}
+
 func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {
 	if r.backgroundCtx != nil {
 		select {
 		case <-r.updateDone:
+			r.updateMu.RLock()
+			defer r.updateMu.RUnlock()
 			return r.updateInfo, r.updateErr
 		case <-r.backgroundCtx.Done():
 			return nil, r.backgroundCtx.Err()
 		}
 	}
 	<-r.updateDone
+	r.updateMu.RLock()
+	defer r.updateMu.RUnlock()
 	return r.updateInfo, r.updateErr
 }
 
 func (r *Runtime) Tachikomas() *tachikoma.Manager { return r.tachikomas }
+
+func (r *Runtime) QuestionBroker() *tools.QuestionBroker { return r.questionBroker }
+
+func (r *Runtime) BackgroundContext() context.Context {
+	if r.backgroundCtx != nil {
+		return r.backgroundCtx
+	}
+	return context.Background()
+}
+
+func (r *Runtime) Stop() {
+	if r.backgroundCancel != nil {
+		r.backgroundCancel()
+	}
+}
 
 func (r *Runtime) GetContextInfo() system.ContextInfo {
 	if r.tachikomas != nil {

@@ -20,12 +20,6 @@ func (g *GitTachikoma) Name() string {
 }
 
 func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
-	ticker := time.NewTicker(g.interval)
-	defer ticker.Stop()
-
-	// Watch for git changes and workspace changes recursively
-	events, _ := WatchHelper(ctx, []string{".", ".git"}, 1*time.Second)
-
 	refresh := func() {
 		baseInfo := system.GetContextInfo()
 		gitInfo := system.GetGitInfo(baseInfo.Path)
@@ -37,17 +31,5 @@ func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error
 		publish(Update{Name: g.Name(), Status: status, Payload: gitInfo})
 	}
 
-	// Initial refresh
-	refresh()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			refresh()
-		case <-events:
-			refresh()
-		}
-	}
+	return runRefreshLoop(ctx, g.interval, []string{".", ".git"}, time.Second, refresh)
 }

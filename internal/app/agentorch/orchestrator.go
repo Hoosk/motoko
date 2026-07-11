@@ -235,6 +235,9 @@ func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.Agen
 	if hasOverride && len(override.ExcludeTools) > 0 {
 		deniedTools = override.ExcludeTools
 	}
+	if !hasOverride && aDef.Permissions.MaxIterations > 0 {
+		override.MaxIterations = &aDef.Permissions.MaxIterations
+	}
 
 	toolsRegistry := o.toolsFn().Filter(func(t tools.Tool) bool {
 		name := t.Spec().Name
@@ -261,6 +264,9 @@ func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.Agen
 			return false
 		}
 		if name == "delegate" && !aDef.Permissions.AllowDelegate {
+			return false
+		}
+		if name == "question" && !aDef.Permissions.AllowQuestion {
 			return false
 		}
 		if name == "task" && !aDef.Permissions.AllowTask {
@@ -391,6 +397,7 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 	}
 
 	subCtx := tools.WithBrain(ctx, subBrain)
+	subCtx = tools.WithQuestionBroker(subCtx, tools.GetQuestionBroker(ctx))
 	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
 	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
@@ -426,55 +433,23 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 }
 
 func (o *Orchestrator) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
-	if o.agent == nil || !o.agent.Configured() {
-		return agent.Result{}, fmt.Errorf("agent not configured")
+	ctx, info, priorHistory, err := o.prepareRunContext(ctx, info, input)
+	if err != nil {
+		return agent.Result{}, err
 	}
-	if info.Path == "" {
-		info = o.contextInfoFn()
-	}
-	info = o.EnrichContext(ctx, info, input)
-	priorHistory := []provider.ConversationItem(nil)
-	if sess := o.currentSessionFn(); sess != nil {
-		priorHistory = append(priorHistory, sess.History...)
-		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
-		ctx = provider.WithTelemetry(ctx, sess.ID, reqID)
-	}
-	ctx = tools.WithBrain(ctx, o.brainFn())
-	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	result, err := o.agent.Run(ctx, info, input, priorHistory)
 	if err != nil {
 		return result, err
 	}
-	if o.onPersistTurn != nil {
-		o.onPersistTurn(result)
-	}
-	if sess := o.currentSessionFn(); sess != nil && (strings.TrimSpace(sess.Title) == "" || strings.EqualFold(strings.TrimSpace(sess.Title), "New session")) {
-		if o.onGenerateTitle != nil {
-			go o.onGenerateTitle(ctx, input, result.Assistant)
-		}
-	}
-	if o.onMaybeAutoCompact != nil {
-		_ = o.onMaybeAutoCompact(ctx, nil)
-	}
+	o.finishRun(ctx, input, result, nil)
 	return result, nil
 }
 
 func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(types.AgentStreamEvent) error) (agent.Result, error) {
-	if o.agent == nil || !o.agent.Configured() {
-		return agent.Result{}, fmt.Errorf("agent not configured")
+	ctx, info, priorHistory, err := o.prepareRunContext(ctx, info, input)
+	if err != nil {
+		return agent.Result{}, err
 	}
-	if info.Path == "" {
-		info = o.contextInfoFn()
-	}
-	info = o.EnrichContext(ctx, info, input)
-	priorHistory := []provider.ConversationItem(nil)
-	if sess := o.currentSessionFn(); sess != nil {
-		priorHistory = append(priorHistory, sess.History...)
-		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
-		ctx = provider.WithTelemetry(ctx, sess.ID, reqID)
-	}
-	ctx = tools.WithBrain(ctx, o.brainFn())
-	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	result, err := o.agent.RunStream(ctx, info, input, priorHistory, func(event agent.StreamEvent) error {
 		if onEvent == nil {
 			return nil
@@ -489,6 +464,33 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 	if err != nil {
 		return result, err
 	}
+	o.finishRun(ctx, input, result, onEvent)
+	return result, nil
+}
+
+func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.ContextInfo, input string) (context.Context, system.ContextInfo, []provider.ConversationItem, error) {
+	if o.agent == nil || !o.agent.Configured() {
+		return ctx, system.ContextInfo{}, nil, fmt.Errorf("agent not configured")
+	}
+	if info.Path == "" {
+		info = o.contextInfoFn()
+	}
+	info = o.EnrichContext(ctx, info, input)
+
+	priorHistory := []provider.ConversationItem(nil)
+	if sess := o.currentSessionFn(); sess != nil {
+		priorHistory = append(priorHistory, sess.History...)
+		reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
+		ctx = provider.WithTelemetry(ctx, sess.ID, reqID)
+	}
+
+	ctx = tools.WithBrain(ctx, o.brainFn())
+	ctx = tools.WithQuestionBroker(ctx, tools.GetQuestionBroker(ctx))
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(o.contextWindowFn()))
+	return ctx, info, priorHistory, nil
+}
+
+func (o *Orchestrator) finishRun(ctx context.Context, input string, result agent.Result, onEvent func(types.AgentStreamEvent) error) {
 	if o.onPersistTurn != nil {
 		o.onPersistTurn(result)
 	}
@@ -500,11 +502,14 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 	if o.onMaybeAutoCompact != nil {
 		_ = o.onMaybeAutoCompact(ctx, onEvent)
 	}
-	return result, nil
 }
 
 func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInfo, input string) system.ContextInfo {
 	info.ContextWindow = o.contextWindowFn()
+	if cfg := o.configFn(); cfg != nil {
+		info.ThinkingVerbosity = cfg.ThinkingVerbosity
+		ctx = tools.WithConfig(ctx, cfg)
+	}
 
 	br := tools.GetBrain(ctx)
 	if br == nil {
@@ -607,7 +612,7 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 			break
 		}
 	}
-	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets))
+	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d on_demand=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets), len(info.OnDemandSignals))
 
 	if info.Path != "" {
 		agentsPath := filepath.Join(info.Path, "AGENTS.md")

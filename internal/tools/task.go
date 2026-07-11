@@ -32,6 +32,13 @@ func (t *TaskTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("task runner no inicializado")
 	}
 	args = strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		if command := jsonStr(parsed, "command", "cmd"); command != "" {
+			args = command
+		} else if terminateID := jsonStr(parsed, "terminate", "task_id", "taskId", "id"); terminateID != "" {
+			args = "terminate " + terminateID
+		}
+	}
 	if args == "" {
 		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
 	}

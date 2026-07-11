@@ -13,11 +13,12 @@ import (
 )
 
 type Deps struct {
-	AgentNamesFn      func() []string
-	SemanticFn        func() *semantic.Index
-	InputModeFn       func() types.InputMode
-	ToolSuggestionsFn func(prefix string) []tools.Spec
-	ActiveConfigFn    func() (config.ProviderConfig, bool)
+	AgentNamesFn          func() []string
+	SemanticFn            func() *semantic.Index
+	InputModeFn           func() types.InputMode
+	ToolSuggestionsFn     func(prefix string) []tools.Spec
+	ActiveConfigFn        func() (config.ProviderConfig, bool)
+	ConfiguredProvidersFn func() []config.ProviderConfig
 }
 
 func Completions(d Deps, input string) []string {
@@ -119,6 +120,39 @@ func Completions(d Deps, input string) []string {
 			prefix = strings.Join(parts[2:], " ")
 		}
 		return modelCompletions(active.Models, prefix, "/models "+subcommand+" ")
+	}
+
+	if strings.EqualFold(parts[0], "provider") {
+		providers := d.ConfiguredProvidersFn()
+		if len(parts) == 1 {
+			return []string{"/provider list", "/provider add", "/provider use ", "/provider remove "}
+		}
+		subcommand := strings.ToLower(parts[1])
+		if len(parts) == 2 && !hasTrailingSpace {
+			options := []string{"list", "add", "use", "remove"}
+			var result []string
+			for _, option := range options {
+				if strings.HasPrefix(option, subcommand) {
+					result = append(result, "/provider "+option)
+				}
+			}
+			if len(result) > 0 {
+				return result
+			}
+		}
+		if subcommand == "use" || subcommand == "remove" {
+			prefix := ""
+			if len(parts) > 2 {
+				prefix = strings.Join(parts[2:], " ")
+			}
+			var result []string
+			for _, p := range providers {
+				if prefix == "" || strings.HasPrefix(strings.ToLower(p.Name), strings.ToLower(prefix)) {
+					result = append(result, "/provider "+subcommand+" "+p.Name)
+				}
+			}
+			return result
+		}
 	}
 
 	if strings.EqualFold(parts[0], "themes") {

@@ -122,58 +122,52 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 }
 
 func TestToSDKMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
-	call := provider.ToolInvocation{
-		Kind:   provider.InvokeCustomTool,
-		Name:   "bash",
-		Input:  "ls",
-		CallID: "call_abc",
-	}
-	messages := []provider.ConversationItem{
-		provider.UserText("first"),
-		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
-		provider.UserText("last"),
-	}
-
-	got := toSDKMessages(messages)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(got))
-	}
-	if got[0].Content[0].OfText.CacheControl != (sdk.CacheControlEphemeralParam{}) {
-		t.Fatalf("expected first message cache control to be empty, got %#v", got[0].Content[0].OfText.CacheControl)
-	}
-	if got[1].Content[0].OfToolUse == nil || got[1].Content[0].OfToolUse.CacheControl == (sdk.CacheControlEphemeralParam{}) {
-		t.Fatalf("expected penultimate tool_use cache control, got %#v", got[1].Content[0])
-	}
-	if got[2].Content[0].OfText.CacheControl != (sdk.CacheControlEphemeralParam{}) {
-		t.Fatalf("expected last message cache control to be empty, got %#v", got[2].Content[0].OfText.CacheControl)
-	}
+	assertPenultimateToolUseCacheControl(
+		t,
+		toSDKMessages(toolUseCacheControlMessages()),
+		func(msg sdk.MessageParam) sdk.CacheControlEphemeralParam { return msg.Content[0].OfText.CacheControl },
+		func(msg sdk.MessageParam) bool { return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.CacheControlEphemeralParam{}) },
+	)
 }
 
 func TestToSDKBetaMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
+	assertPenultimateToolUseCacheControl(
+		t,
+		toSDKBetaMessages(toolUseCacheControlMessages()),
+		func(msg sdk.BetaMessageParam) sdk.BetaCacheControlEphemeralParam { return msg.Content[0].OfText.CacheControl },
+		func(msg sdk.BetaMessageParam) bool { return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) },
+	)
+}
+
+func toolUseCacheControlMessages() []provider.ConversationItem {
 	call := provider.ToolInvocation{
 		Kind:   provider.InvokeCustomTool,
 		Name:   "bash",
 		Input:  "ls",
 		CallID: "call_abc",
 	}
-	messages := []provider.ConversationItem{
+	return []provider.ConversationItem{
 		provider.UserText("first"),
 		provider.AssistantTurn("", "", []provider.ToolInvocation{call}),
 		provider.UserText("last"),
 	}
+}
 
-	got := toSDKBetaMessages(messages)
+
+func assertPenultimateToolUseCacheControl[Msg any, Cache comparable](t *testing.T, got []Msg, firstCache func(Msg) Cache, secondHasToolUseCache func(Msg) bool) {
+	t.Helper()
 	if len(got) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(got))
 	}
-	if got[0].Content[0].OfText.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) {
-		t.Fatalf("expected first message cache control to be empty, got %#v", got[0].Content[0].OfText.CacheControl)
+	var zero Cache
+	if firstCache(got[0]) != zero {
+		t.Fatalf("expected first message cache control to be empty, got %#v", firstCache(got[0]))
 	}
-	if got[1].Content[0].OfToolUse == nil || got[1].Content[0].OfToolUse.CacheControl == (sdk.BetaCacheControlEphemeralParam{}) {
-		t.Fatalf("expected penultimate beta tool_use cache control, got %#v", got[1].Content[0])
+	if !secondHasToolUseCache(got[1]) {
+		t.Fatalf("expected penultimate tool_use cache control, got %#v", got[1])
 	}
-	if got[2].Content[0].OfText.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) {
-		t.Fatalf("expected last message cache control to be empty, got %#v", got[2].Content[0].OfText.CacheControl)
+	if firstCache(got[2]) != zero {
+		t.Fatalf("expected last message cache control to be empty, got %#v", firstCache(got[2]))
 	}
 }
 
@@ -273,8 +267,8 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 	})
 	aClient := client.(*anthropicClient)
 	sdkClient := sdk.NewClient(
-		option.WithAPIKey(aClient.apiKey),
-		option.WithBaseURL(aClient.baseURL),
+		option.WithAPIKey(aClient.APIKey()),
+		option.WithBaseURL(aClient.BaseURL()),
 		option.WithHTTPClient(httpClient),
 	)
 	aClient.sdkClient = &sdkClient
@@ -309,8 +303,8 @@ func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 		}, nil
 	})}
 	sdkClientFallback := sdk.NewClient(
-		option.WithAPIKey(aClientFallback.apiKey),
-		option.WithBaseURL(aClientFallback.baseURL),
+		option.WithAPIKey(aClientFallback.APIKey()),
+		option.WithBaseURL(aClientFallback.BaseURL()),
 		option.WithHTTPClient(fallbackHTTPClient),
 	)
 	aClientFallback.sdkClient = &sdkClientFallback

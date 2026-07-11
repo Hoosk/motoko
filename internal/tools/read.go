@@ -34,26 +34,46 @@ func (t *ReadTool) Spec() Spec {
 
 func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
+	args = strings.TrimSpace(args)
 	parts := strings.Fields(args)
-	if len(parts) == 0 {
-		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
-	}
-
 	offset := 1
 	limit := defaultReadLimit
-	if len(parts) >= 2 {
-		value, err := strconv.Atoi(parts[1])
-		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
+
+	if parsed := parseJSONArgs(args); parsed != nil {
+		path := jsonStr(parsed, "path", "filePath", "file_path", "file")
+		if path == "" {
+			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 		}
-		offset = value
-	}
-	if len(parts) >= 3 {
-		value, err := strconv.Atoi(parts[2])
-		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
+		if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
+			if value < 1 {
+				return Result{}, fmt.Errorf("invalid offset: %d", value)
+			}
+			offset = value
 		}
-		limit = value
+		if value, ok := jsonInt(parsed, "limit", "lines", "max_lines", "count"); ok {
+			if value < 1 {
+				return Result{}, fmt.Errorf("invalid limit: %d", value)
+			}
+			limit = value
+		}
+		parts = []string{path}
+	} else if len(parts) == 0 {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+	} else {
+		if len(parts) >= 2 {
+			value, err := strconv.Atoi(parts[1])
+			if err != nil || value < 1 {
+				return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
+			}
+			offset = value
+		}
+		if len(parts) >= 3 {
+			value, err := strconv.Atoi(parts[2])
+			if err != nil || value < 1 {
+				return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
+			}
+			limit = value
+		}
 	}
 
 	absPath, relPath, err := resolveWorkspacePath(parts[0])

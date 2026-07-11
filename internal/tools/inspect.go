@@ -33,6 +33,9 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	name := strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		name = jsonStr(parsed, "worker_name", "workerName", "worker", "name")
+	}
 	if name == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

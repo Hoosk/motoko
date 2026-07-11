@@ -72,7 +72,7 @@ func pendingLabel(pending string) string {
 	return pending
 }
 
-func renderToolPalette(specs []tools.Spec, tachikomaInfo map[string]string) string {
+func renderToolPalette(specs []tools.Spec) string {
 	title := styles.PopupTitleStyle.Render("TOOL CATALOG")
 	help := styles.PopupMutedStyle.Render("Press Ctrl+T to close. Use /tool <name> <args> to execute.")
 
@@ -143,9 +143,9 @@ func trimLastRune(value string) string {
 	return string(runes[:len(runes)-1])
 }
 
-func clamp(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
+func clamp(value, maxValue int) int {
+	if value < 0 {
+		return 0
 	}
 	if value > maxValue {
 		return maxValue
@@ -193,7 +193,7 @@ func truncateANSI(s string, maxCols int) string {
 }
 
 // overlayBase superimposes an overlay string (toast) over a base string.
-func overlayBase(base, overlay string, width, height int) string {
+func overlayBase(base, overlay string, width int) string {
 	baseLines := strings.Split(base, "\n")
 	overlayLines := strings.Split(overlay, "\n")
 

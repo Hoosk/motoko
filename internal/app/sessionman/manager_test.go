@@ -129,15 +129,20 @@ func TestPersistTurn(t *testing.T) {
 	m.SetCurrentSession(s)
 
 	m.PersistTurn(agent.Result{
-		Assistant: "response",
+		Assistant:  "response",
+		AgentLabel: "fake:provider",
+		Iterations: []provider.Usage{{InputTokens: 60, OutputTokens: 20, TotalTokens: 80, ReasoningTokens: 5}, {InputTokens: 100, OutputTokens: 30, TotalTokens: 130, ReasoningTokens: 7}},
 		History: []provider.ConversationItem{
 			{Role: "user", Content: "query"},
 			{Role: "assistant", Content: "response"},
 		},
 		Usage: provider.Usage{
-			InputTokens:  100,
-			OutputTokens: 50,
-			TotalTokens:  150,
+			InputTokens:           100,
+			OutputTokens:          50,
+			TotalTokens:           150,
+			ReasoningTokens:       12,
+			CacheReadInputTokens:  11,
+			CacheWriteInputTokens: 6,
 		},
 	})
 
@@ -149,6 +154,15 @@ func TestPersistTurn(t *testing.T) {
 	}
 	if s.TotalInputTokens != 100 {
 		t.Errorf("expected TotalInputTokens 100, got %d", s.TotalInputTokens)
+	}
+	if s.LastOutputTokens != 50 || s.LastReasoningTokens != 12 {
+		t.Fatalf("expected last output/reasoning tokens persisted, got %#v", s)
+	}
+	if len(s.Turns) != 1 {
+		t.Fatalf("expected one tracked turn, got %#v", s.Turns)
+	}
+	if s.Turns[0].InputGrowth != 40 {
+		t.Fatalf("expected input growth 40, got %#v", s.Turns[0])
 	}
 }
 

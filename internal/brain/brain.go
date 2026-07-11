@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,11 @@ type FileInfo struct {
 	Name      string
 	SizeBytes int64
 }
+
+var (
+	pendingTaskPattern   = regexp.MustCompile(`(?m)^\s*- \[ \] `)
+	completedTaskPattern = regexp.MustCompile(`(?m)^\s*- \[x\] `)
+)
 
 // New creates/resolves the brain directory for a given workspace and session.
 func New(workspaceID, sessionID string) (*Brain, error) {
@@ -209,6 +215,16 @@ func (b *Brain) TasksSummary() string {
 		return content[:1000] + "\n... [tasks.md truncated, use brain_read to view full tasks list] ..."
 	}
 	return content
+}
+
+func (b *Brain) TaskCounts() (pending int, completed int) {
+	content, err := b.Read("tasks.md")
+	if err != nil {
+		return 0, 0
+	}
+	pending = len(pendingTaskPattern.FindAllString(content, -1))
+	completed = len(completedTaskPattern.FindAllString(strings.ToLower(content), -1))
+	return pending, completed
 }
 
 func isInvalidName(name string) bool {

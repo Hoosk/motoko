@@ -21,22 +21,10 @@ func (w *WorkspaceTachikoma) Name() string {
 }
 
 func (w *WorkspaceTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	refresh := func() {
 		info := system.GetContextInfo()
 		publish(Update{Name: w.Name(), Status: fmt.Sprintf("workspace %s", info.Workspace)})
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
 	}
+
+	return runRefreshLoop(ctx, w.interval, nil, 0, refresh)
 }

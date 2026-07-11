@@ -62,54 +62,108 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 	}
 }
 
-type captureProvider struct {
-	messages []provider.ConversationItem
-	tools    provider.ToolSet
-}
-
-func (c *captureProvider) Configured() bool     { return true }
-func (c *captureProvider) ProviderKind() string { return "fake" }
-func (c *captureProvider) Summary() string      { return "fake:capture" }
-func (c *captureProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	return []provider.ModelInfo{{ID: "capture"}}, nil
-}
-func (c *captureProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	return provider.ModelInfo{ID: model}, nil
-}
-func (c *captureProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
-	c.messages = append([]provider.ConversationItem(nil), messages...)
-	c.tools = tools
-	return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
-}
-func (c *captureProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
-	return c.Complete(ctx, systemPrompt, messages, tools)
-}
-
 func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
-	p := &captureProvider{}
+	var capturedMessages []provider.ConversationItem
+	var capturedSystemPrompt string
+	var capturedTools provider.ToolSet
+	p := &fakeProviderClient{summary: "fake:capture", models: []provider.ModelInfo{{ID: "capture"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		capturedMessages = append([]provider.ConversationItem(nil), messages...)
+		capturedSystemPrompt = systemPrompt
+		capturedTools = tools
+		return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
+	}}
 	a := New(p, tools.NewRegistry())
 	messages := []provider.ConversationItem{provider.UserText("haz algo")}
 	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko", ActiveMode: "plan"}
+	specs := a.tools.Specs(buildToolContext(info))
 
-	if _, err := a.complete(context.Background(), info, messages, nil); err != nil {
+	if _, err := a.complete(context.Background(), info, messages, nil, specs); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.messages) != 2 {
-		t.Fatalf("expected original message plus dynamic tail, got %#v", p.messages)
+	if len(capturedMessages) != 2 {
+		t.Fatalf("expected original message plus dynamic tail, got %#v", capturedMessages)
 	}
-	if p.messages[0].Content != "haz algo" {
-		t.Fatalf("expected original user message untouched, got %#v", p.messages[0])
+	if capturedMessages[0].Content != "haz algo" {
+		t.Fatalf("expected original user message untouched, got %#v", capturedMessages[0])
 	}
-	if p.messages[1].Role != provider.RoleUser {
-		t.Fatalf("expected dynamic tail to be a user message, got %#v", p.messages[1])
+	if capturedMessages[1].Role != provider.RoleUser {
+		t.Fatalf("expected dynamic tail to be a user message, got %#v", capturedMessages[1])
 	}
-	if !strings.Contains(p.messages[1].Content, "<environment>") {
-		t.Fatalf("expected dynamic tail to include environment context, got %q", p.messages[1].Content)
+	if !strings.Contains(capturedMessages[1].Content, "<environment>") {
+		t.Fatalf("expected dynamic tail to include environment context, got %q", capturedMessages[1].Content)
 	}
-	if !strings.Contains(p.messages[1].Content, "PLAN MODE") {
-		t.Fatalf("expected dynamic tail to include active mode fragment/context, got %q", p.messages[1].Content)
+	if strings.Contains(capturedMessages[1].Content, "PLAN MODE") {
+		t.Fatalf("mode fragment should not be in the dynamic tail, got %q", capturedMessages[1].Content)
+	}
+	if !strings.Contains(capturedSystemPrompt, "PLAN MODE") {
+		t.Fatalf("expected system prompt to include active mode fragment, got %q", capturedSystemPrompt)
+	}
+	if !strings.Contains(capturedSystemPrompt, "<operational_mode>") {
+		t.Fatalf("expected system prompt to wrap mode fragment in <operational_mode> block, got %q", capturedSystemPrompt)
+	}
+	if len(capturedTools.Local) != len(specs) {
+		t.Fatalf("expected captured tool set to match computed specs")
 	}
 	if messages[0].Content != "haz algo" {
 		t.Fatalf("expected input slice to remain unmodified, got %#v", messages)
+	}
+}
+
+func TestBuildSystemPromptIncludesPatchFormatNote(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace: "motoko",
+		Path:      "/tmp/motoko",
+	}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "patch", Summary: "Applies changes", Usage: "patch <path>"},
+	}, "")
+
+	if !strings.Contains(prompt, "<<<<<<< AST") {
+		t.Fatalf("prompt missing AST patch format markers: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Selector keys (key: value)") {
+		t.Fatalf("prompt missing AST selector keys documentation: %s", prompt)
+	}
+	if !strings.Contains(prompt, "type, name, query, capture, action, contains, index") {
+		t.Fatalf("prompt missing valid AST selector keys: %s", prompt)
+	}
+	if !strings.Contains(prompt, "function_declaration") {
+		t.Fatalf("prompt missing AST format example: %s", prompt)
+	}
+}
+
+func TestBuildSystemPromptIncludesInspectNote(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace: "motoko",
+		Path:      "/tmp/motoko",
+	}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "inspect", Summary: "Get Tachikoma data", Usage: "inspect <worker>"},
+	}, "")
+
+	if !strings.Contains(prompt, "PREFERRED way to access on-demand Tachikoma data") {
+		t.Fatalf("prompt missing inspect preference statement: %s", prompt)
+	}
+	if !strings.Contains(prompt, "GitTachikoma, CodeTachikoma, DiffTachikoma, SearchTachikoma, DependencyTachikoma") {
+		t.Fatalf("prompt missing valid inspect worker names: %s", prompt)
+	}
+	if !strings.Contains(prompt, "inspect CodeTachikoma") {
+		t.Fatalf("prompt missing inspect example for CodeTachikoma: %s", prompt)
+	}
+}
+
+func TestBuildDynamicPromptOnDemandSignalUsesInspect(t *testing.T) {
+	info := system.ContextInfo{
+		Workspace:       "motoko",
+		Path:            "/tmp/motoko",
+		OnDemandSignals: map[string]string{"DiffTachikoma": "changes available"},
+	}
+	prompt := buildDynamicPrompt("default", info)
+
+	if !strings.Contains(prompt, "use the 'inspect' tool with the worker name") {
+		t.Fatalf("dynamic prompt should instruct use of inspect for on-demand signals: %s", prompt)
+	}
+	if strings.Contains(prompt, "use your tools (read, grep, etc.)") {
+		t.Fatalf("dynamic prompt should not use old generic tool instruction: %s", prompt)
 	}
 }

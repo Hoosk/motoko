@@ -80,3 +80,9 @@ func resolveWorkspaceWritePath(target string) (string, string, error) {
 	}
 	return resolveWorkspacePath(target)
 }
+
+// ResolveWorkspaceWritePath is the exported wrapper used by other tools
+// (e.g. the write tool) that need the same validation as the patch engine.
+func ResolveWorkspaceWritePath(target string) (string, string, error) {
+	return resolveWorkspaceWritePath(target)
+}

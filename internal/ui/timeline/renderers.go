@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	TimelineMouseOffsetX = 2
+	TimelineMouseOffsetX = 1
 	TimelineMouseOffsetY = 1
 	AssistantContentX    = 2
 	ReasoningContentX    = 2

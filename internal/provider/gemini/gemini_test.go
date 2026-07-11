@@ -107,7 +107,7 @@ func TestToGenAIContentToolCallsAndResponses(t *testing.T) {
 
 func TestBuildGenerateContentConfigTools(t *testing.T) {
 	client := &geminiClient{
-		model:               "gemini-2.5-flash",
+		BaseClient:          provider.NewBaseClient("gemini", "", "key", "gemini-2.5-flash"),
 		thinkingBudget:      1024,
 		enableGoogleSearch:  true,
 		enableCodeExecution: true,
@@ -176,7 +176,7 @@ func TestNewGeminiClientInitializesFields(t *testing.T) {
 
 func TestBuildGenerateContentConfigThinkingLevel(t *testing.T) {
 	client := &geminiClient{
-		model:            "gemini-3.5-flash",
+		BaseClient:       provider.NewBaseClient("gemini", "", "key", "gemini-3.5-flash"),
 		thinkingBudget:   8192,
 		supportsThinking: true,
 	}

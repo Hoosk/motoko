@@ -8,56 +8,13 @@ import (
 
 	"github.com/Hoosk/motoko/internal/provider"
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	if err := c.ConfigurationError(); err != nil {
 		return provider.Response{}, err
 	}
-	maxTokens := 4096
-	if c.thinkingBudget > 0 {
-		if c.thinkingBudget >= maxTokens {
-			maxTokens = c.thinkingBudget + 1024
-		}
-	}
-
-	params := sdk.MessageNewParams{
-		Model:     sdk.Model(c.model),
-		MaxTokens: int64(maxTokens),
-		System:    buildAnthropicSystemBlocks(systemPrompt),
-		Messages:  toSDKMessages(messages),
-	}
-
-	if sdkTools := toSDKTools(tools); len(sdkTools) > 0 {
-		params.Tools = sdkTools
-	}
-
-	if c.thinkingBudget > 0 {
-		params.OutputConfig = sdk.OutputConfigParam{
-			Effort: provider.BudgetToAnthropicEffort(c.thinkingBudget),
-		}
-		if c.checkAdaptiveThinking(ctx) {
-			params.Thinking = sdk.ThinkingConfigParamUnion{
-				OfAdaptive: &sdk.ThinkingConfigAdaptiveParam{
-					Display: sdk.ThinkingConfigAdaptiveDisplaySummarized,
-				},
-			}
-		} else {
-			params.Thinking = sdk.ThinkingConfigParamOfEnabled(int64(c.thinkingBudget))
-		}
-	}
-
-	reqOpts := []option.RequestOption{
-		option.WithHeader("anthropic-beta", "prompt-caching-2024-07-31"),
-	}
-	telemetryHeaders := map[string]string{}
-	if sessionID, requestID := provider.GetTelemetry(ctx); sessionID != "" {
-		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
-	}
-	for k, v := range telemetryHeaders {
-		reqOpts = append(reqOpts, option.WithHeader(k, v))
-	}
+	params, reqOpts := c.buildMessageParams(ctx, systemPrompt, messages, tools)
 
 	stream := c.sdkClient.Messages.NewStreaming(ctx, params, reqOpts...)
 	defer func() { _ = stream.Close() }()
@@ -165,12 +122,5 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	}
 
 	finalText := strings.TrimSpace(raw.String())
-	result := provider.Response{FinalText: finalText, Usage: usage, PendingCalls: pendingCalls}
-	if finalText != "" || len(pendingCalls) > 0 {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(finalText, "", pendingCalls)}
-	}
-	if len(result.PendingCalls) > 0 {
-		result.FinalText = ""
-	}
-	return result, nil
+	return provider.FinalizeResponse(finalText, "", pendingCalls, usage), nil
 }

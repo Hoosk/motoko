@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,12 +20,9 @@ func init() {
 }
 
 type geminiClient struct {
+	provider.BaseClient
 	initErr     error
 	genaiClient *genai.Client
-
-	providerName string
-	apiKey       string
-	model        string
 
 	thinkingBudget      int
 	enableGoogleSearch  bool
@@ -40,9 +36,7 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 		APIKey: cfg.APIKey,
 	})
 	return &geminiClient{
-		providerName:        cfg.Name,
-		apiKey:              cfg.APIKey,
-		model:               cfg.Model,
+		BaseClient:          provider.NewBaseClient(cfg.Name, "", cfg.APIKey, cfg.Model),
 		thinkingBudget:      cfg.ThinkingBudget,
 		enableGoogleSearch:  cfg.EnableGoogleSearch,
 		enableCodeExecution: cfg.EnableCodeExecution,
@@ -53,17 +47,8 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 }
 
 func (c *geminiClient) Configured() bool {
-	return c.apiKey != "" && c.model != ""
+	return c.APIKey() != "" && c.Model() != ""
 }
-
-func (c *geminiClient) ProviderKind() string {
-	return c.providerName
-}
-
-func (c *geminiClient) Summary() string {
-	return fmt.Sprintf("%s:%s", c.providerName, c.model)
-}
-
 func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	if c.initErr != nil {
 		return provider.Response{}, c.initErr
@@ -72,7 +57,7 @@ func (c *geminiClient) Complete(ctx context.Context, systemPrompt string, messag
 	contents := toGenAIContent(messages)
 	genaiConfig := c.buildGenerateContentConfig(ctx, systemPrompt, tools)
 
-	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, genaiConfig)
+	resp, err := c.genaiClient.Models.GenerateContent(ctx, c.Model(), contents, genaiConfig)
 	if err != nil {
 		return provider.Response{}, err
 	}
@@ -88,7 +73,7 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	contents := toGenAIContent(messages)
 	genaiConfig := c.buildGenerateContentConfig(ctx, systemPrompt, tools)
 
-	iter := c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, genaiConfig)
+	iter := c.genaiClient.Models.GenerateContentStream(ctx, c.Model(), contents, genaiConfig)
 
 	var raw strings.Builder
 	usage := provider.Usage{}
@@ -145,21 +130,10 @@ func (c *geminiClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		resultText += finalResponse.CodeExecutionResult()
 	}
 
-	result := provider.Response{
-		FinalText: resultText,
-		Usage:     usage,
+	result := provider.FinalizeResponse(resultText, "", pendingCalls, usage)
+	if len(pendingCalls) > 0 && resultText != "" {
+		result.OutputItems = append([]provider.ConversationItem{provider.AssistantText(resultText)}, provider.AssistantToolCallItems(pendingCalls)...)
 	}
-
-	if resultText != "" {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantText(resultText)}
-	}
-
-	if len(pendingCalls) > 0 {
-		result.PendingCalls = pendingCalls
-		result.OutputItems = append(result.OutputItems, provider.AssistantToolCallItems(pendingCalls)...)
-		result.FinalText = ""
-	}
-
 	return result, nil
 }
 
@@ -220,7 +194,7 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 			Headers: make(http.Header),
 		}
 		telemetryHeaders := map[string]string{}
-		provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+		provider.ApplyTelemetryHeaders(c.ProviderKind(), telemetryHeaders, sessionID, requestID)
 		for k, v := range telemetryHeaders {
 			cfg.HTTPOptions.Headers.Set(k, v)
 		}
@@ -230,7 +204,7 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 		cfg.ThinkingConfig = &genai.ThinkingConfig{
 			IncludeThoughts: true,
 		}
-		if strings.Contains(c.model, "2.5") {
+		if strings.Contains(c.Model(), "2.5") {
 			budget32 := int32(c.thinkingBudget)
 			cfg.ThinkingConfig.ThinkingBudget = &budget32
 		} else {
@@ -430,26 +404,13 @@ func responseFromGenAIResponse(resp *genai.GenerateContentResponse) provider.Res
 	}
 
 	pending := toolInvocationsFromGenAI(resp)
-	result := provider.Response{
-		FinalText:    text,
-		PendingCalls: pending,
-		Usage: provider.Usage{
-			InputTokens:          input,
-			OutputTokens:         output,
-			TotalTokens:          total,
-			CacheReadInputTokens: cacheRead,
-			ReasoningTokens:      reasoning,
-		},
-	}
-
-	if text != "" || len(pending) > 0 {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, "", pending)}
-	}
-
-	if len(pending) > 0 {
-		result.FinalText = ""
-	}
-	return result
+	return provider.FinalizeResponse(text, "", pending, provider.Usage{
+		InputTokens:          input,
+		OutputTokens:         output,
+		TotalTokens:          total,
+		CacheReadInputTokens: cacheRead,
+		ReasoningTokens:      reasoning,
+	})
 }
 
 func float32Ptr(v float32) *float32 {

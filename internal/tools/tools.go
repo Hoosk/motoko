@@ -60,6 +60,7 @@ func NewRegistry() *Registry {
 	r.Register(NewGlobTool())
 	r.Register(NewGrepTool())
 	r.Register(NewBashTool())
+	r.Register(NewWriteTool())
 	r.Register(NewPatchTool())
 	r.Register(NewWebSearchTool())
 	r.Register(NewWebFetchTool())
@@ -153,7 +154,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 	f, err := os.CreateTemp("", "motoko-tool-output-*.txt")
 	if err == nil {
 		_, _ = f.WriteString(output)
-		f.Close()
+		_ = f.Close()
 		suffix := fmt.Sprintf("\n...[output truncated. Full output saved to %s]", f.Name())
 		return output[:maxOutput] + suffix
 	}
@@ -164,7 +165,7 @@ func truncateToolOutput(ctx context.Context, output string) string {
 // IsWriteTool returns true if the tool modifies the codebase.
 func IsWriteTool(name string) bool {
 	n := strings.ToLower(name)
-	return n == toolNameBash || n == "patch"
+	return n == toolNameBash || n == "patch" || n == "write"
 }
 
 // Registry filtering for sandboxing
@@ -231,4 +232,20 @@ func GetMaxOutputSize(ctx context.Context) int {
 		return size
 	}
 	return maxToolOutputBytes
+}
+
+type questionBrokerKey struct{}
+
+func WithQuestionBroker(ctx context.Context, broker *QuestionBroker) context.Context {
+	return context.WithValue(ctx, questionBrokerKey{}, broker)
+}
+
+func GetQuestionBroker(ctx context.Context) *QuestionBroker {
+	if ctx == nil {
+		return nil
+	}
+	if broker, ok := ctx.Value(questionBrokerKey{}).(*QuestionBroker); ok {
+		return broker
+	}
+	return nil
 }

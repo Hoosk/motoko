@@ -108,6 +108,8 @@ func TestSessionCompactWith(t *testing.T) {
 	s := New("abc", "/tmp/work")
 	s.History = []provider.ConversationItem{provider.UserText("hola"), provider.AssistantText("mundo")}
 	s.LastInputTokens = 99
+	s.LastOutputTokens = 44
+	s.LastReasoningTokens = 22
 	s.CompactWith("resumen")
 	if len(s.History) != 2 {
 		t.Fatalf("len(History) = %d, want 2", len(s.History))
@@ -117,5 +119,21 @@ func TestSessionCompactWith(t *testing.T) {
 	}
 	if s.LastInputTokens != 0 {
 		t.Fatalf("LastInputTokens = %d, want 0", s.LastInputTokens)
+	}
+	if s.LastOutputTokens != 0 || s.LastReasoningTokens != 0 {
+		t.Fatalf("expected last output/reasoning tokens reset, got %#v", s)
+	}
+}
+
+func TestSessionAddTurnKeepsLastTwenty(t *testing.T) {
+	s := New("abc", "/tmp/work")
+	for i := 1; i <= 25; i++ {
+		s.AddTurn(TurnUsage{Turn: i, InputTokens: i})
+	}
+	if len(s.Turns) != 20 {
+		t.Fatalf("expected 20 turns, got %d", len(s.Turns))
+	}
+	if s.Turns[0].Turn != 6 || s.Turns[len(s.Turns)-1].Turn != 25 {
+		t.Fatalf("unexpected turn window %#v", s.Turns)
 	}
 }

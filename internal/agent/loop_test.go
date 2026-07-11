@@ -10,27 +10,6 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 )
 
-type fakeLoopProvider struct {
-	count int
-}
-
-func (f *fakeLoopProvider) Configured() bool     { return true }
-func (f *fakeLoopProvider) ProviderKind() string { return "fake" }
-func (f *fakeLoopProvider) Summary() string      { return "fake:loop" }
-func (f *fakeLoopProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	return []provider.ModelInfo{{ID: "loop"}}, nil
-}
-func (f *fakeLoopProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	return provider.ModelInfo{ID: model}, nil
-}
-func (f *fakeLoopProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
-	return f.Complete(ctx, systemPrompt, messages, tools)
-}
-func (f *fakeLoopProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
-	f.count++
-	return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", Input: "same"}}}, nil
-}
-
 type fakeLoopTool struct{}
 
 func (f *fakeLoopTool) Spec() tools.Spec {
@@ -41,34 +20,12 @@ func (f *fakeLoopTool) Run(ctx context.Context, args string) (tools.Result, erro
 	return tools.Result{Spec: f.Spec(), Summary: "ok", Output: "ok"}, nil
 }
 
-type fakeMultiProvider struct {
-	count int
-}
-
-func (f *fakeMultiProvider) Configured() bool     { return true }
-func (f *fakeMultiProvider) ProviderKind() string { return "fake" }
-func (f *fakeMultiProvider) Summary() string      { return "fake:multi" }
-func (f *fakeMultiProvider) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	return []provider.ModelInfo{{ID: "multi"}}, nil
-}
-func (f *fakeMultiProvider) GetModel(ctx context.Context, model string) (provider.ModelInfo, error) {
-	return provider.ModelInfo{ID: model}, nil
-}
-func (f *fakeMultiProvider) StreamComplete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
-	return f.Complete(ctx, systemPrompt, messages, tools)
-}
-func (f *fakeMultiProvider) Complete(ctx context.Context, systemPrompt string, messages []provider.Message, tools provider.ToolSet) (provider.Response, error) {
-	f.count++
-	if f.count == 1 {
-		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "1", Input: "a"}, {Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "2", Input: "b"}}}, nil
-	}
-	return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
-}
-
 func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(&fakeLoopTool{})
-	a := New(&fakeLoopProvider{}, registry)
+	a := New(&fakeProviderClient{summary: "fake:loop", models: []provider.ModelInfo{{ID: "loop"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", Input: "same"}}}, nil
+	}}, registry)
 	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
 	if err == nil {
 		t.Fatal("expected loop detection error")
@@ -78,27 +35,27 @@ func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	}
 }
 
-func TestMaxToolIterationsDefaultsToTwentyFour(t *testing.T) {
+func TestMaxToolIterationsDefaultsToConfiguredLimit(t *testing.T) {
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "")
-	if got := maxToolIterations(); got != defaultMaxToolIterations {
+	if got := maxToolIterations(context.Background()); got != defaultMaxToolIterations {
 		t.Fatalf("expected default max iterations %d, got %d", defaultMaxToolIterations, got)
 	}
 }
 
 func TestMaxToolIterationsAcceptsEnvOverride(t *testing.T) {
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "31")
-	if got := maxToolIterations(); got != 31 {
+	if got := maxToolIterations(context.Background()); got != 31 {
 		t.Fatalf("expected env override, got %d", got)
 	}
 }
 
 func TestMaxToolIterationsFallsBackOnInvalidEnv(t *testing.T) {
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "invalid")
-	if got := maxToolIterations(); got != defaultMaxToolIterations {
+	if got := maxToolIterations(context.Background()); got != defaultMaxToolIterations {
 		t.Fatalf("expected invalid env to fall back, got %d", got)
 	}
 	t.Setenv("MOTOKO_MAX_ITERATIONS", "0")
-	if got := maxToolIterations(); got != defaultMaxToolIterations {
+	if got := maxToolIterations(context.Background()); got != defaultMaxToolIterations {
 		t.Fatalf("expected non-positive env to fall back, got %d", got)
 	}
 }
@@ -108,22 +65,40 @@ func TestRunHonorsMaxToolIterationsOverride(t *testing.T) {
 
 	registry := tools.NewRegistry()
 	registry.Register(&fakeLoopTool{})
-	provider := &fakeLoopProvider{}
-	a := New(provider, registry)
+	count := 0
+	providerClient := &fakeProviderClient{summary: "fake:loop", models: []provider.ModelInfo{{ID: "loop"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		count++
+		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", Input: "same"}}}, nil
+	}}
+	a := New(providerClient, registry)
 
 	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
 	if err == nil {
 		t.Fatal("expected max-iterations error")
 	}
-	if provider.count != 1 {
-		t.Fatalf("expected a single completion attempt, got %d", provider.count)
+	if count != 1 {
+		t.Fatalf("expected a single completion attempt, got %d", count)
 	}
 }
 
 func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(&fakeLoopTool{})
-	a := New(&fakeMultiProvider{}, registry)
+	count := 0
+	a := New(&fakeProviderClient{summary: "fake:multi", models: []provider.ModelInfo{{ID: "multi"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		count++
+		if count == 1 {
+			return provider.Response{
+				PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "1", Input: "a"}, {Kind: provider.InvokeCustomTool, Name: "looptool", CallID: "2", Input: "b"}},
+				Usage:        provider.Usage{InputTokens: 100, OutputTokens: 25, TotalTokens: 125, ReasoningTokens: 10},
+			}, nil
+		}
+		return provider.Response{
+			FinalText:   "ok",
+			OutputItems: []provider.ConversationItem{provider.AssistantText("ok")},
+			Usage:       provider.Usage{InputTokens: 140, OutputTokens: 30, TotalTokens: 170, ReasoningTokens: 12},
+		}, nil
+	}}, registry)
 	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -133,5 +108,14 @@ func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
 	}
 	if len(result.History) < 4 {
 		t.Fatalf("expected tool history entries persisted, got %#v", result.History)
+	}
+	if len(result.Iterations) != 2 {
+		t.Fatalf("expected 2 iterations, got %#v", result.Iterations)
+	}
+	if result.Iterations[0].InputTokens != 100 || result.Iterations[1].InputTokens != 140 {
+		t.Fatalf("unexpected iteration usage %#v", result.Iterations)
+	}
+	if result.Usage.ReasoningTokens != 22 {
+		t.Fatalf("expected cumulative reasoning tokens, got %#v", result.Usage)
 	}
 }

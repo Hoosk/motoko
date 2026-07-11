@@ -80,7 +80,7 @@ func (m *Model) PositionAt(x, y int) (TextPos, bool) {
 	if len(m.RenderLines) == 0 || m.Viewport.Height <= 0 {
 		return TextPos{}, false
 	}
-	lineIdx := clamp(y+m.Viewport.YOffset, 0, len(m.RenderLines)-1)
+	lineIdx := clamp(y+m.Viewport.YOffset, len(m.RenderLines)-1)
 	line := m.RenderLines[lineIdx]
 	if !line.Selectable {
 		return TextPos{}, false
@@ -181,7 +181,7 @@ func (m *Model) SyncHighlight() {
 		m.AutoScroll = true
 		return
 	}
-	m.Viewport.YOffset = clamp(currentOffset, 0, maxOffset)
+	m.Viewport.YOffset = clamp(currentOffset, maxOffset)
 }
 
 func InsertANSIHighlight(s string, startCol, endCol int) string {
@@ -277,9 +277,9 @@ func SliceColumns(line string, start, end int) string {
 	return string(out)
 }
 
-func clamp(v, min, max int) int {
-	if v < min {
-		return min
+func clamp(v, max int) int {
+	if v < 0 {
+		return 0
 	}
 	if v > max {
 		return max

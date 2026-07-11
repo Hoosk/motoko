@@ -14,6 +14,23 @@ func ResponseFromText(content string, usage Usage) Response {
 	return resp
 }
 
+func FinalizeResponse(content, reasoning string, pending []ToolInvocation, usage Usage) Response {
+	content = strings.TrimSpace(content)
+	reasoning = strings.TrimSpace(reasoning)
+	resp := Response{
+		FinalText:    content,
+		PendingCalls: pending,
+		Usage:        usage,
+	}
+	if content != "" || reasoning != "" || len(pending) > 0 {
+		resp.OutputItems = []ConversationItem{AssistantTurn(content, reasoning, pending)}
+	}
+	if len(pending) > 0 {
+		resp.FinalText = ""
+	}
+	return resp
+}
+
 func NormalizeConversationRole(role string) string {
 	switch strings.TrimSpace(strings.ToLower(role)) {
 	case RoleAssistant:

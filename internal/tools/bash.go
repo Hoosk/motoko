@@ -36,6 +36,9 @@ func (t *BashTool) DynamicSpec(ctx ToolContext) Spec {
 
 func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 	command := strings.TrimSpace(args)
+	if parsed := parseJSONArgs(args); parsed != nil {
+		command = jsonStr(parsed, "command", "cmd")
+	}
 	if command == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

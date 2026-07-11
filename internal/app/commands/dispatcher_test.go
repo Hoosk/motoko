@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
@@ -46,6 +47,11 @@ func baseDeps() Deps {
 
 		ListTasksFn:     func() []*taskman.TaskState { return nil },
 		TerminateTaskFn: func(id string) error { return nil },
+		ListSchedulesFn: func() []scheduleman.Definition { return nil },
+		AddScheduleFn: func(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error) {
+			return scheduleman.Definition{ID: "sched-1", Instruction: instruction, Interval: interval, OneShot: oneShot}, nil
+		},
+		RemoveScheduleFn: func(id string) error { return nil },
 
 		ToolSpecsFn: func() []tools.Spec { return nil },
 		RunToolFn:   func(ctx context.Context, name, args string) (tools.Result, error) { return tools.Result{}, nil },
@@ -81,7 +87,7 @@ func TestHandleHelp(t *testing.T) {
 	if !strings.Contains(resp.Entries[0].Text, "/help") {
 		t.Error("expected help text to mention /help")
 	}
-	for _, want := range []string{"/models [list|use <model>|info <model>]", "/task [list|terminate <id>]", "/brain [list|read <file>|plan|tasks|summary|clear]"} {
+	for _, want := range []string{"/models [list|use <model>|info <model>]", "/task [list|terminate <id>]", "/brain [list|read <file>|plan|tasks|summary|clear]", "/settings"} {
 		if !strings.Contains(resp.Entries[0].Text, want) {
 			t.Fatalf("expected help text to contain %q, got:\n%s", want, resp.Entries[0].Text)
 		}
@@ -419,9 +425,26 @@ func TestHandleMetricsWithSession(t *testing.T) {
 	deps := baseDeps()
 	deps.SessionFn = func() *session.Session {
 		return &session.Session{
-			TotalInputTokens:  1000,
-			TotalOutputTokens: 500,
-			TotalTokens:       1500,
+			LastInputTokens:       200,
+			LastOutputTokens:      80,
+			LastReasoningTokens:   20,
+			LastCacheReadTokens:   15,
+			LastCacheWriteTokens:  5,
+			TotalInputTokens:      1000,
+			TotalOutputTokens:     500,
+			TotalReasoningTokens:  120,
+			TotalCacheReadTokens:  60,
+			TotalCacheWriteTokens: 20,
+			TotalTokens:           1500,
+			Turns: []session.TurnUsage{{
+				Turn:            1,
+				InputTokens:     200,
+				OutputTokens:    80,
+				ReasoningTokens: 20,
+				TotalTokens:     280,
+				InputGrowth:     40,
+				Iterations:      []provider.Usage{{InputTokens: 160, OutputTokens: 30, TotalTokens: 190, ReasoningTokens: 10}, {InputTokens: 200, OutputTokens: 50, TotalTokens: 250, ReasoningTokens: 10}},
+			}},
 		}
 	}
 	d := newDispatcher(deps)
@@ -430,7 +453,7 @@ func TestHandleMetricsWithSession(t *testing.T) {
 		t.Fatal("expected metrics output")
 	}
 	text := resp.Entries[0].Text
-	for _, want := range []string{"Current Session Metrics", "Input Tokens", "Output Tokens", "Total Tokens"} {
+	for _, want := range []string{"Current Session Metrics", "Input Tokens", "Output Tokens", "Total Tokens", "Reasoning (Thinking) Tokens", "Recent Turn Trend", "iter 1:"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected %q in metrics, got: %s", want, text)
 		}
@@ -442,6 +465,123 @@ func TestHandleSessionsSignal(t *testing.T) {
 	resp := d.Handle("/sessions", system.ContextInfo{})
 	if resp.Signal != "open-sessions-popup" {
 		t.Errorf("expected 'open-sessions-popup', got %q", resp.Signal)
+	}
+}
+
+func TestHandleSettingsSignal(t *testing.T) {
+	d := newDispatcher(baseDeps())
+	resp := d.Handle("/settings", system.ContextInfo{})
+	if resp.Signal != "open-settings-popup" {
+		t.Errorf("expected 'open-settings-popup', got %q", resp.Signal)
+	}
+}
+
+func TestHandleLearnStartsAgentAction(t *testing.T) {
+	d := newDispatcher(baseDeps())
+	resp := d.Handle("/learn", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionAgent {
+		t.Fatalf("expected agent action, got %#v", resp.Action)
+	}
+	if !strings.Contains(strings.ToLower(resp.Action.AgentPrompt), "capture reusable project knowledge") {
+		t.Fatalf("expected learn prompt to mention knowledge capture, got %q", resp.Action.AgentPrompt)
+	}
+}
+
+func TestHandleTeamworkPreviewStartsAgentAction(t *testing.T) {
+	d := newDispatcher(baseDeps())
+	resp := d.Handle("/teamwork-preview auth refactor", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionAgent {
+		t.Fatalf("expected agent action, got %#v", resp.Action)
+	}
+	if !strings.Contains(resp.Action.AgentPrompt, "auth refactor") {
+		t.Fatalf("expected teamwork prompt to include goal, got %q", resp.Action.AgentPrompt)
+	}
+}
+
+func TestHandleGrillMeStartsAgentAction(t *testing.T) {
+	d := newDispatcher(baseDeps())
+	resp := d.Handle("/grill-me", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionAgent {
+		t.Fatalf("expected agent action, got %#v", resp.Action)
+	}
+	if !strings.Contains(strings.ToLower(resp.Action.AgentPrompt), "current plan") {
+		t.Fatalf("expected grill-me prompt to mention the current plan, got %q", resp.Action.AgentPrompt)
+	}
+}
+
+func TestHandleGoalStoresGoalAndStartsAgent(t *testing.T) {
+	br := &brain.Brain{Dir: t.TempDir(), SessionID: "test"}
+	deps := baseDeps()
+	deps.BrainFn = func() *brain.Brain { return br }
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/goal finish login flow", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionAgent {
+		t.Fatalf("expected agent action, got %#v", resp.Action)
+	}
+	content, err := br.Read("goal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, "finish login flow") {
+		t.Fatalf("expected goal file content, got %q", content)
+	}
+}
+
+func TestHandleGoalPlanRequiresTasks(t *testing.T) {
+	br := &brain.Brain{Dir: t.TempDir(), SessionID: "test"}
+	deps := baseDeps()
+	deps.BrainFn = func() *brain.Brain { return br }
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/goal plan", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Fatalf("expected error response, got %#v", resp)
+	}
+}
+
+func TestHandleGoalStatusReportsCounts(t *testing.T) {
+	br := &brain.Brain{Dir: t.TempDir(), SessionID: "test"}
+	if err := br.Write("goal", "# Goal\nFinish tasks"); err != nil {
+		t.Fatal(err)
+	}
+	if err := br.Write("tasks", "# Tasks\n- [ ] one\n- [x] two"); err != nil {
+		t.Fatal(err)
+	}
+	deps := baseDeps()
+	deps.BrainFn = func() *brain.Brain { return br }
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/goal status", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "1 pending, 1 completed") {
+		t.Fatalf("unexpected goal status: %#v", resp)
+	}
+}
+
+func TestHandleScheduleAddListRemove(t *testing.T) {
+	removed := ""
+	deps := baseDeps()
+	defs := []scheduleman.Definition{{ID: "sched-1", Instruction: "run tests", Interval: time.Minute}}
+	deps.ListSchedulesFn = func() []scheduleman.Definition { return defs }
+	deps.RemoveScheduleFn = func(id string) error { removed = id; defs = nil; return nil }
+	d := newDispatcher(deps)
+
+	resp := d.Handle(`/schedule add "run tests" every 1m`, system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "sched-1") {
+		t.Fatalf("unexpected add response %#v", resp)
+	}
+
+	resp = d.Handle(`/schedule list`, system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "run tests") {
+		t.Fatalf("unexpected list response %#v", resp)
+	}
+
+	resp = d.Handle(`/schedule remove sched-1`, system.ContextInfo{})
+	if removed != "sched-1" {
+		t.Fatalf("expected remove called with sched-1, got %q", removed)
+	}
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "removed") {
+		t.Fatalf("unexpected remove response %#v", resp)
 	}
 }
 

@@ -28,15 +28,24 @@ func (t *GrepTool) Spec() Spec {
 }
 
 func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
+	args = strings.TrimSpace(args)
 	parts := strings.Fields(args)
-	if len(parts) == 0 {
-		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
-	}
-
-	pattern := parts[0]
+	pattern := ""
 	include := ""
-	if len(parts) > 1 {
-		include = parts[1]
+	if parsed := parseJSONArgs(args); parsed != nil {
+		pattern = jsonStr(parsed, "pattern", "regex", "query")
+		include = jsonStr(parsed, "include", "glob", "file_pattern", "filePattern")
+	} else {
+		if len(parts) == 0 {
+			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+		}
+		pattern = parts[0]
+		if len(parts) > 1 {
+			include = parts[1]
+		}
+	}
+	if pattern == "" {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	cfg := GetConfig(ctx)

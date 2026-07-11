@@ -92,6 +92,10 @@ func (m *Manager) PersistTurn(result agent.Result) {
 	}
 	m.currentSession.History = append([]provider.ConversationItem(nil), result.History...)
 	m.currentSession.LastInputTokens = result.Usage.InputTokens
+	m.currentSession.LastOutputTokens = result.Usage.OutputTokens
+	m.currentSession.LastReasoningTokens = result.Usage.ReasoningTokens
+	m.currentSession.LastCacheReadTokens = result.Usage.CacheReadInputTokens
+	m.currentSession.LastCacheWriteTokens = result.Usage.CacheWriteInputTokens
 
 	m.currentSession.TotalInputTokens += result.Usage.InputTokens
 	m.currentSession.TotalOutputTokens += result.Usage.OutputTokens
@@ -124,6 +128,22 @@ func (m *Manager) PersistTurn(result agent.Result) {
 		m.currentSession.LastToolsTokens = 0
 		m.currentSession.LastHistoryTokens = 0
 	}
+
+	turn := session.TurnUsage{
+		Turn:             len(m.currentSession.Turns) + 1,
+		AgentLabel:       result.AgentLabel,
+		InputTokens:      result.Usage.InputTokens,
+		OutputTokens:     result.Usage.OutputTokens,
+		TotalTokens:      result.Usage.TotalTokens,
+		ReasoningTokens:  result.Usage.ReasoningTokens,
+		CacheReadTokens:  result.Usage.CacheReadInputTokens,
+		CacheWriteTokens: result.Usage.CacheWriteInputTokens,
+		Iterations:       result.Iterations,
+	}
+	if len(result.Iterations) > 1 {
+		turn.InputGrowth = result.Iterations[len(result.Iterations)-1].InputTokens - result.Iterations[0].InputTokens
+	}
+	m.currentSession.AddTurn(turn)
 
 	_ = m.currentSession.Save()
 }

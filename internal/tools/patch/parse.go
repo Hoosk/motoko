@@ -95,7 +95,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 			continue
 		}
 		if lines[i] != astMarker {
-			return nil, fmt.Errorf("invalid AST format; expected %s and found: %s", astMarker, lines[i])
+			return nil, fmt.Errorf("invalid AST format; expected %s (start an AST block with <<<<<<< AST, <<<<<<< SEARCH, or use unified diff with ---/+++) and found: %s", astMarker, lines[i])
 		}
 		dividerIndex := -1
 		replaceIndex := -1
@@ -106,7 +106,7 @@ func parseASTPatchInput(path, body string) ([]*astPatch, error) {
 			}
 		}
 		if dividerIndex == -1 {
-			return nil, fmt.Errorf("invalid AST format; missing marker %s", dividerMarker)
+			return nil, fmt.Errorf("invalid AST format; missing marker %s (must be EXACTLY '%s' with no trailing spaces)", dividerMarker, dividerMarker)
 		}
 		for j := dividerIndex + 1; j < len(lines); j++ {
 			if lines[j] == replaceMarker {
@@ -153,7 +153,7 @@ func parseASTSelector(block string) (astSelector, error) {
 				queryLines = append(queryLines, rawLine)
 				continue
 			}
-			return astSelector{}, fmt.Errorf("invalid AST line: %s", rawLine)
+			return astSelector{}, fmt.Errorf("invalid AST line: %s (expected key: value format; valid keys: type, name, query, capture, action, contains, index)", rawLine)
 		}
 		key := strings.ToLower(strings.TrimSpace(parts[0]))
 		value := strings.TrimSpace(parts[1])
@@ -184,7 +184,7 @@ func parseASTSelector(block string) (astSelector, error) {
 			}
 			selector.Index = index
 		default:
-			return astSelector{}, fmt.Errorf("unsupported AST key: %s", key)
+			return astSelector{}, fmt.Errorf("unsupported AST key: %s (valid keys: type, name, query, capture, action, contains, index)", key)
 		}
 	}
 	if queryMode {

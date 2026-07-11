@@ -372,7 +372,7 @@ func (m *Manager) setActiveModel(active config.ProviderConfig, modelID string) t
 	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Model set: %s", info.ID)}}}
 }
 
-func (m *Manager) modelInfoResponse(active config.ProviderConfig, modelID string) types.Response {
+func (m *Manager) modelInfoResponse(_ config.ProviderConfig, modelID string) types.Response {
 	info, err := m.GetModelInfoForActiveProvider(context.Background(), modelID)
 	if err != nil {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}

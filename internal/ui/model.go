@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/styles"
 	tea "github.com/charmbracelet/bubbletea"
@@ -65,7 +67,9 @@ type Model struct {
 	providerForm           providerForm
 	modePopup              modePopupState
 	commandPalette         commandPaletteState
+	questionPopup          questionPopupState
 	helpOverlay            helpOverlayState
+	settingsPopup          settingsPopupState
 	thinkingPicker         thinkingPickerState
 	composer               ComposerModel
 	timeline               TimelineModel
@@ -127,6 +131,8 @@ func (m Model) Init() tea.Cmd {
 		m.composer.Init(),
 		m.footer.Init(),
 		m.sidebar.Init(),
+		m.waitQuestion(),
+		m.waitScheduleEvent(),
 		m.waitTaskEvent(),
 		m.checkForUpdatesCmd(),
 	)
@@ -134,19 +140,18 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	oldComposerHeight := m.composer.Height()
 
 	// 1. Handle Priority Key Commands (Global)
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "ctrl+c":
 			if time.Since(m.lastCtrlC) < 2*time.Second {
+				m.runtime.Stop()
 				return m, tea.Quit
 			}
 			m.lastCtrlC = time.Now()
-			m.notificationShow = true
-			m.notificationText = "Press Ctrl+C again to exit"
-			m.notificationTime = time.Now()
-			return m, m.hideNotification()
+			return m, m.showNotification("Press Ctrl+C again to exit")
 		}
 	}
 
@@ -175,8 +180,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.commandPalette.Update(msg))
 		return m, tea.Batch(cmds...)
 	}
+	if m.questionPopup.active {
+		switch msg := msg.(type) {
+		case AgentStreamBatchMsg:
+			if msg.RequestID == m.requestID {
+				m.timeline.ApplyStreamBatch(msg.Events)
+				if msg.Done && m.agentBuffer != nil {
+					m.agentBuffer.mu.Lock()
+					m.agentBuffer.done = true
+					m.agentBuffer.mu.Unlock()
+				}
+				if !msg.Done && m.agentStream != nil {
+					cmds = append(cmds, m.waitAgentStream(m.agentStream, msg.RequestID))
+				} else if msg.Done {
+					m.agentStream = nil
+				}
+			}
+			return m, tea.Batch(cmds...)
+		case ThinkingTickMsg:
+			if m.timeline.model.Thinking || m.footer.thinking {
+				cmds = append(cmds, m.thinkingTick())
+			}
+			m.timeline.Update(msg)
+			m.footer.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+		if done := m.questionPopup.Update(msg); done {
+			cmds = append(cmds, m.waitQuestion())
+		}
+		return m, tea.Batch(cmds...)
+	}
 	if m.helpOverlay.active {
 		cmds = append(cmds, m.helpOverlay.Update(msg))
+		return m, tea.Batch(cmds...)
+	}
+	if m.settingsPopup.active {
+		cmds = append(cmds, m.settingsPopup.Update(msg, m.runtime))
 		return m, tea.Batch(cmds...)
 	}
 
@@ -187,12 +226,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
 				if m.sidebar.offset > 0 {
-					m.sidebar.offset = max(0, m.sidebar.offset-3)
+					m.sidebar.SetOffset(max(0, m.sidebar.offset-3))
 				}
 				m.SyncLayout()
 				return m, nil
 			case tea.MouseButtonWheelDown:
-				m.sidebar.offset += 3
+				m.sidebar.SetOffset(m.sidebar.offset + 3)
 				m.SyncLayout()
 				return m, nil
 			}
@@ -205,28 +244,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case CopySelectionMsg:
 		if msg.Err == nil {
-			m.notificationShow = true
-			m.notificationText = "Copied to clipboard"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Copied to clipboard"))
 		} else {
-			m.notificationShow = true
-			m.notificationText = "Copy failed: " + msg.Err.Error()
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Copy failed: "+msg.Err.Error()))
 		}
 
 	case NotificationMsg:
-		m.notificationShow = true
-		m.notificationText = msg.Text
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification(msg.Text))
 
 	case UpdateAvailableMsg:
-		m.notificationShow = true
-		m.notificationText = "⬆ " + msg.Info.NewVersion + " available — motoko --update"
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("⬆ "+msg.Info.NewVersion+" available — motoko --update"))
 
 	case hideNotificationMsg:
 		if time.Since(m.notificationTime) >= 3*time.Second {
@@ -239,7 +266,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TachikomaStatusMsg:
 		m.footer.tachikomaInfo = msg.Statuses
-		m.sidebar.Update(msg)
 
 	case SubmitPromptMsg:
 		if strings.TrimSpace(msg.Prompt) == "" {
@@ -264,6 +290,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if resp.Signal != "" {
 			switch resp.Signal {
 			case "quit":
+				m.runtime.Stop()
 				cmds = append(cmds, tea.Quit)
 			case "open-provider-popup":
 				m.providerForm.Open(m.runtime)
@@ -274,6 +301,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.listSessions())
 			case "open-mode-popup":
 				m.modePopup.Open(m.runtime)
+			case "open-settings-popup":
+				m.settingsPopup.Open()
 			}
 		}
 
@@ -306,9 +335,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.RequestID != m.requestID {
 			break
 		}
-		for _, event := range msg.Events {
-			m.timeline.Update(AgentStreamEventMsg{Event: event})
-		}
+		m.timeline.ApplyStreamBatch(msg.Events)
 		if msg.Done && m.agentBuffer != nil {
 			m.agentBuffer.mu.Lock()
 			m.agentBuffer.done = true
@@ -346,7 +373,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timeline.renderMessages()
 		}
 		cmds = append(cmds, m.updateContextStats())
-		if next, ok := m.dequeuePrompt(); ok {
+		if next, ok := m.nextPromptAfterAgent(); ok {
 			cmds = append(cmds, func() tea.Msg {
 				return SubmitPromptMsg{Prompt: next}
 			})
@@ -386,6 +413,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.waitTaskEvent())
 
+	case ScheduleEventMsg:
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Scheduled instruction fired: " + msg.Event.Instruction})
+		m.timeline.renderMessages()
+		cmds = append(cmds, m.waitScheduleEvent())
+		if m.runtime.AgentConfigured() {
+			cmds = append(cmds, func() tea.Msg {
+				return SubmitPromptMsg{Prompt: "[System: Scheduled instruction fired from " + msg.Event.ID + "] " + msg.Event.Instruction}
+			})
+		}
+
 	case ProviderModelsMsg:
 		if msg.Err != nil {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
@@ -411,6 +448,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ThinkingBudgetSelectedMsg:
 		cmds = append(cmds, selectModelAndBudget(m.runtime, msg.Model, msg.Budget))
 
+	case QuestionAskedMsg:
+		if msg.Pending != nil {
+			m.questionPopup.Open(msg.Pending)
+		}
+
 	case SessionsMsg:
 		cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
 
@@ -424,10 +466,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeline.appendEntry(entry)
 			}
 			m.timeline.renderMessages()
-			m.notificationShow = true
-			m.notificationText = "Session loaded"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Session loaded"))
 		}
 
 	case CompactResultMsg:
@@ -439,23 +478,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeline.appendEntry(entry)
 			}
 			m.timeline.renderMessages()
-			m.notificationShow = true
-			m.notificationText = "Session compacted"
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Session compacted"))
 		}
 
 	case AgentChangedMsg:
-		m.notificationShow = true
-		m.notificationText = "Agent switched to " + msg.Name
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("Agent switched to "+msg.Name))
 
 	case ModelChangedMsg:
-		m.notificationShow = true
-		m.notificationText = "Model switched to " + msg.Model
-		m.notificationTime = time.Now()
-		cmds = append(cmds, m.hideNotification())
+		cmds = append(cmds, m.showNotification("Model switched to "+msg.Model))
 
 	case PaletteSelectedMsg:
 		if msg.SessionID != "" {
@@ -479,13 +509,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showTools = true
 			case "ctrl+s":
 				if _, allowed := m.sidebarLayout(); allowed {
-					m.showSidebar = !m.showSidebar
-					if m.showSidebar {
-						m.sidebarPref = sidebarForceShow
-					} else {
-						m.sidebarPref = sidebarForceHide
-					}
-					m.SyncLayout()
+					m.toggleSidebar()
 				}
 			case "cancel-request":
 				if m.timeline.model.Thinking && m.cancelCurrent != nil {
@@ -509,10 +533,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.queueFocus = false
 				return m, nil
 			case keyUp, keyCtrlP:
-				m.queueSel = clamp(m.queueSel-1, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel-1, max(0, len(m.promptQueue)-1))
 				return m, nil
 			case keyDown, keyCtrlN:
-				m.queueSel = clamp(m.queueSel+1, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel+1, max(0, len(m.promptQueue)-1))
 				return m, nil
 			case "backspace", "delete":
 				m.removeQueuedAt(m.queueSel)
@@ -543,7 +567,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+q":
 			if len(m.promptQueue) > 0 {
 				m.queueFocus = !m.queueFocus
-				m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+				m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
 				return m, nil
 			}
 		case "ctrl+m":
@@ -553,19 +577,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.listSessions())
 		case "ctrl+s", "alt+s":
 			if _, allowed := m.sidebarLayout(); !allowed {
-				m.notificationShow = true
-				m.notificationText = "Sidebar disabled: terminal width too small (min 40)"
-				m.notificationTime = time.Now()
-				cmds = append(cmds, m.hideNotification())
+				cmds = append(cmds, m.showNotification("Sidebar disabled: terminal width too small (min 40)"))
 			} else {
-				if m.showSidebar {
-					m.sidebarPref = sidebarForceHide
-					m.showSidebar = false
-				} else {
-					m.sidebarPref = sidebarForceShow
-					m.showSidebar = true
-				}
-				m.SyncLayout()
+				m.toggleSidebar()
 			}
 		case "ctrl+a":
 			m.modePopup.Open(m.runtime)
@@ -586,10 +600,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.timeline.model.ShowReasoning {
 				stateStr = "visible"
 			}
-			m.notificationShow = true
-			m.notificationText = "Reasoning is now " + stateStr
-			m.notificationTime = time.Now()
-			cmds = append(cmds, m.hideNotification())
+			cmds = append(cmds, m.showNotification("Reasoning is now "+stateStr))
 		}
 	}
 	// 4. Delegate to standard components
@@ -624,7 +635,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.prevActiveTasks = currentActiveTasks
 	m.prevActiveSubagents = currentActiveSubagents
 
-	m.SyncLayout()
+	if _, isKey := msg.(tea.KeyMsg); !isKey || m.composer.Height() != oldComposerHeight {
+		m.SyncLayout()
+	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -752,10 +765,16 @@ func (m Model) View() string {
 		popup := widePopupStyle.Render(m.commandPalette.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.showTools {
-		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs(), m.footer.tachikomaInfo))
+		popup := widePopupStyle.Render(renderToolPalette(m.runtime.ToolSpecs()))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.questionPopup.active {
+		popup := widePopupStyle.Render(m.questionPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.settingsPopup.active {
+		popup := widePopupStyle.Render(m.settingsPopup.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	}
 
@@ -766,7 +785,7 @@ func (m Model) View() string {
 			BorderForeground(styles.MainNeon).
 			Render(styles.BoldNeonStyle.Render("✓ ") +
 				styles.WhiteStyle.Render(m.notificationText))
-		base = overlayBase(base, toast, m.width, m.height)
+		base = overlayBase(base, toast, m.width)
 	}
 
 	lines := strings.Split(base, "\n")
@@ -801,8 +820,7 @@ func (m *Model) SyncLayout() {
 	mainWidth := m.width - sidebarWidth
 
 	m.composer.SetWidth(mainWidth)
-	composerView := m.composer.View()
-	composerHeight := lipgloss.Height(composerView)
+	composerHeight := m.composer.Height()
 
 	footerHeight := 1
 	m.footer.width = m.width
@@ -816,8 +834,7 @@ func (m *Model) SyncLayout() {
 	}
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	m.sidebar.width = sidebarWidth
-	m.sidebar.height = timelineHeight + toolbarHeight + queueHeight + composerHeight
+	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+composerHeight)
 }
 
 func timelineOnboarding(runtime *app.Runtime) []string {
@@ -859,7 +876,7 @@ func (m Model) paletteContext() paletteContext {
 
 func (m *Model) enqueuePrompt(prompt string) {
 	m.promptQueue = append(m.promptQueue, prompt)
-	m.queueSel = clamp(m.queueSel, 0, max(0, len(m.promptQueue)-1))
+	m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
 }
 
 func (m *Model) dequeuePrompt() (string, bool) {
@@ -874,9 +891,84 @@ func (m *Model) dequeuePrompt() (string, bool) {
 		m.queueSel = 0
 		m.queueFocus = false
 	} else {
-		m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+		m.queueSel = clamp(m.queueSel, len(m.promptQueue)-1)
 	}
 	return prompt, true
+}
+
+func (m *Model) nextPromptAfterAgent() (string, bool) {
+	if br := m.runtime.GetBrain(); br != nil && br.Exists("goal") {
+		pending, completed := br.TaskCounts()
+		if !br.Exists("tasks") {
+			return "[System: Goal still active. No tasks.md exists yet. Create or refine tasks.md first, then continue.]", true
+		}
+		if pending > 0 {
+			attempts, lastPending := readGoalState(br)
+			if lastPending == pending {
+				attempts++
+			} else {
+				attempts = 1
+			}
+			_ = writeGoalState(br, attempts, pending)
+			if attempts > 20 {
+				_ = br.Delete("goal")
+				_ = br.Delete("goal_state")
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "Goal auto-continue stopped after 20 attempts without progress."})
+				m.timeline.renderMessages()
+				return m.dequeuePrompt()
+			}
+			return "[System: Goal still active. Continue with the next unfinished task in tasks.md.]", true
+		}
+		if pending == 0 && completed == 0 {
+			attempts, lastPending := readGoalState(br)
+			if lastPending == 0 {
+				attempts++
+			} else {
+				attempts = 1
+			}
+			_ = writeGoalState(br, attempts, 0)
+			if attempts > 20 {
+				_ = br.Delete("goal")
+				_ = br.Delete("goal_state")
+				m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "Goal auto-continue stopped after 20 attempts without a usable tasks.md checklist."})
+				m.timeline.renderMessages()
+				return m.dequeuePrompt()
+			}
+			return "[System: Goal still active, but tasks.md has no checkboxes yet. Refine tasks.md first, then continue.]", true
+		}
+		_ = br.Delete("goal_state")
+		_ = br.Delete("goal")
+		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Goal completed."})
+		m.timeline.renderMessages()
+	}
+	return m.dequeuePrompt()
+}
+
+func readGoalState(br *brain.Brain) (attempts int, lastPending int) {
+	if br == nil {
+		return 0, -1
+	}
+	content, err := br.Read("goal_state")
+	if err != nil {
+		return 0, -1
+	}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "attempts:") {
+			_, _ = fmt.Sscanf(line, "attempts: %d", &attempts)
+		}
+		if strings.HasPrefix(line, "pending:") {
+			_, _ = fmt.Sscanf(line, "pending: %d", &lastPending)
+		}
+	}
+	return attempts, lastPending
+}
+
+func writeGoalState(br *brain.Brain, attempts int, pending int) error {
+	if br == nil {
+		return nil
+	}
+	return br.Write("goal_state", fmt.Sprintf("attempts: %d\npending: %d\n", attempts, pending))
 }
 
 func (m *Model) removeQueuedAt(index int) {
@@ -889,19 +981,37 @@ func (m *Model) removeQueuedAt(index int) {
 		m.queueFocus = false
 		return
 	}
-	m.queueSel = clamp(m.queueSel, 0, len(m.promptQueue)-1)
+	m.queueSel = clamp(m.queueSel, len(m.promptQueue)-1)
 }
 
 func (m *Model) moveQueued(index, delta int) {
 	if index < 0 || index >= len(m.promptQueue) {
 		return
 	}
-	target := clamp(index+delta, 0, len(m.promptQueue)-1)
+	target := clamp(index+delta, len(m.promptQueue)-1)
 	if target == index {
 		return
 	}
 	m.promptQueue[index], m.promptQueue[target] = m.promptQueue[target], m.promptQueue[index]
 	m.queueSel = target
+}
+
+func (m *Model) showNotification(text string) tea.Cmd {
+	m.notificationShow = true
+	m.notificationText = text
+	m.notificationTime = time.Now()
+	return m.hideNotification()
+}
+
+func (m *Model) toggleSidebar() {
+	if m.showSidebar {
+		m.sidebarPref = sidebarForceHide
+		m.showSidebar = false
+	} else {
+		m.sidebarPref = sidebarForceShow
+		m.showSidebar = true
+	}
+	m.SyncLayout()
 }
 
 func (m Model) queuePanelHeight(width int) int {

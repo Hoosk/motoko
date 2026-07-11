@@ -16,7 +16,7 @@ Motoko is built in Go and operates as a terminal coding agent with a strong loca
 - `Sidebar`: Tachikoma status, semantic summary, and context signals
 - `Composer`: multiline input with command/tool completion. Shows active agent mode and thinking indicator.
 - `Footer`: workspace path, git state, task count, context window usage, and pending approvals
-- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector
+- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector, Settings popup, and agent-driven Question popup
 
 ## 2. Session Runtime (`internal/app`)
 The runtime is the operational core that connects the TUI to the agent, tools, and background workers.
@@ -42,8 +42,14 @@ The runtime is the operational core that connects the TUI to the agent, tools, a
 - `/compact` — Manually compact the active session
 - `/plan` — Activate read-only plan mode
 - `/build` — Activate active build mode
+- `/learn` — Capture reusable knowledge into `.agents/skills/` or `.agents/modes/`
+- `/teamwork-preview [goal]` — Run parallel planning/orchestration and optional build handoff
+- `/grill-me` — Interrogate the current plan until ambiguities are resolved
+- `/goal [plan|clear|status|<description>]` — Persist a goal and auto-continue until tasks are complete
+- `/schedule [list|add|remove]` — Run one-shot or recurring scheduled instructions
 - `/agent [name]` — Switch or display active agent mode
 - `/mode` — Open agent mode selector popup
+- `/settings` — Open runtime settings popup
 - `/shell` — Activate direct shell execution mode
 - `/chat` — Return to normal chat mode
 - `/status` — Summarize mode, provider, workspace, and approval state
@@ -75,6 +81,7 @@ Motoko has a local tool registry used by the runtime, the agent loop, and slash 
 - `brain_write`: write a markdown file to the session brain
 - `brain_read`: read a markdown file from the session brain
 - `brain_list`: list all files in the session brain
+- `question`: ask the user a structured question and block until a reply is received
 - `activate_skill`: load specialized instructions from the skills directory
 - `web_search`: search the web via Mojeek (with DuckDuckGo fallback)
 - `web_fetch`: fetch and extract readable content from a URL
@@ -92,14 +99,14 @@ The agent loop handles the full LLM interaction cycle including tool calling.
 - Normal input in chat mode is routed to the agent when the provider is configured
 - The agent receives workspace and git context, semantic summaries, relevant file/snippet suggestions, brain state, available skills, and the registered tool catalog
 - The agent can answer directly or request tools; tool results are fed back into the loop
-- Maximum of 24 tool iterations per turn (configurable via `MOTOKO_MAX_ITERATIONS`)
+- Maximum of 250 tool iterations per turn by default (configurable via `MOTOKO_MAX_ITERATIONS`, `max_iterations`, or per-agent overrides)
 - Cycle detection prevents infinite tool loops
 - Tools are executed in parallel when multiple calls are returned in a single response
 - Streaming is supported: text and reasoning deltas are forwarded to the TUI in real-time
 
 ### Multi-Agent System
-- **Built-in agents:** `plan`, `build`, `search` — each with a distinct system prompt
-- **Custom agents:** defined in a `.agents` INI file at the workspace root
+- **Built-in agents:** `plan`, `build`, `search`, `learn`, `teamwork`, `grill` — each with a distinct system prompt
+- **Custom agents:** defined as markdown files in `.agents/modes/*.md` at the workspace root
 - **Agent switching:** via `/agent <name>`, `/plan`, `/build`, `/mode`, or `Ctrl+A`
 - **Command palette:** `Ctrl+K` opens a fuzzy command palette for slash commands and core shortcuts
 - **Tool filtering:** plan and search agents only get read-only tools; build agents get the full set
@@ -171,6 +178,8 @@ The brain provides persistent per-session markdown storage.
 - The agent is instructed to use brain files for multi-step workflows
 - Brain state (file list, plan summary, tasks summary) is injected into the system prompt each turn
 - Brain files can be managed via the `/brain` slash command or the `brain_write`/`brain_read`/`brain_list` tools
+- `goal.md` is used to persist an execution goal across turns
+- `schedule.md` is used to persist session schedules and restore them on session load
 
 ## 9. Skills System (`internal/skills`)
 Skills are folders of instructions that extend the agent's capabilities for specialized tasks.
@@ -187,10 +196,12 @@ Skills are folders of instructions that extend the agent's capabilities for spec
 - **Shell execution:** async Bubble Tea command returning result messages
 - **Agent loop:** runs as an async Bubble Tea command; streams events through a buffered channel
 - **Background tasks:** managed by `TaskManager`; results delivered via event channel
+- **Scheduled instructions:** managed by `ScheduleManager`; events delivered via a dedicated channel and reinjected as prompts
 - **Tachikoma workers:** goroutines publishing status updates through a shared update channel
 - **Subagents:** synchronous execution within the `delegate` tool's goroutine
 
 ## 11. Project Guidelines
 - **AGENTS.md:** workspace-level guidelines loaded into the system prompt automatically
-- **.agents file:** custom agent definitions in INI format
+- **.agents/modes/:** custom agent definitions in markdown + frontmatter format
 - **.agents/skills/:** skill definitions with YAML+markdown
+- **.agents/config.json:** workspace-scoped config overrides for providers, agents, search, thinking verbosity, and max iterations

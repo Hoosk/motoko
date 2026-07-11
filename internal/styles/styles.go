@@ -215,7 +215,8 @@ func SetTheme(name string) {
 		Foreground(White)
 
 	ReasoningBlockStyle = lipgloss.NewStyle().
-		Foreground(Gray)
+		Foreground(Gray).
+		Italic(true)
 
 	AssistantLabelStyle = lipgloss.NewStyle().
 		Foreground(MainNeon).

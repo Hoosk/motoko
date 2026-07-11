@@ -128,14 +128,7 @@ func responseFromChatCompletion(decoded chatCompletionResponse) provider.Respons
 	text := strings.TrimSpace(message.Content)
 	reasoning := strings.TrimSpace(message.ReasoningContent)
 	pending := pendingCallsFromChatToolCalls(message.ToolCalls)
-	result := provider.Response{FinalText: text, Usage: decoded.Usage.providerUsage(), PendingCalls: pending}
-	if text != "" || reasoning != "" || len(pending) > 0 {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, reasoning, pending)}
-	}
-	if len(pending) > 0 {
-		result.FinalText = ""
-	}
-	return result
+	return provider.FinalizeResponse(text, reasoning, pending, decoded.Usage.providerUsage())
 }
 
 func pendingCallsFromChatToolCalls(toolCalls []chatCompletionToolCall) []provider.ToolInvocation {
@@ -526,24 +519,13 @@ func responseFromSDKChatCompletion(comp *openai.ChatCompletion) provider.Respons
 	reasoningTokens := int(comp.Usage.CompletionTokensDetails.ReasoningTokens)
 
 	pending := pendingCallsFromSDKToolCalls(message.ToolCalls)
-	result := provider.Response{
-		FinalText:    text,
-		PendingCalls: pending,
-		Usage: provider.Usage{
-			InputTokens:          input,
-			OutputTokens:         output,
-			TotalTokens:          total,
-			CacheReadInputTokens: cacheRead,
-			ReasoningTokens:      reasoningTokens,
-		},
-	}
-	if text != "" || reasoningContent != "" || len(pending) > 0 {
-		result.OutputItems = []provider.ConversationItem{provider.AssistantTurn(text, reasoningContent, pending)}
-	}
-	if len(result.PendingCalls) > 0 {
-		result.FinalText = ""
-	}
-	return result
+	return provider.FinalizeResponse(text, reasoningContent, pending, provider.Usage{
+		InputTokens:          input,
+		OutputTokens:         output,
+		TotalTokens:          total,
+		CacheReadInputTokens: cacheRead,
+		ReasoningTokens:      reasoningTokens,
+	})
 }
 
 func pendingCallsFromSDKToolCalls(toolCalls []openai.ChatCompletionMessageToolCallUnion) []provider.ToolInvocation {

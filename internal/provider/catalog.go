@@ -117,7 +117,7 @@ func LoadCatalog(ctx context.Context) error {
 		tracelog.Logf("catalog: request failed: %v", err)
 		return fallbackToCache(cachePath)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		tracelog.Logf("catalog: request returned non-200 status: %d", resp.StatusCode)

@@ -3,11 +3,9 @@ package openai
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -24,11 +22,7 @@ func init() {
 }
 
 type openAIClient struct {
-	baseURL            string
-	apiKey             string
-	model              string
-	providerName       string
-	httpClient         *http.Client
+	provider.BaseClient
 	sdkClient          openai.Client
 	thinkingBudget     int
 	contextWindow      int
@@ -37,23 +31,16 @@ type openAIClient struct {
 }
 
 func NewClient(cfg config.ProviderConfig) provider.Client {
-	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	apiKey := strings.TrimSpace(cfg.APIKey)
-	model := strings.TrimSpace(cfg.Model)
-	httpClient := &http.Client{Timeout: 15 * time.Minute}
+	base := provider.NewBaseClient(cfg.Name, cfg.BaseURL, cfg.APIKey, cfg.Model)
 
 	sdkClient := openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithBaseURL(baseURL),
-		option.WithHTTPClient(&http.Client{Timeout: 15 * time.Minute}),
+		option.WithAPIKey(base.APIKey()),
+		option.WithBaseURL(base.BaseURL()),
+		option.WithHTTPClient(base.HTTPClient()),
 	)
 
 	return &openAIClient{
-		baseURL:            baseURL,
-		apiKey:             apiKey,
-		model:              model,
-		providerName:       cfg.Name,
-		httpClient:         httpClient,
+		BaseClient:         base,
 		thinkingBudget:     cfg.ThinkingBudget,
 		contextWindow:      cfg.ContextWindow,
 		sdkClient:          sdkClient,
@@ -61,36 +48,6 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 		useSDK:             cfg.UseSDK,
 	}
 }
-
-func (c *openAIClient) Configured() bool {
-	return c.baseURL != "" && c.apiKey != "" && c.model != ""
-}
-
-func (c *openAIClient) ConfigurationError() error {
-	if c.baseURL == "" {
-		return fmt.Errorf("provider not configured: empty base URL")
-	}
-	if c.apiKey == "" {
-		return fmt.Errorf("provider not configured: empty API Key")
-	}
-	if c.model == "" {
-		return fmt.Errorf("provider not configured: model not specified")
-	}
-	return nil
-}
-
-func (c *openAIClient) listReady() bool {
-	return c.baseURL != "" && c.apiKey != ""
-}
-
-func (c *openAIClient) ProviderKind() string {
-	return c.providerName
-}
-
-func (c *openAIClient) Summary() string {
-	return fmt.Sprintf("%s:%s", c.providerName, c.model)
-}
-
 func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	if err := c.ConfigurationError(); err != nil {
 		return provider.Response{}, err
@@ -104,10 +61,10 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 	}
 
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
+	params := buildResponseParams(c.Model(), systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]option.RequestOption, 0)
 	telemetryHeaders := map[string]string{}
-	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), telemetryHeaders, sessionID, requestID)
 	for k, v := range telemetryHeaders {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))
 	}
@@ -122,7 +79,7 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	var decoded chatCompletionResponse
 
 	payload := map[string]interface{}{
-		"model": c.model,
+		"model": c.Model(),
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
@@ -134,14 +91,14 @@ func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, me
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
-		payload["parallel_tool_calls"] = false
+		payload["parallel_tool_calls"] = true
 	}
 
-	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	headers := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), headers, sessionID, requestID)
 
-	if err := provider.PostJSON(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, &decoded); err != nil {
+	if err := provider.PostJSON(ctx, c.HTTPClient(), c.BaseURL()+"/chat/completions", payload, headers, &decoded); err != nil {
 		return provider.Response{}, err
 	}
 
@@ -159,7 +116,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(c.model),
+		Model:       openai.ChatModel(c.Model()),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
 	}
@@ -171,11 +128,11 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
 			OfAuto: param.NewOpt("auto"),
 		}
-		params.ParallelToolCalls = param.NewOpt(false)
+		params.ParallelToolCalls = param.NewOpt(true)
 	}
 
-	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
+	headers := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), headers, sessionID, requestID)
 	reqOpts := make([]option.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, option.WithHeader(k, v))
@@ -189,7 +146,7 @@ func (c *openAIClient) completeChatSDK(ctx context.Context, systemPrompt string,
 }
 
 func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
-	if !c.listReady() {
+	if !c.ListReady() {
 		return nil, fmt.Errorf("provider not configured")
 	}
 	var decoded struct {
@@ -199,9 +156,9 @@ func (c *openAIClient) ListModels(ctx context.Context) ([]provider.ModelInfo, er
 		} `json:"data"`
 	}
 
-	listHeaders := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	listHeaders := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
 
-	if err := provider.GetJSON(ctx, c.httpClient, c.baseURL+"/models", listHeaders, &decoded); err != nil {
+	if err := provider.GetJSON(ctx, c.HTTPClient(), c.BaseURL()+"/models", listHeaders, &decoded); err != nil {
 		return nil, err
 	}
 	result := make([]provider.ModelInfo, 0, len(decoded.Data))
@@ -253,7 +210,7 @@ func (c *openAIClient) GetModel(ctx context.Context, model string) (provider.Mod
 	}
 
 	// Attempt 3: Fall back to the local catalog cache.
-	if info, ok := provider.LookupModel(c.providerName, model); ok {
+	if info, ok := provider.LookupModel(c.ProviderKind(), model); ok {
 		return info, nil
 	}
 
@@ -290,8 +247,8 @@ func buildResponseParams(model, systemPrompt string, messages []provider.Convers
 	if toolDefs := responseTools(tools); len(toolDefs) > 0 {
 		p.Tools = toolDefs
 		p.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto)}
-		p.MaxToolCalls = param.NewOpt(int64(1))
-		p.ParallelToolCalls = param.NewOpt(false)
+		p.MaxToolCalls = param.NewOpt(int64(8))
+		p.ParallelToolCalls = param.NewOpt(true)
 	}
 	if thinkingBudget > 0 {
 		p.Reasoning = shared.ReasoningParam{

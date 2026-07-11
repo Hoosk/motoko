@@ -6,7 +6,13 @@ import (
 	"github.com/Hoosk/motoko/internal/app"
 )
 
-const startupMessageCount = 3
+func (m *Model) startupMessageCount() int {
+	count := len(m.Messages) - len(m.VisibleEntries())
+	if count < 0 {
+		return 0
+	}
+	return count
+}
 
 // VisibleEntries returns the subset of entries to display.
 func (m *Model) VisibleEntries() []app.Entry {
@@ -55,6 +61,7 @@ func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer 
 }
 
 func (m *Model) RenderLineMetadata(idx int) []RenderLine {
+	startupMessageCount := m.startupMessageCount()
 	if idx < startupMessageCount {
 		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
 		meta := make([]RenderLine, 0, len(plainLines))
@@ -119,6 +126,7 @@ func (m *Model) MessageAtY(y int) int {
 	}
 
 	currentY := -m.Viewport.YOffset
+	startupMessageCount := m.startupMessageCount()
 
 	logoHeight := strings.Count(LogoArt, "\n") + 1
 	if y >= currentY && y < currentY+logoHeight {
@@ -175,5 +183,5 @@ func (m *Model) ClampMouseContentCoords(x, y int) (int, int) {
 	if m.Viewport.Width <= 0 || m.Viewport.Height <= 0 {
 		return 0, 0
 	}
-	return clamp(x, 0, m.Viewport.Width-1), clamp(y, 0, m.Viewport.Height-1)
+	return clamp(x, m.Viewport.Width-1), clamp(y, m.Viewport.Height-1)
 }

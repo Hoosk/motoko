@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/app/sessiontitle"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
@@ -858,6 +860,9 @@ func TestSlashCommandMetrics(t *testing.T) {
 	r.sesMgr.SetCurrentSession(session.New(r.sesMgr.WorkspaceID(), "/workspace"))
 	r.sesMgr.CurrentSession().TotalInputTokens = 1000
 	r.sesMgr.CurrentSession().TotalOutputTokens = 500
+	r.sesMgr.CurrentSession().TotalReasoningTokens = 125
+	r.sesMgr.CurrentSession().TotalCacheReadTokens = 60
+	r.sesMgr.CurrentSession().TotalCacheWriteTokens = 20
 	r.sesMgr.CurrentSession().TotalTokens = 1500
 	r.sesMgr.CurrentSession().TotalSystemStaticTokens = 500
 	r.sesMgr.CurrentSession().TotalSystemDynamicTokens = 300
@@ -865,10 +870,24 @@ func TestSlashCommandMetrics(t *testing.T) {
 	r.sesMgr.CurrentSession().TotalHistoryTokens = 100
 
 	r.sesMgr.CurrentSession().LastInputTokens = 500
+	r.sesMgr.CurrentSession().LastOutputTokens = 200
+	r.sesMgr.CurrentSession().LastReasoningTokens = 75
+	r.sesMgr.CurrentSession().LastCacheReadTokens = 25
+	r.sesMgr.CurrentSession().LastCacheWriteTokens = 10
 	r.sesMgr.CurrentSession().LastSystemStaticTokens = 250
 	r.sesMgr.CurrentSession().LastSystemDynamicTokens = 150
 	r.sesMgr.CurrentSession().LastToolsTokens = 50
 	r.sesMgr.CurrentSession().LastHistoryTokens = 50
+	r.sesMgr.CurrentSession().Turns = []session.TurnUsage{{
+		Turn:            1,
+		AgentLabel:      "fake:test",
+		InputTokens:     500,
+		OutputTokens:    200,
+		ReasoningTokens: 75,
+		TotalTokens:     700,
+		InputGrowth:     100,
+		Iterations:      []provider.Usage{{InputTokens: 400, OutputTokens: 75, TotalTokens: 475, ReasoningTokens: 25}, {InputTokens: 500, OutputTokens: 125, TotalTokens: 625, ReasoningTokens: 50}},
+	}}
 
 	resp = r.handleSlashCommand("/metrics", system.ContextInfo{})
 	if len(resp.Entries) == 0 {
@@ -884,7 +903,89 @@ func TestSlashCommandMetrics(t *testing.T) {
 	if !strings.Contains(text, "Cumulative Token Usage") {
 		t.Errorf("expected Cumulative section, got %q", text)
 	}
+	if !strings.Contains(text, "Recent Turn Trend") {
+		t.Errorf("expected recent turn trend, got %q", text)
+	}
+	if !strings.Contains(text, "Reasoning (Thinking) Tokens: 75") {
+		t.Errorf("expected last-turn reasoning tokens, got %q", text)
+	}
+	if !strings.Contains(text, "iter 2: in=500 out=125 reasoning=50 total=625 input_delta=+100") {
+		t.Errorf("expected per-iteration metrics, got %q", text)
+	}
 	if !strings.Contains(text, "System Prompt (Static):  500 (50.0% of input)") {
 		t.Errorf("expected static prompt breakdown, got %q", text)
+	}
+}
+
+func TestSchedulePersistenceRoundTrip(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	def, err := r.AddSchedule("run tests", time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := r.GetBrain().Read("schedule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content, def.ID) || !strings.Contains(content, "run tests") {
+		t.Fatalf("unexpected persisted schedule content: %q", content)
+	}
+
+	parsed := scheduleman.ParseScheduleBrain(content)
+	if len(parsed) != 1 {
+		t.Fatalf("expected one parsed schedule, got %#v", parsed)
+	}
+	if parsed[0].Instruction != "run tests" {
+		t.Fatalf("unexpected parsed instruction: %#v", parsed[0])
+	}
+}
+
+func TestLoadSessionRestoresSchedulesFromBrain(t *testing.T) {
+	withSessionBaseDir(t)
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	s := session.New(r.sesMgr.WorkspaceID(), "/workspace")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := brain.New(r.sesMgr.WorkspaceID(), s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := scheduleman.FormatScheduleBrain([]scheduleman.Definition{{ID: "sched-7", Instruction: "run tests", Interval: time.Minute}})
+	if err := b.Write("schedule", content); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.LoadSession(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	defs := r.ListSchedules()
+	if len(defs) != 1 || defs[0].ID != "sched-7" {
+		t.Fatalf("expected restored schedules, got %#v", defs)
+	}
+}
+
+func TestRuntimeStopCancelsBackgroundContext(t *testing.T) {
+	r := NewRuntime()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	bg := r.BackgroundContext()
+	r.Stop()
+
+	select {
+	case <-bg.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected background context to be cancelled by Stop")
 	}
 }

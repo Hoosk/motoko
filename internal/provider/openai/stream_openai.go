@@ -34,10 +34,10 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 	}
 
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	params := buildResponseParams(c.model, systemPrompt, messages, tools, c.thinkingBudget, sessionID)
+	params := buildResponseParams(c.Model(), systemPrompt, messages, tools, c.thinkingBudget, sessionID)
 	reqOpts := make([]openaioption.RequestOption, 0)
 	telemetryHeaders := map[string]string{}
-	provider.ApplyTelemetryHeaders(c.providerName, telemetryHeaders, sessionID, requestID)
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), telemetryHeaders, sessionID, requestID)
 	for k, v := range telemetryHeaders {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
 	}
@@ -100,7 +100,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	mappedIndexes := make(map[int]int)
 
 	payload := map[string]interface{}{
-		"model": c.model,
+		"model": c.Model(),
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},
 		}, toChatMessages(messages)...),
@@ -114,14 +114,14 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	if toolDefs := chatCompletionTools(tools); len(toolDefs) > 0 {
 		payload["tools"] = toolDefs
 		payload["tool_choice"] = "auto"
-		payload["parallel_tool_calls"] = false
+		payload["parallel_tool_calls"] = true
 	}
 
-	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
+	headers := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
 	sessionID, requestID := provider.GetTelemetry(ctx)
-	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), headers, sessionID, requestID)
 
-	err := postJSONStream(ctx, c.httpClient, c.baseURL+"/chat/completions", payload, headers, func(data string) error {
+	err := postJSONStream(ctx, c.HTTPClient(), c.BaseURL()+"/chat/completions", payload, headers, func(data string) error {
 		var chunk struct {
 			Usage   *chatCompletionUsage   `json:"usage"`
 			Choices []chatCompletionChoice `json:"choices"`
@@ -177,7 +177,7 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 	sessionID, requestID := provider.GetTelemetry(ctx)
 
 	params := openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(c.model),
+		Model:       openai.ChatModel(c.Model()),
 		Messages:    sdkMessages,
 		Temperature: param.NewOpt(0.2),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
@@ -192,11 +192,11 @@ func (c *openAIClient) streamChatSDK(ctx context.Context, systemPrompt string, m
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
 			OfAuto: param.NewOpt("auto"),
 		}
-		params.ParallelToolCalls = param.NewOpt(false)
+		params.ParallelToolCalls = param.NewOpt(true)
 	}
 
-	headers := provider.BuildAuthHeaders(c.baseURL, c.apiKey)
-	provider.ApplyTelemetryHeaders(c.providerName, headers, sessionID, requestID)
+	headers := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
+	provider.ApplyTelemetryHeaders(c.ProviderKind(), headers, sessionID, requestID)
 	reqOpts := make([]openaioption.RequestOption, 0, len(headers))
 	for k, v := range headers {
 		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
