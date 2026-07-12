@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func isolateConfigStorage(t *testing.T) (string, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	t.Setenv("AppData", root)
+
+	configPath, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath, err := KeyPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{configPath, keyPath} {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("test storage path %q escapes temporary root %q", path, root)
+		}
+	}
+
+	return configPath, keyPath
+}
+
 func TestNormalizeProviderBackfillsPresetKindNameAndBaseURL(t *testing.T) {
 	got := NormalizeProvider(ProviderConfig{
 		Kind:   "openai",
@@ -102,8 +131,7 @@ func TestUniqueSortedKeepDeduplicatesAndSorts(t *testing.T) {
 }
 
 func TestLoadAndSaveRoundTrip(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
+	configPath, keyPath := isolateConfigStorage(t)
 
 	cfg := &AppConfig{
 		ActiveProvider: "openrouter",
@@ -125,21 +153,16 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	if loaded.ActiveProvider != "openrouter" || len(loaded.Providers) != 1 {
 		t.Fatalf("unexpected loaded config %#v", loaded)
 	}
-	path, err := Path()
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected config file saved at %s: %v", configPath, err)
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("expected config file saved at %s: %v", path, err)
-	}
-	if filepath.Dir(path) != filepath.Join(configHome, "motoko") {
-		t.Fatalf("unexpected config dir %q", filepath.Dir(path))
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("expected encryption key saved at %s: %v", keyPath, err)
 	}
 }
 
 func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
+	configPath, keyPath := isolateConfigStorage(t)
 
 	const rawKey = "sk-proj-my-super-secret-key-12345"
 
@@ -159,15 +182,13 @@ func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, err := Path()
+	// Read raw config file and check that the key is ENCRYPTED
+	fileData, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Read raw config file and check that the key is ENCRYPTED
-	fileData, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(keyPath); err != nil {
+		t.Fatalf("expected encryption key saved at %s: %v", keyPath, err)
 	}
 	rawContent := string(fileData)
 	if !strings.Contains(rawContent, "enc:") {
