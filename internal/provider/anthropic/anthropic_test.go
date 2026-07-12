@@ -126,7 +126,9 @@ func TestToSDKMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
 		t,
 		toSDKMessages(toolUseCacheControlMessages()),
 		func(msg sdk.MessageParam) sdk.CacheControlEphemeralParam { return msg.Content[0].OfText.CacheControl },
-		func(msg sdk.MessageParam) bool { return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.CacheControlEphemeralParam{}) },
+		func(msg sdk.MessageParam) bool {
+			return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.CacheControlEphemeralParam{})
+		},
 	)
 }
 
@@ -134,8 +136,12 @@ func TestToSDKBetaMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
 	assertPenultimateToolUseCacheControl(
 		t,
 		toSDKBetaMessages(toolUseCacheControlMessages()),
-		func(msg sdk.BetaMessageParam) sdk.BetaCacheControlEphemeralParam { return msg.Content[0].OfText.CacheControl },
-		func(msg sdk.BetaMessageParam) bool { return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.BetaCacheControlEphemeralParam{}) },
+		func(msg sdk.BetaMessageParam) sdk.BetaCacheControlEphemeralParam {
+			return msg.Content[0].OfText.CacheControl
+		},
+		func(msg sdk.BetaMessageParam) bool {
+			return msg.Content[0].OfToolUse != nil && msg.Content[0].OfToolUse.CacheControl != (sdk.BetaCacheControlEphemeralParam{})
+		},
 	)
 }
 
@@ -152,7 +158,6 @@ func toolUseCacheControlMessages() []provider.ConversationItem {
 		provider.UserText("last"),
 	}
 }
-
 
 func assertPenultimateToolUseCacheControl[Msg any, Cache comparable](t *testing.T, got []Msg, firstCache func(Msg) Cache, secondHasToolUseCache func(Msg) bool) {
 	t.Helper()

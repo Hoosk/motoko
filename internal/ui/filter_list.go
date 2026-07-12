@@ -42,8 +42,8 @@ type filteredItem struct {
 
 type filterListRow struct {
 	Item      FilterableItem
-	Positions []int
 	Header    string
+	Positions []int
 	Index     int
 }
 
@@ -138,7 +138,7 @@ func (fl *FilterList) Update(msg tea.Msg) (FilterableItem, bool, bool) {
 			fl.Active = false
 			return chosen, true, false
 
-		case "backspace":
+		case keyBackspace:
 			if len(fl.SearchQuery) > 0 {
 				fl.Filter(fl.SearchQuery[:len(fl.SearchQuery)-1])
 			}
@@ -181,10 +181,7 @@ func (fl *FilterList) View() string {
 	end := len(displayRows)
 
 	if end > maxItems {
-		start = selectedRow - maxItems/2
-		if start < 0 {
-			start = 0
-		}
+		start = max(selectedRow-maxItems/2, 0)
 		end = start + maxItems
 		if end > len(displayRows) {
 			end = len(displayRows)

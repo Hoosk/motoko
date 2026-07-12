@@ -43,8 +43,8 @@ func (t *TaskTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
 	}
 
-	if strings.HasPrefix(args, "terminate ") {
-		id := strings.TrimSpace(strings.TrimPrefix(args, "terminate "))
+	if after, ok := strings.CutPrefix(args, "terminate "); ok {
+		id := strings.TrimSpace(after)
 		if err := t.runner.TerminateTask(id); err != nil {
 			return Result{}, err
 		}

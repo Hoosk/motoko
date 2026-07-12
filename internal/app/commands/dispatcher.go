@@ -32,6 +32,12 @@ const (
 	ValNone        = "none"
 	ThemeCyberpunk = "cyberpunk"
 	DefaultTheme   = ThemeCyberpunk
+
+	CmdQuit    = "quit"
+	CmdThemes  = "themes"
+	CmdAgent   = "agent"
+	CmdShell   = "shell"
+	CmdApprove = "approve"
 )
 
 type Deps struct {
@@ -111,7 +117,6 @@ func (d *Dispatcher) Definitions() []Definition {
 func (d *Dispatcher) buildRegistry() *Registry {
 	r := NewRegistry()
 	for _, def := range commandDefinitions {
-		def := def
 		r.Add(Command{
 			Definition: def,
 			Handler:    d.handlerFor(def.Name),
@@ -124,9 +129,9 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 	switch command {
 	case "help":
 		return func(inv Invocation) types.Response { return d.helpResponse() }
-	case "exit", "quit":
-		return func(inv Invocation) types.Response { return types.Response{Signal: "quit"} }
-	case "themes":
+	case "exit", CmdQuit:
+		return func(inv Invocation) types.Response { return types.Response{Signal: CmdQuit} }
+	case CmdThemes:
 		return d.handleThemesCommand
 	case CmdClear:
 		return func(inv Invocation) types.Response { return d.handleClearCommand() }
@@ -152,14 +157,16 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 			d.deps.SetAgentModeFn("grill")
 			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Agent switched to: grill"}}, Action: &types.Action{Type: types.ActionAgent, AgentPrompt: grillMePrompt()}}
 		}
-	case "agent":
+	case CmdAgent:
 		return d.handleAgentCommand
 	case "mode":
 		return func(inv Invocation) types.Response { return types.Response{Signal: "open-mode-popup"} }
-	case "shell", "chat":
+	case CmdShell, "chat":
 		return d.handleInputModeCommand(command)
 	case CmdStatus:
-		return func(inv Invocation) types.Response { return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: d.statusText(inv.Info)}}} }
+		return func(inv Invocation) types.Response {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: d.statusText(inv.Info)}}}
+		}
 	case "debug":
 		return func(inv Invocation) types.Response { return d.handleDebugCommand() }
 	case "context":
@@ -173,10 +180,12 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 	case "settings":
 		return func(inv Invocation) types.Response { return types.Response{Signal: "open-settings-popup"} }
 	case "tools":
-		return func(inv Invocation) types.Response { return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}} }
+		return func(inv Invocation) types.Response {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}}
+		}
 	case CmdTool:
 		return d.handleToolCommand
-	case "approve", "deny":
+	case CmdApprove, "deny":
 		return d.handleApprovalCommand(command)
 	case "trace":
 		return func(inv Invocation) types.Response { return d.handleTraceCommand() }

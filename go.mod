@@ -1,6 +1,6 @@
 module github.com/Hoosk/motoko
 
-go 1.24.13
+go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.47.0

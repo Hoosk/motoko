@@ -31,11 +31,11 @@ type TaskEventMsg struct {
 }
 
 type AgentResultMsg struct {
-	RequestID int
 	Err       error
 	Prompt    string
 	Assistant string
 	Result    agent.Result
+	RequestID int
 }
 
 type agentStreamBuffer struct {
@@ -58,22 +58,22 @@ type Model struct {
 	agentStream            chan app.AgentStreamEvent
 	cancelCurrent          context.CancelFunc
 	runtime                *app.Runtime
-	modelPicker            modelPickerState
-	promptQueue            []string
+	sessionPicker          sessionPickerState
+	commandPalette         commandPaletteState
 	taskStatus             string
 	notificationText       string
-	sessionPicker          sessionPickerState
-	sidebar                SidebarModel
+	modelPicker            modelPickerState
+	promptQueue            []string
+	questionPopup          questionPopupState
 	providerForm           providerForm
 	modePopup              modePopupState
-	commandPalette         commandPaletteState
-	questionPopup          questionPopupState
-	helpOverlay            helpOverlayState
 	settingsPopup          settingsPopupState
+	sidebar                SidebarModel
 	thinkingPicker         thinkingPickerState
 	composer               ComposerModel
 	timeline               TimelineModel
 	footer                 FooterModel
+	helpOverlay            helpOverlayState
 	sidebarPref            sidebarLayoutState
 	requestID              int
 	height                 int
@@ -494,18 +494,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Shortcut != "" {
 			switch msg.Shortcut {
-			case "ctrl+m":
+			case keyCtrlM:
 				cmds = append(cmds, m.listModels())
-			case "ctrl+p":
+			case keyCtrlP:
 				m.providerForm.Open(m.runtime)
-			case "ctrl+o":
+			case keyCtrlO:
 				m.sessionPicker.Open()
 				cmds = append(cmds, m.listSessions())
-			case "ctrl+a":
+			case keyCtrlA:
 				m.modePopup.Open(m.runtime)
-			case "ctrl+h":
+			case keyCtrlH:
 				m.helpOverlay.Open()
-			case "ctrl+t":
+			case keyCtrlT:
 				m.showTools = true
 			case "ctrl+s":
 				if _, allowed := m.sidebarLayout(); allowed {
@@ -646,7 +646,7 @@ func (m Model) renderComposerToolbar(width int) string {
 	agentName := m.runtime.AgentName()
 	var modeIndicator string
 	switch agentName {
-	case "plan":
+	case modePlan:
 		modeIndicator = styles.BoldVioletStyle.Render("[plan]")
 	case "build":
 		modeIndicator = styles.BoldNeonStyle.Render("[build]")
@@ -682,10 +682,9 @@ func (m Model) renderComposerToolbar(width int) string {
 
 	leftLen := lipgloss.Width(leftContent)
 	rightLen := lipgloss.Width(helpHint)
-	paddingLen := width - leftLen - rightLen - 2 // Account for right margin
-	if paddingLen < 0 {
-		paddingLen = 0
-	}
+	paddingLen := max(
+		// Account for right margin
+		width-leftLen-rightLen-2, 0)
 
 	toolbarContent := leftContent + strings.Repeat(" ", paddingLen) + helpHint
 	return styles.SystemStyle.Width(width).Render(toolbarContent)
@@ -727,20 +726,14 @@ func (m Model) View() string {
 	base := lipgloss.JoinVertical(lipgloss.Left, mainView, footerView)
 
 	// Dynamic popup width: adapt to terminal, capped at 50
-	popupWidth := m.width - 10
-	if popupWidth > 50 {
-		popupWidth = 50
-	}
+	popupWidth := min(m.width-10, 50)
 	if popupWidth < 30 {
 		popupWidth = 30
 	}
 	popupStyle := styles.PopupStyle.Width(popupWidth)
 
 	// Dynamic wide popup width: adapt to terminal, capped at 76
-	widePopupWidth := m.width - 10
-	if widePopupWidth > 76 {
-		widePopupWidth = 76
-	}
+	widePopupWidth := min(m.width-10, 76)
 	if widePopupWidth < 40 {
 		widePopupWidth = 40
 	}
@@ -828,10 +821,7 @@ func (m *Model) SyncLayout() {
 	toolbarHeight := 1
 	queueHeight := m.queuePanelHeight(mainWidth)
 
-	timelineHeight := m.height - footerHeight - composerHeight - toolbarHeight - queueHeight
-	if timelineHeight < 4 {
-		timelineHeight = 4
-	}
+	timelineHeight := max(m.height-footerHeight-composerHeight-toolbarHeight-queueHeight, 4)
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
 	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+composerHeight)
@@ -952,7 +942,7 @@ func readGoalState(br *brain.Brain) (attempts int, lastPending int) {
 	if err != nil {
 		return 0, -1
 	}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "attempts:") {
 			_, _ = fmt.Sscanf(line, "attempts: %d", &attempts)
@@ -1025,10 +1015,7 @@ func (m Model) renderQueuePanel(width int) string {
 	if len(m.promptQueue) == 0 || width <= 0 {
 		return ""
 	}
-	contentWidth := width - 4
-	if contentWidth < 0 {
-		contentWidth = 0
-	}
+	contentWidth := max(width-4, 0)
 	header := styles.WarmGoldStyle.Render("Queue") + " " + styles.GrayStyle.Render("("+strconv.Itoa(len(m.promptQueue))+")")
 	if m.queueFocus {
 		header += "  " + styles.BoldNeonStyle.Render("Ctrl+Up/Down reorder • Backspace delete • Esc close")

@@ -104,8 +104,8 @@ func ParseSkillFile(location string) (Skill, error) {
 
 	// Parse YAML frontmatter simply and leniently
 	var name, description string
-	lines := strings.Split(frontmatter, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(frontmatter, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

@@ -14,7 +14,7 @@ const updatesBufferSize = 32
 
 // Update represents a status update from a Tachikoma
 type Update struct {
-	Payload interface{}
+	Payload any
 	Name    string
 	Status  string
 	Done    bool

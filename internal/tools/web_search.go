@@ -142,27 +142,27 @@ func parseMojeekHTML(html string) []SearchResponseItem {
 		}
 		h2Content := part[titleH2Start : titleH2Start+titleH2End]
 
-		hrefIdx := strings.Index(h2Content, "href=\"")
-		if hrefIdx == -1 {
+		_, after, ok := strings.Cut(h2Content, "href=\"")
+		if !ok {
 			continue
 		}
-		hrefVal := h2Content[hrefIdx+6:]
-		hrefCloseIdx := strings.Index(hrefVal, "\"")
-		if hrefCloseIdx == -1 {
+		hrefVal := after
+		before, _, ok := strings.Cut(hrefVal, "\"")
+		if !ok {
 			continue
 		}
-		urlStr := hrefVal[:hrefCloseIdx]
+		urlStr := before
 
-		anchorCloseIdx := strings.Index(hrefVal, ">")
-		if anchorCloseIdx == -1 {
+		_, after, ok = strings.Cut(hrefVal, ">")
+		if !ok {
 			continue
 		}
-		titleVal := hrefVal[anchorCloseIdx+1:]
-		titleEndIdx := strings.Index(titleVal, "</a>")
-		if titleEndIdx == -1 {
+		titleVal := after
+		before, _, ok = strings.Cut(titleVal, "</a>")
+		if !ok {
 			continue
 		}
-		titleText := stripHTML(titleVal[:titleEndIdx])
+		titleText := stripHTML(before)
 
 		snippetStart := strings.Index(part, "class=\"s\"")
 		if snippetStart == -1 {
@@ -174,9 +174,9 @@ func parseMojeekHTML(html string) []SearchResponseItem {
 			closeTagIdx := strings.Index(snippetVal, ">")
 			if closeTagIdx != -1 {
 				snippetVal = snippetVal[closeTagIdx+1:]
-				snippetEndIdx := strings.Index(snippetVal, "</p>")
-				if snippetEndIdx != -1 {
-					snippetText = stripHTML(snippetVal[:snippetEndIdx])
+				before, _, ok := strings.Cut(snippetVal, "</p>")
+				if ok {
+					snippetText = stripHTML(before)
 				}
 			}
 		}
@@ -194,16 +194,16 @@ func parseDuckDuckGoHTML(html string) []SearchResponseItem {
 	var items []SearchResponseItem
 	parts := strings.Split(html, "class=\"result__a\"")
 	for _, part := range parts[1:] {
-		hrefIdx := strings.Index(part, "href=\"")
-		if hrefIdx == -1 {
+		_, after, ok := strings.Cut(part, "href=\"")
+		if !ok {
 			continue
 		}
-		hrefVal := part[hrefIdx+6:]
-		hrefCloseIdx := strings.Index(hrefVal, "\"")
-		if hrefCloseIdx == -1 {
+		hrefVal := after
+		before, _, ok := strings.Cut(hrefVal, "\"")
+		if !ok {
 			continue
 		}
-		urlStr := hrefVal[:hrefCloseIdx]
+		urlStr := before
 
 		// Unescape URL if it's redirected through ddg, e.g. /l/?kh=-1&uddg=https%3A%2F%2F...
 		if strings.Contains(urlStr, "uddg=") {
@@ -218,16 +218,16 @@ func parseDuckDuckGoHTML(html string) []SearchResponseItem {
 			}
 		}
 
-		anchorCloseIdx := strings.Index(hrefVal, ">")
-		if anchorCloseIdx == -1 {
+		_, after, ok = strings.Cut(hrefVal, ">")
+		if !ok {
 			continue
 		}
-		titleVal := hrefVal[anchorCloseIdx+1:]
-		titleEndIdx := strings.Index(titleVal, "</a>")
-		if titleEndIdx == -1 {
+		titleVal := after
+		before, _, ok = strings.Cut(titleVal, "</a>")
+		if !ok {
 			continue
 		}
-		titleText := stripHTML(titleVal[:titleEndIdx])
+		titleText := stripHTML(before)
 
 		snippetText := ""
 		snippetIdx := strings.Index(part, "class=\"result__snippet\"")
@@ -236,9 +236,9 @@ func parseDuckDuckGoHTML(html string) []SearchResponseItem {
 			closeTagIdx := strings.Index(snippetVal, ">")
 			if closeTagIdx != -1 {
 				snippetVal = snippetVal[closeTagIdx+1:]
-				snippetEndIdx := strings.Index(snippetVal, "</a>")
-				if snippetEndIdx != -1 {
-					snippetText = stripHTML(snippetVal[:snippetEndIdx])
+				before, _, ok := strings.Cut(snippetVal, "</a>")
+				if ok {
+					snippetText = stripHTML(before)
 				}
 			}
 		}

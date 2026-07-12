@@ -27,14 +27,14 @@ type Question struct {
 }
 
 type Answer struct {
-	Selections []string `json:"selections,omitempty"`
 	Custom     string   `json:"custom,omitempty"`
+	Selections []string `json:"selections,omitempty"`
 	Cancelled  bool     `json:"cancelled,omitempty"`
 }
 
 type PendingQuestion struct {
-	Question Question
 	answerCh chan Answer
+	Question Question
 	once     sync.Once
 }
 
@@ -49,8 +49,8 @@ func (p *PendingQuestion) Resolve(answer Answer) {
 }
 
 type QuestionBroker struct {
-	nextID  atomic.Int64
 	pending chan *PendingQuestion
+	nextID  atomic.Int64
 }
 
 func NewQuestionBroker() *QuestionBroker {

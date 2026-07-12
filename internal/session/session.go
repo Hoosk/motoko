@@ -20,8 +20,9 @@ var SessionsBaseDir string
 const maxTrackedTurns = 20
 
 type TurnUsage struct {
-	Turn             int              `json:"turn"`
 	AgentLabel       string           `json:"agent_label,omitempty"`
+	Iterations       []provider.Usage `json:"iterations,omitempty"`
+	Turn             int              `json:"turn"`
 	InputTokens      int              `json:"input_tokens,omitempty"`
 	OutputTokens     int              `json:"output_tokens,omitempty"`
 	TotalTokens      int              `json:"total_tokens,omitempty"`
@@ -29,42 +30,36 @@ type TurnUsage struct {
 	CacheReadTokens  int              `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int              `json:"cache_write_tokens,omitempty"`
 	InputGrowth      int              `json:"input_growth,omitempty"`
-	Iterations       []provider.Usage `json:"iterations,omitempty"`
 }
 
 type Session struct {
-	ID                   string                      `json:"id"`
-	Title                string                      `json:"title"`
-	WorkspaceID          string                      `json:"workspace_id"`
-	Workspace            string                      `json:"workspace"`
-	CreatedAt            time.Time                   `json:"created_at"`
-	UpdatedAt            time.Time                   `json:"updated_at"`
-	History              []provider.ConversationItem `json:"history,omitempty"`
-	LastInputTokens      int                         `json:"last_input_tokens,omitempty"`
-	LastOutputTokens     int                         `json:"last_output_tokens,omitempty"`
-	LastReasoningTokens  int                         `json:"last_reasoning_tokens,omitempty"`
-	LastCacheReadTokens  int                         `json:"last_cache_read_tokens,omitempty"`
-	LastCacheWriteTokens int                         `json:"last_cache_write_tokens,omitempty"`
-
-	TotalInputTokens      int `json:"total_input_tokens,omitempty"`
-	TotalOutputTokens     int `json:"total_output_tokens,omitempty"`
-	TotalTokens           int `json:"total_tokens,omitempty"`
-	TotalReasoningTokens  int `json:"total_reasoning_tokens,omitempty"`
-	TotalCacheReadTokens  int `json:"total_cache_read_tokens,omitempty"`
-	TotalCacheWriteTokens int `json:"total_cache_write_tokens,omitempty"`
-
-	// Cumulative estimated token usage per component
-	TotalSystemStaticTokens  int `json:"total_system_static_tokens,omitempty"`
-	TotalSystemDynamicTokens int `json:"total_system_dynamic_tokens,omitempty"`
-	TotalToolsTokens         int `json:"total_tools_tokens,omitempty"`
-	TotalHistoryTokens       int `json:"total_history_tokens,omitempty"`
-
-	// Last turn estimated token usage per component
-	LastSystemStaticTokens  int         `json:"last_system_static_tokens,omitempty"`
-	LastSystemDynamicTokens int         `json:"last_system_dynamic_tokens,omitempty"`
-	LastToolsTokens         int         `json:"last_tools_tokens,omitempty"`
-	LastHistoryTokens       int         `json:"last_history_tokens,omitempty"`
-	Turns                   []TurnUsage `json:"turns,omitempty"`
+	CreatedAt                time.Time                   `json:"created_at"`
+	UpdatedAt                time.Time                   `json:"updated_at"`
+	ID                       string                      `json:"id"`
+	Title                    string                      `json:"title"`
+	WorkspaceID              string                      `json:"workspace_id"`
+	Workspace                string                      `json:"workspace"`
+	History                  []provider.ConversationItem `json:"history,omitempty"`
+	Turns                    []TurnUsage                 `json:"turns,omitempty"`
+	TotalInputTokens         int                         `json:"total_input_tokens,omitempty"`
+	TotalCacheWriteTokens    int                         `json:"total_cache_write_tokens,omitempty"`
+	LastCacheReadTokens      int                         `json:"last_cache_read_tokens,omitempty"`
+	LastCacheWriteTokens     int                         `json:"last_cache_write_tokens,omitempty"`
+	LastOutputTokens         int                         `json:"last_output_tokens,omitempty"`
+	TotalOutputTokens        int                         `json:"total_output_tokens,omitempty"`
+	TotalTokens              int                         `json:"total_tokens,omitempty"`
+	TotalReasoningTokens     int                         `json:"total_reasoning_tokens,omitempty"`
+	TotalCacheReadTokens     int                         `json:"total_cache_read_tokens,omitempty"`
+	LastReasoningTokens      int                         `json:"last_reasoning_tokens,omitempty"`
+	TotalSystemStaticTokens  int                         `json:"total_system_static_tokens,omitempty"`
+	TotalSystemDynamicTokens int                         `json:"total_system_dynamic_tokens,omitempty"`
+	TotalToolsTokens         int                         `json:"total_tools_tokens,omitempty"`
+	TotalHistoryTokens       int                         `json:"total_history_tokens,omitempty"`
+	LastSystemStaticTokens   int                         `json:"last_system_static_tokens,omitempty"`
+	LastSystemDynamicTokens  int                         `json:"last_system_dynamic_tokens,omitempty"`
+	LastToolsTokens          int                         `json:"last_tools_tokens,omitempty"`
+	LastHistoryTokens        int                         `json:"last_history_tokens,omitempty"`
+	LastInputTokens          int                         `json:"last_input_tokens,omitempty"`
 }
 
 func WorkspaceIDFor(path string) string {

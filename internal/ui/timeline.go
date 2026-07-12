@@ -103,10 +103,10 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 	case AgentStreamEventMsg:
 		if m.model.Streaming {
 			event := msg.Event
-			if event.Kind == "assistant_delta" || event.Kind == "thinking_delta" {
+			if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
 				targetKind := app.EntryAssistant
 				content := event.Content
-				if event.Kind == "thinking_delta" {
+				if event.Kind == thinkingDelta {
 					targetKind = app.EntryReasoning
 					content = event.ReasoningContent
 				}
@@ -218,10 +218,10 @@ func (m *TimelineModel) ApplyStreamBatch(events []app.AgentStreamEvent) {
 		return
 	}
 	for _, event := range events {
-		if event.Kind == "assistant_delta" || event.Kind == "thinking_delta" {
+		if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
 			targetKind := app.EntryAssistant
 			content := event.Content
-			if event.Kind == "thinking_delta" {
+			if event.Kind == thinkingDelta {
 				targetKind = app.EntryReasoning
 				content = event.ReasoningContent
 			}
@@ -253,14 +253,8 @@ func (m TimelineModel) View() string {
 	if m.model.Width <= 0 || m.model.Height <= 0 {
 		return ""
 	}
-	vpWidth := m.model.Width - 2
-	if vpWidth < 0 {
-		vpWidth = 0
-	}
-	vpHeight := m.model.Height - 2
-	if vpHeight < 0 {
-		vpHeight = 0
-	}
+	vpWidth := max(m.model.Width-2, 0)
+	vpHeight := max(m.model.Height-2, 0)
 	return styles.TimelineStyle.Width(vpWidth).Height(vpHeight).Render(m.model.Viewport.View())
 }
 
@@ -275,16 +269,10 @@ func (m *TimelineModel) SyncLayout(width, height int) {
 	m.model.Width = width
 	m.model.Height = height
 
-	vpWidth := width - 2
-	if vpWidth < 0 {
-		vpWidth = 0
-	}
+	vpWidth := max(width-2, 0)
 	m.model.Viewport.Width = vpWidth
 
-	vpHeight := height - 2
-	if vpHeight < 0 {
-		vpHeight = 0
-	}
+	vpHeight := max(height-2, 0)
 	m.model.Viewport.Height = vpHeight
 
 	if widthChanged {

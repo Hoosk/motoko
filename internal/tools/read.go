@@ -155,7 +155,7 @@ func (t *ReadTool) getInjectedInstructions(absPath string) string {
 		return ""
 	}
 
-	var injected string
+	var injected strings.Builder
 	dir := absPath
 	info, err := os.Stat(absPath)
 	if err == nil && !info.IsDir() {
@@ -170,7 +170,7 @@ func (t *ReadTool) getInjectedInstructions(absPath string) string {
 			}
 			if b, err := os.ReadFile(agentFile); err == nil {
 				t.injectedInstructions[agentFile] = true
-				injected += fmt.Sprintf("\n\n<system-reminder>\nFound %s:\n%s\n</system-reminder>", name, string(b))
+				fmt.Fprintf(&injected, "\n\n<system-reminder>\nFound %s:\n%s\n</system-reminder>", name, string(b))
 			}
 		}
 		if dir == workspaceRoot {
@@ -182,5 +182,5 @@ func (t *ReadTool) getInjectedInstructions(absPath string) string {
 		}
 		dir = parent
 	}
-	return injected
+	return injected.String()
 }

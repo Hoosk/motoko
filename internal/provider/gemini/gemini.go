@@ -20,10 +20,9 @@ func init() {
 }
 
 type geminiClient struct {
-	provider.BaseClient
 	initErr     error
 	genaiClient *genai.Client
-
+	provider.BaseClient
 	thinkingBudget      int
 	enableGoogleSearch  bool
 	enableCodeExecution bool
@@ -180,12 +179,13 @@ func (c *geminiClient) GetModel(ctx context.Context, model string) (provider.Mod
 }
 
 func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPrompt string, tools provider.ToolSet) *genai.GenerateContentConfig {
+	temp := float32(0.2)
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{
 			Role:  provider.RoleUser,
 			Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
 		},
-		Temperature: float32Ptr(0.2),
+		Temperature: &temp,
 	}
 
 	sessionID, requestID := provider.GetTelemetry(ctx)
@@ -411,10 +411,6 @@ func responseFromGenAIResponse(resp *genai.GenerateContentResponse) provider.Res
 		CacheReadInputTokens: cacheRead,
 		ReasoningTokens:      reasoning,
 	})
-}
-
-func float32Ptr(v float32) *float32 {
-	return &v
 }
 
 func extractText(resp *genai.GenerateContentResponse) string {

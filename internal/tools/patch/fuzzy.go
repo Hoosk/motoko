@@ -52,7 +52,7 @@ func fuzzyReplace(current, search, replace string) (string, error) {
 	var matchIndices []int
 	for i := 0; i <= len(lines)-len(searchLines); i++ {
 		match := true
-		for j := 0; j < len(searchLines); j++ {
+		for j := range searchLines {
 			if strings.TrimSpace(lines[i+j].text) != strings.TrimSpace(searchLines[j]) {
 				match = false
 				break

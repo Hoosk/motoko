@@ -181,8 +181,8 @@ func parseCargoTOML(content string) (string, []string) {
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "name =") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "name ="))
+		if after, ok := strings.CutPrefix(line, "name ="); ok {
+			val := strings.TrimSpace(after)
 			packageName = strings.Trim(val, "\"'")
 			continue
 		}
@@ -202,8 +202,8 @@ func parseCargoTOML(content string) (string, []string) {
 
 func parseRequirementsTXT(content string) []string {
 	var deps []string
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(content, "\n")
+	for line := range lines {
 		if idx := strings.Index(line, "#"); idx != -1 {
 			line = line[:idx]
 		}
@@ -226,8 +226,8 @@ func parseRequirementsTXT(content string) []string {
 
 func parseGemfile(content string) []string {
 	var deps []string
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(content, "\n")
+	for line := range lines {
 		if idx := strings.Index(line, "#"); idx != -1 {
 			line = line[:idx]
 		}

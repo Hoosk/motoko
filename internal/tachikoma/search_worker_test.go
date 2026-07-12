@@ -1,7 +1,6 @@
 package tachikoma
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -38,8 +37,7 @@ func TestSearchTachikoma(t *testing.T) {
 		t.Errorf("Expected SearchTachikoma name, got %s", worker.Name())
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	updates := make(chan Update, 5)
 	publish := func(u Update) bool {

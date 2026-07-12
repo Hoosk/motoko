@@ -21,13 +21,13 @@ type Definition struct {
 }
 
 type Command struct {
-	Definition
 	Handler Handler
+	Definition
 }
 
 type Registry struct {
-	ordered []Command
 	index   map[string]int
+	ordered []Command
 }
 
 func NewRegistry() *Registry {
@@ -73,25 +73,25 @@ var commandDefinitions = []Definition{
 	{Name: "grill-me", Usage: "/grill-me", Summary: "Interview the plan until open questions are resolved"},
 	{Name: "goal", Usage: "/goal [plan|clear|status|<description>]", Summary: "Persist a goal and auto-continue until it is complete"},
 	{Name: "schedule", Usage: "/schedule [list|add <instruction> every|once <duration>|remove <id>]", Summary: "Run an instruction on a timer or recurring schedule"},
-	{Name: "agent", Usage: "/agent [name]", Summary: "Switch or show active agent mode"},
-	{Name: "shell", Usage: "/shell", Summary: "Activate direct shell execution mode"},
+	{Name: CmdAgent, Usage: "/agent [name]", Summary: "Switch or show active agent mode"},
+	{Name: CmdShell, Usage: "/shell", Summary: "Activate direct shell execution mode"},
 	{Name: "chat", Usage: "/chat", Summary: "Return to normal chat mode"},
 	{Name: CmdStatus, Usage: "/status", Summary: "Summarize mode, permissions, and approvals"},
 	{Name: "context", Usage: "/context", Summary: "Show raw system prompt sent to the agent"},
 	{Name: "provider", Usage: "/provider [list|add|use|remove]", Summary: "Manage configured LLM providers"},
 	{Name: "models", Usage: "/models [list|use <model>|info <model>]", Summary: "List or select models from the active provider"},
-	{Name: "themes", Usage: "/themes [theme]", Summary: "List or switch visual themes"},
+	{Name: CmdThemes, Usage: "/themes [theme]", Summary: "List or switch visual themes"},
 	{Name: "settings", Usage: "/settings", Summary: "Open Motoko settings"},
 	{Name: "sessions", Usage: "/sessions", Summary: "List or switch between workspace sessions"},
 	{Name: "tools", Usage: "/tools", Summary: "Show all registered tools"},
 	{Name: CmdTool, Usage: "/tool <name> [args]", Summary: "Execute a specific runtime tool"},
 	{Name: "task", Usage: "/task [list|terminate <id>]", Summary: "Interact with background tasks"},
-	{Name: "approve", Usage: "/approve", Summary: "Execute the pending tool command"},
+	{Name: CmdApprove, Usage: "/approve", Summary: "Execute the pending tool command"},
 	{Name: "deny", Usage: "/deny", Summary: "Cancel the pending tool command"},
 	{Name: "brain", Usage: "/brain [list|read <file>|plan|tasks|summary|clear]", Summary: "Interact with the session brain"},
 	{Name: "metrics", Usage: "/metrics", Summary: "Show cumulative token usage for this session"},
 	{Name: "debug", Usage: "/debug", Summary: "Toggle agent debug output"},
 	{Name: "trace", Usage: "/trace", Summary: "Toggle trace logging (requires -tags motoko_trace)"},
 	{Name: "exit", Usage: "/exit", Summary: "Exit the application"},
-	{Name: "quit", Usage: "/quit", Summary: "Exit the application"},
+	{Name: CmdQuit, Usage: "/quit", Summary: "Exit the application"},
 }

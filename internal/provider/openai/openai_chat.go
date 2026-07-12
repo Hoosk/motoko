@@ -191,8 +191,8 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 		}
 		if msg.Role == provider.RoleTool {
 			item := map[string]any{
-				"role":    provider.RoleTool,
-				"content": msg.Content,
+				keyRole:    provider.RoleTool,
+				keyContent: msg.Content,
 			}
 			if msg.ToolCallID != "" {
 				item["tool_call_id"] = msg.ToolCallID
@@ -204,8 +204,8 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 			continue
 		}
 		item := map[string]any{
-			"role":    provider.NormalizeConversationRole(msg.Role),
-			"content": msg.Content,
+			keyRole:    provider.NormalizeConversationRole(msg.Role),
+			keyContent: msg.Content,
 		}
 		if msg.ReasoningContent != "" {
 			item["reasoning_content"] = msg.ReasoningContent

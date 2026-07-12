@@ -90,7 +90,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 				m.advanceSuggestion(1)
 				return m, nil
 			}
-		case "shift+tab", "left":
+		case keyShiftTab, keyLeft:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(-1)
 				return m, nil
@@ -191,10 +191,7 @@ func (m ComposerModel) View() string {
 		blocks = append(blocks, suggestionsBlock)
 	}
 
-	chromeWidth := m.width - 4
-	if chromeWidth < 0 {
-		chromeWidth = 0
-	}
+	chromeWidth := max(m.width-4, 0)
 	separator := styles.GrayStyle.Width(chromeWidth).Render(strings.Repeat("─", chromeWidth))
 	content := styles.InputChromeStyle.Width(chromeWidth).Render(
 		lipgloss.JoinVertical(lipgloss.Left, blocks...),
@@ -338,10 +335,7 @@ func (m ComposerModel) renderInputPrompt() string {
 }
 
 func (m ComposerModel) renderSuggestionsLine() string {
-	chromeWidth := m.width - 4
-	if chromeWidth < 0 {
-		chromeWidth = 0
-	}
+	chromeWidth := max(m.width-4, 0)
 
 	statusWidth := 22
 	showStatus := chromeWidth >= 45
@@ -428,10 +422,7 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	if len(m.mentionSuggestions) == 0 {
 		return ""
 	}
-	chromeWidth := m.width - 4
-	if chromeWidth < 0 {
-		chromeWidth = 0
-	}
+	chromeWidth := max(m.width-4, 0)
 	idx := m.mentionIndex
 	if idx < 0 || idx >= len(m.mentionSuggestions) {
 		idx = 0
@@ -439,7 +430,7 @@ func (m ComposerModel) renderMentionDropdownBlock() string {
 	rows := make([]string, 0, min(4, len(m.mentionSuggestions))+1)
 	rows = append(rows, styles.PopupMutedStyle.Render("Mentions"))
 	limit := min(4, len(m.mentionSuggestions))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		line := m.mentionSuggestions[i]
 		if len(line) > chromeWidth-2 && chromeWidth > 5 {
 			line = truncate(line, chromeWidth-2)

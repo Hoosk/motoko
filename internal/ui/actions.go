@@ -78,7 +78,7 @@ func (m Model) waitAgentStream(ch chan app.AgentStreamEvent, requestID int) tea.
 	return func() tea.Msg {
 		var events []app.AgentStreamEvent
 		// Read at most 10 events to avoid blocking too long
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			select {
 			case ev, ok := <-ch:
 				if !ok {

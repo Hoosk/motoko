@@ -136,7 +136,7 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 	}
 
 	maxIterations := maxToolIterations(ctx)
-	for i := 0; i < maxIterations; i++ {
+	for i := range maxIterations {
 		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(history), a.provider.Summary())
 
 		currentHistory := make([]provider.ConversationItem, len(history))

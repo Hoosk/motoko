@@ -36,13 +36,6 @@ func levenshtein(s1, s2 string) int {
 	return d[n][m]
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // RepairToolName attempts to find a matching tool name if the LLM makes a typo.
 // If the distance is small enough (<= 2 for short words, <= 3 for longer), it returns the corrected name.
 // Returns an empty string if no good match is found.

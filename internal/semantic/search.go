@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"maps"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -46,9 +47,7 @@ func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummar
 
 	// 2. Semantic graph score propagation (expanded scores)
 	expanded := make(map[string]int)
-	for k, v := range scores {
-		expanded[k] = v
-	}
+	maps.Copy(expanded, scores)
 
 	for _, a := range s.Files {
 		scoreA := scores[a.Path]

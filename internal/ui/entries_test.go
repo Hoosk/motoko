@@ -56,7 +56,7 @@ func TestDiffOutputHighlighter(t *testing.T) {
 func TestDiffOutputCollapsing(t *testing.T) {
 	var lines []string
 	lines = append(lines, "--- a/file.go", "+++ b/file.go", "@@ -1,1 +1,1 @@")
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		lines = append(lines, fmt.Sprintf("+line %d", i))
 	}
 	input := strings.Join(lines, "\n")

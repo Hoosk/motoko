@@ -10,7 +10,7 @@ import (
 )
 
 type mockTachikoma struct {
-	payload interface{}
+	payload any
 	name    string
 }
 

@@ -103,7 +103,7 @@ func cleanHTML(html string, baseURL *url.URL) string {
 	}
 
 	runes := []rune(cleaned)
-	for i := 0; i < len(runes); i++ {
+	for i := range runes {
 		r := runes[i]
 		if r == '<' {
 			inTag = true
@@ -235,11 +235,11 @@ func parseHref(tag string) string {
 	quote := val[0]
 	if quote == '"' || quote == '\'' {
 		val = val[1:]
-		endIdx := strings.IndexByte(val, quote)
-		if endIdx == -1 {
+		before, _, ok := strings.Cut(val, string(quote))
+		if !ok {
 			return ""
 		}
-		return val[:endIdx]
+		return before
 	}
 	endIdx := strings.IndexAny(val, " \t\r\n>")
 	if endIdx == -1 {

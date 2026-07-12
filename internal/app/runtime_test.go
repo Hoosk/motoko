@@ -920,8 +920,7 @@ func TestSlashCommandMetrics(t *testing.T) {
 func TestSchedulePersistenceRoundTrip(t *testing.T) {
 	withSessionBaseDir(t)
 	r := NewRuntime()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r.Start(ctx)
 
 	def, err := r.AddSchedule("run tests", time.Minute, false)
@@ -948,8 +947,7 @@ func TestSchedulePersistenceRoundTrip(t *testing.T) {
 func TestLoadSessionRestoresSchedulesFromBrain(t *testing.T) {
 	withSessionBaseDir(t)
 	r := NewRuntime()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r.Start(ctx)
 
 	s := session.New(r.sesMgr.WorkspaceID(), "/workspace")
@@ -976,8 +974,7 @@ func TestLoadSessionRestoresSchedulesFromBrain(t *testing.T) {
 
 func TestRuntimeStopCancelsBackgroundContext(t *testing.T) {
 	r := NewRuntime()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	r.Start(ctx)
 
 	bg := r.BackgroundContext()

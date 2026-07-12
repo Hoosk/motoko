@@ -78,7 +78,7 @@ func (c *openAIClient) Complete(ctx context.Context, systemPrompt string, messag
 func (c *openAIClient) completeChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
 	var decoded chatCompletionResponse
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": c.Model(),
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},

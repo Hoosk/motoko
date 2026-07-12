@@ -99,7 +99,7 @@ func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, mess
 	toolCalls := make(map[int]*chatCompletionToolCall)
 	mappedIndexes := make(map[int]int)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model": c.Model(),
 		"messages": append([]map[string]any{
 			{keyRole: "system", keyContent: systemPrompt},
@@ -320,8 +320,8 @@ func postJSONStream(ctx context.Context, client *http.Client, url string, body a
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "data:") {
-			eventData = append(eventData, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		if after, ok := strings.CutPrefix(line, "data:"); ok {
+			eventData = append(eventData, strings.TrimSpace(after))
 		}
 	}
 	if err := scanner.Err(); err != nil {

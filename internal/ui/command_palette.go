@@ -21,24 +21,24 @@ import (
 type PaletteSelectedMsg struct {
 	Prompt    string
 	SessionID string
-	Execute   bool
 	Shortcut  string
+	Execute   bool
 }
 
 type paletteContext struct {
-	Info              system.ContextInfo
+	Brain             *brain.Brain
+	Pending           string
 	Providers         []config.ProviderConfig
 	Skills            []skills.Skill
 	Sessions          []*session.Session
 	Tasks             []*taskman.TaskState
 	Agents            []agent.AgentDef
 	ActiveProvider    config.ProviderConfig
-	Pending           string
+	Info              system.ContextInfo
+	QueueLen          int
 	Thinking          bool
 	HasActiveProvider bool
-	QueueLen          int
 	ShowSidebar       bool
-	Brain             *brain.Brain
 }
 
 type paletteItem struct {
@@ -47,9 +47,9 @@ type paletteItem struct {
 	summary   string
 	prompt    string
 	sessionID string
-	execute   bool
 	shortcut  string
 	searchKey string
+	execute   bool
 }
 
 func (p paletteItem) FilterKey() string {
@@ -195,7 +195,7 @@ func workspacePaletteItems(ctx paletteContext) []FilterableItem {
 			Prompt  string
 			Summary string
 		}{
-			{Name: "plan", Prompt: "/brain plan", Summary: "Open current implementation plan"},
+			{Name: modePlan, Prompt: "/brain plan", Summary: "Open current implementation plan"},
 			{Name: "tasks", Prompt: "/brain tasks", Summary: "Open active task checklist"},
 			{Name: "summary", Prompt: "/brain summary", Summary: "Open session summary"},
 		}
@@ -235,12 +235,12 @@ func commandDefinitionItems(defs []commands.Definition) []FilterableItem {
 
 func shortcutPaletteItems() []FilterableItem {
 	shortcuts := []paletteItem{
-		{category: "Shortcuts", title: "Ctrl+M", summary: "Open model selector", shortcut: "ctrl+m", searchKey: "ctrl+m models model selector"},
-		{category: "Shortcuts", title: "Ctrl+P", summary: "Open provider form", shortcut: "ctrl+p", searchKey: "ctrl+p provider form"},
-		{category: "Shortcuts", title: "Ctrl+O", summary: "Open session picker", shortcut: "ctrl+o", searchKey: "ctrl+o sessions"},
-		{category: "Shortcuts", title: "Ctrl+A", summary: "Open agent mode selector", shortcut: "ctrl+a", searchKey: "ctrl+a agent mode"},
-		{category: "Shortcuts", title: "Ctrl+H", summary: "Open help overlay", shortcut: "ctrl+h", searchKey: "ctrl+h help"},
-		{category: "Shortcuts", title: "Ctrl+T", summary: "Open tool catalog", shortcut: "ctrl+t", searchKey: "ctrl+t tools"},
+		{category: categoryShortcuts, title: "Ctrl+M", summary: "Open model selector", shortcut: keyCtrlM, searchKey: "ctrl+m models model selector"},
+		{category: categoryShortcuts, title: "Ctrl+P", summary: "Open provider form", shortcut: keyCtrlP, searchKey: "ctrl+p provider form"},
+		{category: categoryShortcuts, title: "Ctrl+O", summary: "Open session picker", shortcut: keyCtrlO, searchKey: "ctrl+o sessions"},
+		{category: categoryShortcuts, title: "Ctrl+A", summary: "Open agent mode selector", shortcut: keyCtrlA, searchKey: "ctrl+a agent mode"},
+		{category: categoryShortcuts, title: "Ctrl+H", summary: "Open help overlay", shortcut: keyCtrlH, searchKey: "ctrl+h help"},
+		{category: categoryShortcuts, title: "Ctrl+T", summary: "Open tool catalog", shortcut: keyCtrlT, searchKey: "ctrl+t tools"},
 	}
 	items := make([]FilterableItem, 0, len(shortcuts))
 	for _, shortcut := range shortcuts {

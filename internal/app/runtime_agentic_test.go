@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,13 +51,7 @@ func TestRuntime_AgenticImprovements(t *testing.T) {
 	if len(completions) < 3 {
 		t.Errorf("expected at least 3 agent completions, got %v", completions)
 	}
-	foundSearch := false
-	for _, comp := range completions {
-		if comp == "/agent search" {
-			foundSearch = true
-			break
-		}
-	}
+	foundSearch := slices.Contains(completions, "/agent search")
 	if !foundSearch {
 		t.Error("expected /agent search to be suggested")
 	}

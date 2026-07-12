@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -416,12 +417,7 @@ func TestShellCompletionsNoMatch(t *testing.T) {
 }
 
 func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func slicesEqual(a, b []string) bool {

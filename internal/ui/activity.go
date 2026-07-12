@@ -2,7 +2,7 @@ package ui
 
 func agentActivityLabel(agentName string) string {
 	switch agentName {
-	case "plan":
+	case modePlan:
 		return "planning"
 	case "build":
 		return "building"

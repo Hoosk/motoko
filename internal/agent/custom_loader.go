@@ -9,18 +9,18 @@ import (
 
 // AgentFrontmatter represents the parsed YAML frontmatter from a custom agent markdown file.
 type AgentFrontmatter struct {
-	Name            string   `yaml:"name"`
-	Description     string   `yaml:"description"`
-	ToolFilter      []string `yaml:"tool_filter"`
-	ExcludeTools    []string `yaml:"exclude_tools"`
-	ReadOnly        bool     `yaml:"readonly"`
 	AllowWrite      *bool    `yaml:"allow_write"`
 	AllowQuestion   *bool    `yaml:"allow_question"`
 	AllowDelegate   *bool    `yaml:"allow_delegate"`
 	AllowTask       *bool    `yaml:"allow_task"`
 	AllowBrainWrite *bool    `yaml:"allow_brain_write"`
 	AllowWebAccess  *bool    `yaml:"allow_web"`
+	Name            string   `yaml:"name"`
+	Description     string   `yaml:"description"`
+	ToolFilter      []string `yaml:"tool_filter"`
+	ExcludeTools    []string `yaml:"exclude_tools"`
 	MaxIterations   int      `yaml:"max_iterations"`
+	ReadOnly        bool     `yaml:"readonly"`
 }
 
 // CustomAgentDef represents an agent loaded from a markdown file.
