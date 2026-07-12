@@ -45,49 +45,50 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("tachikoma worker '%s' not found or has no data yet", name)
 	}
 
-	output := fmt.Sprintf("Worker: %s\nStatus: %s\n", update.Name, update.Status)
+	var output strings.Builder
+	fmt.Fprintf(&output, "Worker: %s\nStatus: %s\n", update.Name, update.Status)
 
 	// Format payload if it's a known type
 	if update.Payload != nil {
-		output += "\n--- Detailed Payload ---\n"
+		output.WriteString("\n--- Detailed Payload ---\n")
 		switch p := update.Payload.(type) {
 		case *semantic.Snapshot:
-			output += p.Summary()
+			output.WriteString(p.Summary())
 			// We could add more details here, like listing all files in the index
-			output += "\n\nFiles in index:\n"
+			output.WriteString("\n\nFiles in index:\n")
 			for _, f := range p.Files {
-				output += fmt.Sprintf("- %s\n", f.Path)
+				fmt.Fprintf(&output, "- %s\n", f.Path)
 			}
 		case system.ContextInfo:
-			output += "Context Data Found:\n"
+			output.WriteString("Context Data Found:\n")
 			if p.HasGit {
-				output += fmt.Sprintf("  Branch: %s\n", p.GitBranch)
-				output += fmt.Sprintf("  Status: %s\n", p.GitSummary())
+				fmt.Fprintf(&output, "  Branch: %s\n", p.GitBranch)
+				fmt.Fprintf(&output, "  Status: %s\n", p.GitSummary())
 				if len(p.ModifiedFiles) > 0 {
-					output += "\nModified Files:\n"
+					output.WriteString("\nModified Files:\n")
 					for _, f := range p.ModifiedFiles {
-						output += fmt.Sprintf("  - %s\n", f)
+						fmt.Fprintf(&output, "  - %s\n", f)
 					}
 				}
 			} else {
-				output += "  Workspace: " + p.Workspace + "\n"
-				output += "  No Git detected.\n"
+				output.WriteString("  Workspace: " + p.Workspace + "\n")
+				output.WriteString("  No Git detected.\n")
 			}
 		case tachikoma.SemanticDiff:
-			output += "Semantic Diff (affected symbols):\n"
+			output.WriteString("Semantic Diff (affected symbols):\n")
 			if len(p.Files) == 0 {
-				output += "  No semantic changes detected in the current workspace state."
+				output.WriteString("  No semantic changes detected in the current workspace state.")
 			}
 			for path, changes := range p.Files {
-				output += fmt.Sprintf("\n- %s:\n", path)
+				fmt.Fprintf(&output, "\n- %s:\n", path)
 				for _, c := range changes {
-					output += fmt.Sprintf("    [%s] %s %s\n", strings.ToUpper(c.Type), c.Kind, c.Name)
+					fmt.Fprintf(&output, "    [%s] %s %s\n", strings.ToUpper(c.Type), c.Kind, c.Name)
 				}
 			}
 		case tachikoma.ProjectDependencies:
-			output += "Detected Dependencies by Ecosystem:\n"
+			output.WriteString("Detected Dependencies by Ecosystem:\n")
 			if len(p.Ecosystems) == 0 {
-				output += "  No dependencies detected."
+				output.WriteString("  No dependencies detected.")
 			} else {
 				var ecosystems []string
 				for eco := range p.Ecosystems {
@@ -95,21 +96,21 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 				}
 				sort.Strings(ecosystems)
 				for _, eco := range ecosystems {
-					output += fmt.Sprintf("  %s:\n", eco)
+					fmt.Fprintf(&output, "  %s:\n", eco)
 					deps := p.Ecosystems[eco]
 					for _, dep := range deps {
-						output += fmt.Sprintf("    - %s\n", dep)
+						fmt.Fprintf(&output, "    - %s\n", dep)
 					}
 				}
 			}
 		default:
-			output += fmt.Sprintf("%v", p)
+			fmt.Fprintf(&output, "%v", p)
 		}
 	}
 
 	return Result{
 		Spec:    t.Spec(),
 		Summary: fmt.Sprintf("Inspected %s", name),
-		Output:  output,
+		Output:  output.String(),
 	}, nil
 }

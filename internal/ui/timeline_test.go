@@ -11,7 +11,7 @@ import (
 
 func longestRuleLen(text string) int {
 	maxLen := 0
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue

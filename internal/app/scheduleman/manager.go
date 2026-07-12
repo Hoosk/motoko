@@ -20,9 +20,9 @@ type Definition struct {
 }
 
 type Event struct {
+	FiredAt     time.Time
 	ID          string
 	Instruction string
-	FiredAt     time.Time
 	OneShot     bool
 }
 
@@ -32,17 +32,17 @@ type EventResult struct {
 }
 
 type entry struct {
-	def    Definition
 	cancel context.CancelFunc
+	def    Definition
 }
 
 type Manager struct {
-	mu        sync.Mutex
+	baseCtx   context.Context
 	schedules map[string]*entry
 	events    chan Event
-	baseCtx   context.Context
 	onChange  func([]Definition)
 	nextID    int
+	mu        sync.Mutex
 }
 
 func NewManager() *Manager {

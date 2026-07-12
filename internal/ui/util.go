@@ -26,6 +26,18 @@ const (
 	keyUp    = "up"
 	keyDown  = "down"
 	keyRight = "right"
+
+	keyBackspace      = "backspace"
+	keyLeft           = "left"
+	keyShiftTab       = "shift+tab"
+	keyCtrlM          = "ctrl+m"
+	keyCtrlO          = "ctrl+o"
+	keyCtrlA          = "ctrl+a"
+	keyCtrlH          = "ctrl+h"
+	keyCtrlT          = "ctrl+t"
+	modePlan          = "plan"
+	categoryShortcuts = "Shortcuts"
+	thinkingDelta     = "thinking_delta"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -202,10 +214,7 @@ func overlayBase(base, overlay string, width int) string {
 		if i < len(overlayLines) {
 			oLine := overlayLines[i]
 			oWidth := lipgloss.Width(oLine)
-			availWidth := width - oWidth
-			if availWidth < 0 {
-				availWidth = 0
-			}
+			availWidth := max(width-oWidth, 0)
 			truncated := truncateANSI(baseLine, availWidth)
 			actualWidth := lipgloss.Width(truncated)
 			padding := ""
@@ -252,15 +261,9 @@ func overlayCenter(base, overlay string, width, height int) string {
 		}
 	}
 
-	startY := (len(baseLines) - popupHeight) / 2
-	if startY < 0 {
-		startY = 0
-	}
+	startY := max((len(baseLines)-popupHeight)/2, 0)
 
-	startX := (width - popupWidth) / 2
-	if startX < 0 {
-		startX = 0
-	}
+	startX := max((width-popupWidth)/2, 0)
 
 	res := make([]string, len(baseLines))
 	for i, baseLine := range baseLines {

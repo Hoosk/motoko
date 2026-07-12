@@ -34,15 +34,15 @@ type ProviderConfig struct {
 	APIKey              string         `json:"api_key"`
 	Model               string         `json:"model"`
 	Models              []string       `json:"models,omitempty"`
-	ContextWindow       int            `json:"context_window,omitempty"`
+	EffortPresets       []string       `json:"effort_presets,omitempty"`
 	ThinkingBudget      int            `json:"thinking_budget,omitempty"`
+	ContextWindow       int            `json:"context_window,omitempty"`
+	BudgetMin           int            `json:"budget_min,omitempty"`
+	BudgetMax           int            `json:"budget_max,omitempty"`
 	UseSDK              bool           `json:"use_sdk,omitempty"`
 	EnableGoogleSearch  bool           `json:"enable_google_search,omitempty"`
 	EnableCodeExecution bool           `json:"enable_code_execution,omitempty"`
 	SupportsThinking    bool           `json:"supports_thinking,omitempty"`
-	EffortPresets       []string       `json:"effort_presets,omitempty"`
-	BudgetMin           int            `json:"budget_min,omitempty"`
-	BudgetMax           int            `json:"budget_max,omitempty"`
 }
 
 type SearchConfig struct {
@@ -70,7 +70,7 @@ type AppConfig struct {
 	Density           string                   `json:"density,omitempty"`
 	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
 	Providers         []ProviderConfig         `json:"providers"`
-	Search            SearchConfig             `json:"search,omitempty"`
+	Search            SearchConfig             `json:"search"`
 	MaxIterations     int                      `json:"max_iterations,omitempty"`
 }
 

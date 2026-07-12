@@ -235,9 +235,6 @@ func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.Agen
 	if hasOverride && len(override.ExcludeTools) > 0 {
 		deniedTools = override.ExcludeTools
 	}
-	if !hasOverride && aDef.Permissions.MaxIterations > 0 {
-		override.MaxIterations = &aDef.Permissions.MaxIterations
-	}
 
 	toolsRegistry := o.toolsFn().Filter(func(t tools.Tool) bool {
 		name := t.Spec().Name
@@ -605,7 +602,7 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 			lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 			limit := min(limits.ExplicitLimit, len(lines))
 			var numbered []string
-			for i := 0; i < limit; i++ {
+			for i := range limit {
 				numbered = append(numbered, fmt.Sprintf("%d: %s", i+1, lines[i]))
 			}
 			info.RelevantSnippets = append([]string{fmt.Sprintf("FILE %s\nLINES 1-%d\nREASON explicit @ mention\n%s", file.Path, limit, strings.Join(numbered, "\n"))}, info.RelevantSnippets...)

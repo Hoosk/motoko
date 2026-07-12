@@ -120,7 +120,7 @@ func (p *settingsPopupState) updateIterations(key tea.KeyMsg) tea.Cmd {
 		p.status = ""
 		p.mode = settingsModeList
 		return nil
-	case "backspace":
+	case keyBackspace:
 		p.buffer = trimLastRune(p.buffer)
 		if strings.TrimSpace(p.buffer) == "" {
 			p.buffer = ""

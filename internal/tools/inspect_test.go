@@ -62,7 +62,7 @@ func TestInspectTool_Run(t *testing.T) {
 		mgr.Start(ctx)
 
 		var ok bool
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			_, ok = mgr.Query("DependencyTachikoma")
 			if ok {
 				break
@@ -106,7 +106,7 @@ func TestInspectTool_Run(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		mgr.Start(ctx)
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			if _, ok := mgr.Query("DependencyTachikoma"); ok {
 				break
 			}

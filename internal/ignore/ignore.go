@@ -147,7 +147,7 @@ func (m *Matcher) loadGitIgnored(root string) {
 		m.loadGitIgnoreFiles(root)
 		return
 	}
-	for _, rawLine := range strings.Split(string(out), "\n") {
+	for rawLine := range strings.SplitSeq(string(out), "\n") {
 		rawLine = strings.TrimSpace(rawLine)
 		if rawLine == "" {
 			continue
@@ -210,7 +210,7 @@ func (m *Matcher) loadSingleGitIgnoreFile(path, base string) {
 	if err != nil {
 		return
 	}
-	for _, rawLine := range strings.Split(string(data), "\n") {
+	for rawLine := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(rawLine)
 		p, ok := parseIgnoreLine(line, base)
 		if !ok {
@@ -221,7 +221,7 @@ func (m *Matcher) loadSingleGitIgnoreFile(path, base string) {
 }
 
 func hasFixedIgnoredComponent(relPath string) bool {
-	for _, part := range strings.Split(relPath, "/") {
+	for part := range strings.SplitSeq(relPath, "/") {
 		if _, ok := fixedIgnoredDirs[part]; ok {
 			return true
 		}

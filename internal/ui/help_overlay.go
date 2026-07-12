@@ -43,12 +43,12 @@ func (h *helpOverlayState) Update(msg tea.Msg) tea.Cmd {
 		h.viewHeight = max(8, msg.Height-14)
 	case tea.KeyMsg:
 		switch msg.String() {
-		case keyEsc, "ctrl+h":
+		case keyEsc, keyCtrlH:
 			h.active = false
 		case keyTab, keyRight:
 			h.tab = (h.tab + 1) % 3
 			h.offset = 0
-		case "shift+tab", "left":
+		case keyShiftTab, keyLeft:
 			h.tab = (h.tab + 2) % 3
 			h.offset = 0
 		case keyDown, keyCtrlN:

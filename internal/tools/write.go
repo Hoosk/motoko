@@ -64,9 +64,9 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	return Result{
-		Spec: t.Spec(),
+		Spec:    t.Spec(),
 		Summary: fmt.Sprintf("Successfully %s %s (%d bytes)", verb, relPath, len(content)),
-		Output: fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verb, relPath, absPath, len(content)),
+		Output:  fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verb, relPath, absPath, len(content)),
 	}, nil
 }
 

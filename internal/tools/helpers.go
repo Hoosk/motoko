@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -223,10 +224,5 @@ func isTextFile(path string) bool {
 }
 
 func bytesContainsZero(data []byte) bool {
-	for _, b := range data {
-		if b == 0 {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(data, 0)
 }

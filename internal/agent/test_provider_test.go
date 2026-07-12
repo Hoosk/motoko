@@ -9,11 +9,11 @@ import (
 
 type fakeProviderClient struct {
 	configured *bool
+	completeFn func(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error)
+	streamFn   func(context.Context, string, []provider.ConversationItem, provider.ToolSet, func(provider.Delta) error) (provider.Response, error)
 	kind       string
 	summary    string
 	models     []provider.ModelInfo
-	completeFn func(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error)
-	streamFn   func(context.Context, string, []provider.ConversationItem, provider.ToolSet, func(provider.Delta) error) (provider.Response, error)
 }
 
 func (f *fakeProviderClient) Configured() bool {

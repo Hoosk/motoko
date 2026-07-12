@@ -17,9 +17,9 @@ const (
 )
 
 type questionOptionItem struct {
-	index       int
 	label       string
 	description string
+	index       int
 	selected    bool
 	multiple    bool
 }
@@ -102,7 +102,7 @@ func (p *questionPopupState) Update(msg tea.Msg) bool {
 				}
 				return false
 			}
-		case "shift+tab":
+		case keyShiftTab:
 			if p.allowCustom {
 				if p.focus == questionFocusCustom {
 					p.focus = questionFocusList
@@ -182,7 +182,7 @@ func (p *questionPopupState) updateCustom(msg tea.Msg) bool {
 		}
 		p.submit()
 		return true
-	case "backspace":
+	case keyBackspace:
 		p.custom = trimLastRune(p.custom)
 		return false
 	default:

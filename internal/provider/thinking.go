@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -106,10 +107,8 @@ func BudgetToAnthropicEffort(budget int) anthropic.OutputConfigEffort {
 }
 
 func appendUniqueInt(values []int, value int) []int {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
+	if slices.Contains(values, value) {
+		return values
 	}
 	return append(values, value)
 }

@@ -92,20 +92,20 @@ type pendingShell struct {
 }
 
 type Runtime struct {
-	backgroundCtx     context.Context
-	backgroundCancel  context.CancelFunc
-	updateMu          sync.RWMutex
+	cplDeps           completions.Deps
 	updateErr         error
-	semantic          *semantic.Index
+	backgroundCtx     context.Context
+	provMgr           *providerman.Manager
+	cmdDispatch       *commands.Dispatcher
 	newProviderClient func(config.ProviderConfig) (provider.Client, error)
 	config            *config.AppConfig
 	taskMgr           *taskman.Manager
 	scheduleMgr       *scheduleman.Manager
 	sesMgr            *sessionman.Manager
-	provMgr           *providerman.Manager
+	questionBroker    *tools.QuestionBroker
 	agOrch            *agentorch.Orchestrator
-	cmdDispatch       *commands.Dispatcher
-	cplDeps           completions.Deps
+	semantic          *semantic.Index
+	backgroundCancel  context.CancelFunc
 	updateInfo        *updater.VersionInfo
 	tachikomas        *tachikoma.Manager
 	pending           *pendingShell
@@ -114,7 +114,7 @@ type Runtime struct {
 	inputMode         InputMode
 	version           string
 	contextWindow     int
-	questionBroker    *tools.QuestionBroker
+	updateMu          sync.RWMutex
 }
 
 func NewRuntime(opts ...RuntimeOptions) *Runtime {

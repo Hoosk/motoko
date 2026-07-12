@@ -129,7 +129,7 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				f.fieldIndex = f.fieldCount(runtime) - 1
 			}
 			return nil
-		case "left":
+		case keyLeft:
 			if f.fieldIndex == 0 {
 				f.showPicker = true
 				f.picker.Active = true
@@ -163,7 +163,7 @@ func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				}
 			}
 			return nil
-		case "backspace":
+		case keyBackspace:
 			if f.isOpenAICompatible(runtime) {
 				switch f.fieldIndex {
 				case 1:

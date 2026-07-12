@@ -63,10 +63,7 @@ func renderHeader(title string, style lipgloss.Style, width int) string {
 		return style.Render(title)
 	}
 	left := 2
-	right := width - titleLen - left - 2
-	if right < 0 {
-		right = 0
-	}
+	right := max(width-titleLen-left-2, 0)
 	return style.Render(fmt.Sprintf("%s %s %s", strings.Repeat("─", left), title, strings.Repeat("─", right)))
 }
 
@@ -229,18 +226,12 @@ func (m *SidebarModel) View() string {
 	}
 
 	totalLines := len(content)
-	maxOffset := totalLines - m.height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	maxOffset := max(totalLines-m.height, 0)
 	if m.offset > maxOffset {
 		m.offset = maxOffset
 	}
 
-	end := m.offset + m.height
-	if end > totalLines {
-		end = totalLines
-	}
+	end := min(m.offset+m.height, totalLines)
 	content = content[m.offset:end]
 
 	style := lipgloss.NewStyle().
@@ -278,7 +269,7 @@ func contractPath(path string, maxLength int) string {
 	}
 	filename := parts[len(parts)-1]
 
-	for i := 0; i < len(dirs); i++ {
+	for i := range dirs {
 		if len(dirs[i]) <= 1 {
 			continue
 		}

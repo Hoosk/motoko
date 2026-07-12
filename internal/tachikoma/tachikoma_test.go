@@ -23,8 +23,7 @@ func (f fakeTachikoma) Run(ctx context.Context, publish func(Update) bool) error
 func TestManagerStartPublishesUpdates(t *testing.T) {
 	mgr := NewManager()
 	mgr.Add(fakeTachikoma{name: "one"})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	mgr.Start(ctx)
 
 	select {
@@ -74,7 +73,7 @@ func TestManagerWaitReturnsAfterCancel(t *testing.T) {
 
 func TestManagerDropsUpdatesWhenBufferIsFull(t *testing.T) {
 	mgr := NewManager()
-	for i := 0; i < updatesBufferSize; i++ {
+	for i := range updatesBufferSize {
 		if !mgr.publishUpdate(Update{Name: "x", Status: "ok"}) {
 			t.Fatalf("expected buffered publish to succeed at %d", i)
 		}
@@ -118,7 +117,7 @@ func TestGetContextInfoCodeTachikomaHintUsesInspect(t *testing.T) {
 	mgr := NewManager()
 
 	langCounts := make(map[string]int)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		langCounts["verylonglanguagenamethatforceslargesummary_"+string(rune('a'+i))] = 1000 + i
 	}
 

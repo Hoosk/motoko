@@ -23,8 +23,8 @@ func ExtractStructuredMessage(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "```") {
-		raw = strings.TrimPrefix(raw, "```")
+	if after, ok := strings.CutPrefix(raw, "```"); ok {
+		raw = after
 		raw = strings.TrimSpace(raw)
 		if strings.HasPrefix(strings.ToLower(raw), "json") {
 			raw = strings.TrimSpace(raw[4:])

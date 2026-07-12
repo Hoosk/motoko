@@ -77,9 +77,9 @@ type Message struct {
 	Role             string           `json:"role"`
 	Content          string           `json:"content,omitempty"`
 	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolInvocation `json:"tool_calls,omitempty"`
 	ToolCallID       string           `json:"tool_call_id,omitempty"`
 	ToolName         string           `json:"tool_name,omitempty"`
+	ToolCalls        []ToolInvocation `json:"tool_calls,omitempty"`
 }
 
 type ConversationItem = Message
@@ -103,11 +103,11 @@ type Delta struct {
 
 type ModelInfo struct {
 	ID               string   `json:"id"`
-	ContextWindow    int      `json:"context_window,omitempty"`
-	SupportsThinking bool     `json:"supports_thinking,omitempty"`
 	EffortPresets    []string `json:"effort_presets,omitempty"`
+	ContextWindow    int      `json:"context_window,omitempty"`
 	BudgetMin        int      `json:"budget_min,omitempty"`
 	BudgetMax        int      `json:"budget_max,omitempty"`
+	SupportsThinking bool     `json:"supports_thinking,omitempty"`
 }
 
 type ReasoningOption struct {

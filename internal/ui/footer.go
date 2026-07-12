@@ -89,10 +89,7 @@ func (m FooterModel) View() string {
 		parts = append(parts, styles.BoldBlueStyle.Render(fmt.Sprintf("tasks:%d", m.taskCount)))
 	}
 
-	footerWidth := m.width - 2
-	if footerWidth < 0 {
-		footerWidth = 0
-	}
+	footerWidth := max(m.width-2, 0)
 	return styles.FooterStyle.Width(footerWidth).Render(strings.Join(parts, "  "))
 }
 

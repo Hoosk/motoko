@@ -21,8 +21,8 @@ func init() {
 }
 
 type anthropicClient struct {
+	sdkClient *sdk.Client
 	provider.BaseClient
-	sdkClient          *sdk.Client
 	thinkingBudget     int
 	mu                 sync.Mutex
 	capabilitiesLoaded bool

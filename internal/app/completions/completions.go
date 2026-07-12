@@ -12,6 +12,11 @@ import (
 	"github.com/Hoosk/motoko/internal/app/types"
 )
 
+const (
+	modelsListCmd = "/models list"
+	subCmdUse     = "use"
+)
+
 type Deps struct {
 	AgentNamesFn          func() []string
 	SemanticFn            func() *semantic.Index
@@ -35,8 +40,8 @@ func Completions(d Deps, input string) []string {
 		return shellCompletions(trimmed)
 	}
 
-	if strings.HasPrefix(trimmed, "!") {
-		command := strings.TrimSpace(strings.TrimPrefix(trimmed, "!"))
+	if after, ok := strings.CutPrefix(trimmed, "!"); ok {
+		command := strings.TrimSpace(after)
 		if command == "" {
 			return []string{"!git status", "!go build ./...", "!ls"}
 		}
@@ -87,18 +92,18 @@ func Completions(d Deps, input string) []string {
 		active, ok := d.ActiveConfigFn()
 		if !ok || len(active.Models) == 0 {
 			if len(parts) == 1 {
-				return []string{"/models list", "/models use "}
+				return []string{modelsListCmd, "/models use "}
 			}
-			return []string{"/models list"}
+			return []string{modelsListCmd}
 		}
 
 		if len(parts) == 1 {
-			return []string{"/models list", "/models use ", "/models info "}
+			return []string{modelsListCmd, "/models use ", "/models info "}
 		}
 
 		subcommand := strings.ToLower(parts[1])
 		if len(parts) == 2 && !hasTrailingSpace {
-			options := []string{"list", "use", "info"}
+			options := []string{"list", subCmdUse, "info"}
 			var result []string
 			for _, option := range options {
 				if strings.HasPrefix(option, subcommand) {
@@ -110,7 +115,7 @@ func Completions(d Deps, input string) []string {
 			}
 		}
 
-		if subcommand != "use" && subcommand != "info" {
+		if subcommand != subCmdUse && subcommand != "info" {
 			prefix := strings.Join(parts[1:], " ")
 			return modelCompletions(active.Models, prefix, "/models ")
 		}

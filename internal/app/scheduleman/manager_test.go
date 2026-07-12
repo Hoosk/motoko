@@ -8,8 +8,7 @@ import (
 
 func TestAddAndFireOneShotSchedule(t *testing.T) {
 	m := NewManager()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	m.AttachContext(ctx)
 
 	def, err := m.Add("run once", 20*time.Millisecond, true)
@@ -35,8 +34,7 @@ func TestAddAndFireOneShotSchedule(t *testing.T) {
 
 func TestRestoreSchedules(t *testing.T) {
 	m := NewManager()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	m.AttachContext(ctx)
 
 	m.Restore([]Definition{{ID: "sched-8", Instruction: "tick", Interval: 10 * time.Millisecond}})

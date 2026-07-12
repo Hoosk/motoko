@@ -38,12 +38,12 @@ func parsePatchRequest(input string) (request, error) {
 }
 
 func splitPatchPathAndBody(input string) (string, string, error) {
-	newline := strings.Index(input, "\n")
-	if newline == -1 {
+	before, after, ok := strings.Cut(input, "\n")
+	if !ok {
 		return "", "", fmt.Errorf("missing patch block")
 	}
-	path := strings.TrimSpace(input[:newline])
-	body := strings.TrimSpace(input[newline+1:])
+	path := strings.TrimSpace(before)
+	body := strings.TrimSpace(after)
 	if path == "" || body == "" {
 		return "", "", fmt.Errorf("invalid format; missing path or patch block")
 	}
@@ -57,13 +57,13 @@ func parsePatchInput(input string) (string, string, string, error) {
 		return "", "", "", fmt.Errorf("usage: first line with the path followed by the SEARCH/REPLACE block")
 	}
 
-	newline := strings.Index(input, "\n")
-	if newline == -1 {
+	before, after, ok := strings.Cut(input, "\n")
+	if !ok {
 		return "", "", "", fmt.Errorf("missing SEARCH/REPLACE block")
 	}
 
-	path := strings.TrimSpace(input[:newline])
-	body := strings.TrimSpace(input[newline+1:])
+	path := strings.TrimSpace(before)
+	body := strings.TrimSpace(after)
 
 	searchIndex := strings.Index(body, searchMarker)
 	dividerIndex := strings.Index(body, dividerMarker)
@@ -203,7 +203,7 @@ func parseASTSelector(block string) (astSelector, error) {
 }
 
 func astActionFromSelectorBlock(block string) string {
-	for _, rawLine := range strings.Split(strings.TrimSpace(block), "\n") {
+	for rawLine := range strings.SplitSeq(strings.TrimSpace(block), "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
