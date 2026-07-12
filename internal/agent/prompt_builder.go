@@ -35,6 +35,10 @@ func thinkingVerbosityFragment(level string) string {
 // buildSystemPrompt assembles the stable, cache-friendly system prompt.
 func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []tools.Spec, agentSystem string) string {
 	var lines []string
+	availableTools := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		availableTools[spec.Name] = true
+	}
 
 	// --- STATIC PART ---
 
@@ -52,7 +56,6 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"    DO NOT invent file names, functions, or command outputs.",
 		"    Prefer finishing the task end-to-end instead of stopping at analysis.",
 		"    If the existing context already answers the question, answer directly without unnecessary tool calls.",
-		"    You have a 'delegate' tool. If a task contains independent research or sub-problems, delegate them to subagents (like 'search' or 'plan') to run in parallel in the background, rather than doing everything sequentially yourself.",
 		"  </general>",
 		"",
 		"  <tachikomas>",
@@ -71,27 +74,55 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"    - AGENTS & DESIGN RULES: If 'AGENTS.md' guidelines are present, strictly follow them for code conventions, build and test setups. If 'DESIGN.md' specifications are present, strictly adhere to them for any UI, TUI, or visual styling.",
 		"    - WEB SEARCH & FETCH PROTOCOL: When you use 'web_search', do not just rely on the search snippets. Always identify the most relevant URL(s) and use the 'web_fetch' tool to visit and read their full contents to obtain accurate details. Limit search and fetch activities to a maximum of 2-3 queries per task to avoid excessive network load.",
 		"  </operating_rules>",
-		"",
-		"  <brain_protocol>",
-		"    You have a persistent session brain — a set of markdown files that survive across turns.",
-		"    Use brain_write, brain_read, and brain_list to manage your brain files.",
-		"",
-		"    MANDATORY BEHAVIORS:",
-		"    - When starting a multi-step task, ALWAYS create plan.md with your approach BEFORE writing code.",
-		"    - When a plan exists in your brain, ALWAYS read it at the start of your turn and follow it.",
-		"    - Track progress in tasks.md — mark items as completed with [x] as you finish them.",
-		"    - When all work is done, write summary.md with what was accomplished.",
-		"    - If the user asks you to plan, save the plan to plan.md, not just in your response.",
-		"",
-		"    BRAIN FILES CONVENTION:",
-		"    - plan.md    — Current implementation plan (goals, approach, file changes)",
-		"    - tasks.md   — Checklist of tasks with completion status",
-		"    - summary.md — Post-completion summary of what was done",
-		"    - notes.md   — Free-form notes, discoveries, or context for future turns",
-		"  </brain_protocol>",
 		"</system_instructions>",
 		"",
 	)
+
+	if availableTools["delegate"] {
+		lines = append(lines,
+			"<delegation_protocol>",
+			"  You have a 'delegate' tool. If a task contains independent research or sub-problems, delegate them to subagents (like 'search' or 'plan') to run in parallel in the background, rather than doing everything sequentially yourself.",
+			"</delegation_protocol>",
+			"",
+		)
+	}
+
+	if availableTools["brain_write"] && availableTools["brain_read"] && availableTools["brain_list"] {
+		lines = append(lines,
+			"<brain_protocol>",
+			"  You have a persistent session brain — a set of markdown files that survive across turns.",
+			"  Use brain_write, brain_read, and brain_list to manage your brain files.",
+			"",
+			"  MANDATORY BEHAVIORS:",
+			"  - When starting a multi-step task, ALWAYS create plan.md with your approach BEFORE writing code.",
+			"  - When a plan exists in your brain, ALWAYS read it at the start of your turn and follow it.",
+			"  - Track progress in tasks.md — mark items as completed with [x] as you finish them.",
+			"  - When all work is done, write summary.md with what was accomplished.",
+			"  - If the user asks you to plan, save the plan to plan.md, not just in your response.",
+			"",
+			"  BRAIN FILES CONVENTION:",
+			"  - plan.md    — Current implementation plan (goals, approach, file changes)",
+			"  - tasks.md   — Checklist of tasks with completion status",
+			"  - summary.md — Post-completion summary of what was done",
+			"  - notes.md   — Free-form notes, discoveries, or context for future turns",
+			"</brain_protocol>",
+			"",
+		)
+	} else if availableTools["brain_write"] {
+		lines = append(lines,
+			"<brain_protocol>",
+			"  You can create or update session brain files using brain_write. Other brain operations are unavailable unless listed in the tool catalog.",
+			"</brain_protocol>",
+			"",
+		)
+	} else if availableTools["brain_read"] || availableTools["brain_list"] {
+		lines = append(lines,
+			"<brain_protocol>",
+			"  You can inspect existing session brain files using the available brain tools, but you cannot create or modify them.",
+			"</brain_protocol>",
+			"",
+		)
+	}
 
 	if agentSystem != "" {
 		lines = append(lines, agentSystem, "")

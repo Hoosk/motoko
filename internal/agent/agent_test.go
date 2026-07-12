@@ -152,6 +152,80 @@ func TestBuildSystemPromptIncludesInspectNote(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPromptOnlyAdvertisesAvailableCapabilities(t *testing.T) {
+	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko"}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "read", Summary: "Read files", Usage: "read <path>"},
+		{Name: "grep", Summary: "Search files", Usage: "grep <pattern>"},
+	}, "")
+
+	for _, unavailable := range []string{
+		"You have a 'delegate' tool",
+		"<brain_protocol>",
+		"brain_write",
+		"brain_read",
+		"brain_list",
+		"ALWAYS create plan.md",
+	} {
+		if strings.Contains(prompt, unavailable) {
+			t.Errorf("prompt advertises unavailable capability %q:\n%s", unavailable, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptIncludesAvailableCapabilities(t *testing.T) {
+	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko"}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "delegate", Summary: "Delegate work", Usage: "delegate <agent>: <task>"},
+		{Name: "brain_write", Summary: "Write brain file", Usage: "brain_write <file>"},
+		{Name: "brain_read", Summary: "Read brain file", Usage: "brain_read <file>"},
+		{Name: "brain_list", Summary: "List brain files", Usage: "brain_list"},
+	}, "")
+
+	for _, available := range []string{
+		"You have a 'delegate' tool",
+		"<brain_protocol>",
+		"brain_write, brain_read, and brain_list",
+		"ALWAYS create plan.md",
+	} {
+		if !strings.Contains(prompt, available) {
+			t.Errorf("prompt missing available capability %q:\n%s", available, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptDescribesReadOnlyBrain(t *testing.T) {
+	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko"}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "brain_read", Summary: "Read brain file", Usage: "brain_read <file>"},
+		{Name: "brain_list", Summary: "List brain files", Usage: "brain_list"},
+	}, "")
+
+	if !strings.Contains(prompt, "You can inspect existing session brain files") {
+		t.Fatalf("prompt missing read-only brain guidance: %s", prompt)
+	}
+	if strings.Contains(prompt, "brain_write") || strings.Contains(prompt, "ALWAYS create plan.md") {
+		t.Fatalf("read-only brain guidance must not require writes: %s", prompt)
+	}
+}
+
+func TestBuildSystemPromptDoesNotAdvertiseMissingBrainTools(t *testing.T) {
+	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko"}
+	prompt := buildSystemPrompt("default", info, []tools.Spec{
+		{Name: "brain_write", Summary: "Write brain file", Usage: "brain_write <file>"},
+	}, "")
+
+	if !strings.Contains(prompt, "using brain_write") {
+		t.Fatalf("prompt missing available brain_write guidance: %s", prompt)
+	}
+	if strings.Contains(prompt, "Use brain_write, brain_read, and brain_list") {
+		t.Fatalf("prompt advertises unavailable brain tools: %s", prompt)
+	}
+	if strings.Contains(prompt, "ALWAYS read it") {
+		t.Fatalf("prompt requires unavailable brain_read tool: %s", prompt)
+	}
+}
+
 func TestBuildDynamicPromptOnDemandSignalUsesInspect(t *testing.T) {
 	info := system.ContextInfo{
 		Workspace:       "motoko",
