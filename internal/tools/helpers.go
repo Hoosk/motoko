@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 func parseJSONArgs(args string) map[string]any {
@@ -86,33 +87,39 @@ func jsonHas(m map[string]any, keys ...string) bool {
 }
 
 func resolveWorkspacePath(target string) (string, string, error) {
-	workspace, err := os.Getwd()
+	resolved, err := pathpolicy.Resolve(target)
 	if err != nil {
 		return "", "", err
 	}
+	return resolved.Path, resolved.Relative, nil
+}
 
-	if target == "" {
-		return workspace, ".", nil
+const approveExternalOption = "Allow once"
+
+func approveExternalAccess(ctx context.Context, operation string, resolved pathpolicy.Resolution) error {
+	if !resolved.External {
+		return nil
+	}
+	broker := GetQuestionBroker(ctx)
+	if broker == nil {
+		return fmt.Errorf("%s requires approval: symlink resolves outside workspace to %s", operation, resolved.Path)
 	}
 
-	path := target
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(workspace, path)
-	}
-	path = filepath.Clean(path)
-
-	rel, err := filepath.Rel(workspace, path)
+	answer, err := broker.Ask(ctx, Question{
+		Header:   "External file access",
+		Question: fmt.Sprintf("The requested path %q resolves outside the workspace to %q. Allow Motoko to %s this external path?", resolved.Relative, resolved.Path, operation),
+		Options: []QuestionOption{
+			{Label: approveExternalOption, Description: "Permit only this tool invocation."},
+			{Label: "Deny", Description: "Do not access the external path."},
+		},
+	})
 	if err != nil {
-		return "", "", err
+		return fmt.Errorf("external path approval failed: %w", err)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("path outside workspace: %s", target)
+	if len(answer.Selections) != 1 || !slices.Contains(answer.Selections, approveExternalOption) {
+		return fmt.Errorf("user denied access to external path: %s", resolved.Path)
 	}
-	if rel == "." {
-		return path, rel, nil
-	}
-
-	return path, filepath.ToSlash(rel), nil
+	return nil
 }
 
 func walkWorkspace(ctx context.Context, fn func(relPath, absPath string, entry fs.DirEntry) error) error {

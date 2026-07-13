@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 const defaultReadLimit = 200
@@ -76,20 +79,29 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 		}
 	}
 
-	absPath, relPath, err := resolveWorkspacePath(parts[0])
+	resolved, err := pathpolicy.Resolve(parts[0])
+	if err != nil {
+		return Result{}, err
+	}
+	if err := approveExternalAccess(ctx, "read", resolved); err != nil {
+		return Result{}, err
+	}
+	absPath, relPath := resolved.Path, resolved.Relative
+
+	file, err := pathpolicy.OpenRead(resolved)
+	if err != nil {
+		return Result{}, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
 	if err != nil {
 		return Result{}, err
 	}
 
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return Result{}, err
-	}
-
-	injected := t.getInjectedInstructions(absPath)
+	injected := t.getInjectedInstructions(absPath, resolved.External)
 
 	if info.IsDir() {
-		entries, readErr := os.ReadDir(absPath)
+		entries, readErr := file.ReadDir(-1)
 		if readErr != nil {
 			return Result{}, readErr
 		}
@@ -109,12 +121,6 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 			Output:  strings.Join(lines, "\n") + injected,
 		}, nil
 	}
-
-	file, err := os.Open(absPath)
-	if err != nil {
-		return Result{}, err
-	}
-	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
@@ -146,7 +152,10 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	}, nil
 }
 
-func (t *ReadTool) getInjectedInstructions(absPath string) string {
+func (t *ReadTool) getInjectedInstructions(absPath string, external bool) string {
+	if external {
+		return ""
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -168,7 +177,17 @@ func (t *ReadTool) getInjectedInstructions(absPath string) string {
 			if t.injectedInstructions[agentFile] {
 				continue
 			}
-			if b, err := os.ReadFile(agentFile); err == nil {
+			resolved, err := pathpolicy.Resolve(agentFile)
+			if err != nil || resolved.External {
+				continue
+			}
+			file, err := pathpolicy.OpenRead(resolved)
+			if err != nil {
+				continue
+			}
+			b, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr == nil {
 				t.injectedInstructions[agentFile] = true
 				fmt.Fprintf(&injected, "\n\n<system-reminder>\nFound %s:\n%s\n</system-reminder>", name, string(b))
 			}

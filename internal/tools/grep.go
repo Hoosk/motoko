@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 const maxGrepMatches = 200
@@ -76,37 +79,31 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	var matches []string
-	err = walkWorkspace(ctx, func(relPath, absPath string, entry fs.DirEntry) error {
+	err = walkWorkspace(ctx, func(relPath, _ string, entry fs.DirEntry) error {
 		if entry.IsDir() {
 			return nil
 		}
 		if includeMatcher != nil && !includeMatcher.MatchString(relPath) {
 			return nil
 		}
-		if !isTextFile(absPath) {
-			return nil
+		resolved, resolveErr := pathpolicy.Resolve(relPath)
+		if resolveErr != nil {
+			return resolveErr
 		}
-
-		file, openErr := os.Open(absPath)
+		if approveErr := approveExternalAccess(ctx, "read", resolved); approveErr != nil {
+			return approveErr
+		}
+		file, openErr := pathpolicy.OpenRead(resolved)
 		if openErr != nil {
+			return openErr
+		}
+		if !isTextOpenFile(file) {
+			_ = file.Close()
 			return nil
 		}
-		defer func() { _ = file.Close() }()
-
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 1024), 1024*1024)
-		lineNo := 0
-		for scanner.Scan() {
-			lineNo++
-			line := scanner.Text()
-			if re.MatchString(line) {
-				matches = append(matches, fmt.Sprintf("%s:%d: %s", relPath, lineNo, line))
-				if len(matches) >= maxMatches {
-					return errStopWalk
-				}
-			}
-		}
-		return nil
+		matchErr := grepOpenFile(file, relPath, re, &matches, maxMatches)
+		_ = file.Close()
+		return matchErr
 	})
 	if err != nil && err != errStopWalk {
 		return Result{}, err
@@ -126,3 +123,33 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 }
 
 var errStopWalk = fmt.Errorf("stop walk")
+
+func isTextOpenFile(file *os.File) bool {
+	buffer := make([]byte, 8192)
+	n, err := file.Read(buffer)
+	if err != nil && err.Error() != "EOF" {
+		return false
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return false
+	}
+	chunk := buffer[:n]
+	return !bytesContainsZero(chunk) && utf8.Valid(chunk)
+}
+
+func grepOpenFile(file *os.File, relPath string, re *regexp.Regexp, matches *[]string, maxMatches int) error {
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := scanner.Text()
+		if re.MatchString(line) {
+			*matches = append(*matches, fmt.Sprintf("%s:%d: %s", relPath, lineNo, line))
+			if len(*matches) >= maxMatches {
+				return errStopWalk
+			}
+		}
+	}
+	return scanner.Err()
+}
