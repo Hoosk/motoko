@@ -3,10 +3,10 @@ package patch
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 const (
@@ -16,7 +16,9 @@ const (
 	replaceMarker = ">>>>>>> REPLACE"
 )
 
-type Tool struct{}
+type Tool struct {
+	approveExternal ExternalApprover
+}
 
 type Result struct {
 	Summary string
@@ -74,39 +76,45 @@ type patchedLine struct {
 
 var unifiedHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
-func New() *Tool {
-	return &Tool{}
+func New(approvers ...ExternalApprover) *Tool {
+	tool := &Tool{}
+	if len(approvers) > 0 {
+		tool.approveExternal = approvers[0]
+	}
+	return tool
 }
 
 func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
 	request, err := parsePatchRequest(args)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(request.AST) > 0 {
-		return t.runASTPatch(request.AST)
+		return t.runASTPatch(ctx, request.AST)
 	}
 	if request.Unified != nil {
-		return t.runUnifiedPatch(request.Unified)
+		return t.runUnifiedPatch(ctx, request.Unified)
 	}
 
-	absPath, relPath, err := resolveWorkspaceWritePath(request.Path)
+	resolved, err := resolveWorkspaceWritePath(ctx, request.Path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
 
-	content, err := os.ReadFile(absPath)
-	if err != nil && !os.IsNotExist(err) {
-		return Result{}, err
+	var content []byte
+	if resolved.Existing() {
+		content, err = pathpolicy.ReadFile(resolved)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 
 	current := string(content)
 	updated := ""
 
-	if os.IsNotExist(err) {
+	if !resolved.Existing() {
 		if request.Search != "" {
-			return Result{}, fmt.Errorf("file %s does not exist and the SEARCH block is not empty", relPath)
+			return Result{}, fmt.Errorf("file %s does not exist and the SEARCH block is not empty", resolved.Relative)
 		}
 		updated = request.Replace
 	} else {
@@ -116,28 +124,25 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return Result{}, err
-	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	if err := pathpolicy.WriteFile(resolved, []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 
 	return Result{
-		Summary: fmt.Sprintf("Patch applied to %s.", relPath),
+		Summary: fmt.Sprintf("Patch applied to %s.", resolved.Relative),
 		Output:  diffPreview(request.Search, request.Replace),
 	}, nil
 }
 
-func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
+func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, error) {
 	if len(requests) == 0 {
 		return Result{}, fmt.Errorf("no AST mutations provided")
 	}
-	absPath, relPath, err := resolveWorkspaceWritePath(requests[0].Path)
+	resolved, err := resolveWorkspaceWritePath(ctx, requests[0].Path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
-	content, err := os.ReadFile(absPath)
+	content, err := pathpolicy.ReadFile(resolved)
 	if err != nil {
 		return Result{}, err
 	}
@@ -152,12 +157,12 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 		if request.Action == "" {
 			request.Action = actionReplace
 		}
-		updated, err = applyASTPatch([]byte(updated), relPath, request)
+		updated, err = applyASTPatch([]byte(updated), resolved.Relative, request)
 		if err != nil {
 			return Result{}, err
 		}
 	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	if err := pathpolicy.WriteFile(resolved, []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 	rendered := make([]string, 0, len(requests))
@@ -167,41 +172,41 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 		}
 		rendered = append(rendered, request.Render())
 	}
-	summary := fmt.Sprintf("%d AST mutations applied to %s.", len(rendered), relPath)
+	summary := fmt.Sprintf("%d AST mutations applied to %s.", len(rendered), resolved.Relative)
 	if len(rendered) == 1 {
-		summary = fmt.Sprintf("AST patch applied to %s.", relPath)
+		summary = fmt.Sprintf("AST patch applied to %s.", resolved.Relative)
 	}
 	return Result{Summary: summary, Output: strings.Join(rendered, "\n\n")}, nil
 }
 
-func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
+func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result, error) {
 	path, err := patch.targetPath()
 	if err != nil {
 		return Result{}, err
 	}
-	absPath, relPath, err := resolveWorkspaceWritePath(path)
+	resolved, err := resolveWorkspaceWritePath(ctx, path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
-	content, readErr := os.ReadFile(absPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return Result{}, readErr
+	var content []byte
+	if resolved.Existing() {
+		content, err = pathpolicy.ReadFile(resolved)
+		if err != nil {
+			return Result{}, err
+		}
 	}
-	if os.IsNotExist(readErr) && patch.OldPath != devNull {
-		return Result{}, fmt.Errorf("file %s does not exist to apply the unified diff", relPath)
+	if !resolved.Existing() && patch.OldPath != devNull {
+		return Result{}, fmt.Errorf("file %s does not exist to apply the unified diff", resolved.Relative)
 	}
 	updated, err := applyUnifiedPatch(string(content), patch)
 	if err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return Result{}, err
-	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	if err := pathpolicy.WriteFile(resolved, []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 	return Result{
-		Summary: fmt.Sprintf("Unified diff applied to %s.", relPath),
+		Summary: fmt.Sprintf("Unified diff applied to %s.", resolved.Relative),
 		Output:  patch.Render(),
 	}, nil
 }

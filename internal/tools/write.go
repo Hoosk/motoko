@@ -3,11 +3,9 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 type WriteTool struct{}
@@ -37,24 +35,20 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("content is empty; refusing to write an empty file (use bash with truncation if intentional)")
 	}
 
-	absPath, relPath, err := patchtool.ResolveWorkspaceWritePath(path)
+	resolved, err := pathpolicy.Resolve(path)
 	if err != nil {
 		return Result{}, err
 	}
-
-	existed := false
-	if info, statErr := os.Stat(absPath); statErr == nil {
-		if info.IsDir() {
-			return Result{}, fmt.Errorf("path is a directory: %s", relPath)
-		}
-		existed = true
+	if err := pathpolicy.ValidateWrite(resolved); err != nil {
+		return Result{}, err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
-		return Result{}, fmt.Errorf("failed to create parent directories: %w", err)
+	if err := approveExternalAccess(ctx, "modify", resolved); err != nil {
+		return Result{}, err
 	}
+	absPath, relPath := resolved.Path, resolved.Relative
 
-	if err := os.WriteFile(absPath, []byte(content), 0o600); err != nil {
+	existed := resolved.Existing()
+	if err := pathpolicy.WriteFile(resolved, []byte(content), 0o600, 0o700); err != nil {
 		return Result{}, fmt.Errorf("failed to write file: %w", err)
 	}
 

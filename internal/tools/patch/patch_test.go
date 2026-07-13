@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 func withTempWorkspace(t *testing.T) string {
@@ -192,6 +194,42 @@ func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
 				t.Fatalf("expected sandbox error, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestPatchToolRequiresApprovalForExternalSymlink(t *testing.T) {
+	root := withTempWorkspace(t)
+	external := filepath.Join(t.TempDir(), "external.txt")
+	if err := os.WriteFile(external, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(root, "external-link")); err != nil {
+		t.Fatal(err)
+	}
+	realExternal, err := filepath.EvalSymlinks(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := "external-link\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
+
+	if _, err := New().Run(context.Background(), args); err == nil || !strings.Contains(err.Error(), "requires approval") {
+		t.Fatalf("expected approval error, got %v", err)
+	}
+	tool := New(func(_ context.Context, resolved pathpolicy.Resolution) error {
+		if !resolved.External || resolved.Path != realExternal {
+			t.Fatalf("unexpected external resolution %#v", resolved)
+		}
+		return nil
+	})
+	if _, err := tool.Run(context.Background(), args); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "new\n" {
+		t.Fatalf("unexpected external content %q", content)
 	}
 }
 
