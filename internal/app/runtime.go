@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/mcp"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
@@ -110,6 +112,7 @@ type Runtime struct {
 	tachikomas        *tachikoma.Manager
 	pending           *pendingShell
 	tools             *tools.Registry
+	mcpMgr            *mcp.Manager
 	updateDone        chan struct{}
 	inputMode         InputMode
 	version           string
@@ -277,6 +280,87 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if len(sList) > 0 {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
 	}
+
+	// MCP manager is built last so it can publish tools directly into the
+	// already-populated registry. Servers are started on Runtime.Start so the
+	// background context is available for transports and to honour the
+	// process-wide cancellation during shutdown.
+	r.mcpMgr = mcp.NewManager(mcp.ManagerConfig{
+		Registry: mcp.ToolRegistrar{
+			Register: func(adapter mcp.ToolAdapter) {
+				if adapter == nil {
+					return
+				}
+				r.tools.Register(tools.NewMCPRemoteTool(adapter))
+			},
+			Unregister: func(name string) bool {
+				return r.tools.Unregister(name)
+			},
+		},
+		RootsFn: func(ctx context.Context) ([]mcp.Root, error) {
+			var path string
+			if r.sesMgr != nil && r.sesMgr.CurrentSession() != nil {
+				path = r.sesMgr.CurrentSession().Workspace
+			}
+			if path == "" {
+				var err error
+				path, err = os.Getwd()
+				if err != nil {
+					return nil, err
+				}
+			}
+			uri := "file://" + filepath.ToSlash(path)
+			return []mcp.Root{
+				{
+					URI:  uri,
+					Name: "workspace",
+				},
+			}, nil
+		},
+		SamplingFn: func(ctx context.Context, params mcp.CreateMessageParams) (*mcp.CreateMessageResult, error) {
+			items := make([]provider.ConversationItem, len(params.Messages))
+			for i, m := range params.Messages {
+				role := provider.RoleUser
+				if m.Role == "assistant" {
+					role = provider.RoleAssistant
+				}
+				items[i] = provider.ConversationItem{
+					Role:    role,
+					Content: m.Content.Text,
+				}
+			}
+
+			cfg, ok := r.provMgr.GetActiveProviderConfig()
+			if !ok {
+				return nil, fmt.Errorf("no active provider configured")
+			}
+			pClient, err := r.provMgr.ProviderClient(cfg)
+			if err != nil {
+				return nil, err
+			}
+
+			resp, err := pClient.Complete(ctx, params.SystemPrompt, items, provider.ToolSet{})
+			if err != nil {
+				return nil, err
+			}
+
+			var modelName string
+			if base, ok := pClient.(interface{ Model() string }); ok {
+				modelName = base.Model()
+			} else {
+				modelName = pClient.Summary()
+			}
+
+			return &mcp.CreateMessageResult{
+				Content: mcp.ContentBlock{
+					Type: "text",
+					Text: resp.FinalText,
+				},
+				Model: modelName,
+				Role:  "assistant",
+			}, nil
+		},
+	})
 
 	return r
 }
@@ -484,6 +568,9 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(r.backgroundCtx)
 	}
+	if r.mcpMgr != nil && r.config != nil && len(r.config.MCPServers) > 0 {
+		r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs(r.config.MCPServers))
+	}
 	_ = provider.LoadCatalog(context.Background())
 	r.agOrch.RefreshAgent()
 	go func() {
@@ -565,6 +652,9 @@ func (r *Runtime) Stop() {
 	if r.backgroundCancel != nil {
 		r.backgroundCancel()
 	}
+	if r.mcpMgr != nil {
+		r.mcpMgr.Stop()
+	}
 }
 
 func (r *Runtime) GetContextInfo() system.ContextInfo {
@@ -639,4 +729,28 @@ func trailingMentionToken(input string) (string, bool) {
 		return "", false
 	}
 	return last, true
+}
+
+// mcpServerConfigs converts the persisted config entries into the shape the
+// mcp manager consumes. The conversion is intentionally explicit so future
+// fields (auth, headers, env templates) can be added without leaking the
+// persistence type into the mcp package.
+func mcpServerConfigs(in []config.MCPServerConfig) []mcp.ServerConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]mcp.ServerConfig, 0, len(in))
+	for _, s := range in {
+		out = append(out, mcp.ServerConfig{
+			Name:      s.Name,
+			Transport: s.NormalizeTransport(),
+			Command:   s.Command,
+			Args:      s.Args,
+			Env:       s.EnvSlice(),
+			URL:       s.URL,
+			Headers:   s.Headers,
+			Disabled:  s.Disabled,
+		})
+	}
+	return out
 }

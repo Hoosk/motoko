@@ -77,6 +77,26 @@ func (r *Registry) Register(tool Tool) {
 	sort.Strings(r.order)
 }
 
+// Unregister removes a tool by name (case-insensitive). It returns true when
+// the tool was found and removed, false otherwise.
+func (r *Registry) Unregister(name string) bool {
+	if r == nil {
+		return false
+	}
+	name = strings.ToLower(name)
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	for i, n := range r.order {
+		if n == name {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+	return true
+}
+
 func (r *Registry) Specs(ctx ToolContext) []Spec {
 	result := make([]Spec, 0, len(r.order))
 	for _, name := range r.order {

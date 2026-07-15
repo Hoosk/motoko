@@ -72,6 +72,43 @@ type AppConfig struct {
 	Providers         []ProviderConfig         `json:"providers"`
 	Search            SearchConfig             `json:"search"`
 	MaxIterations     int                      `json:"max_iterations,omitempty"`
+	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
+}
+
+// MCPServerConfig describes a single MCP server. Both stdio and HTTP/Streamable
+// transports are accepted; only stdio is implemented in phase 1.
+type MCPServerConfig struct {
+	Name      string            `json:"name"`
+	Transport string            `json:"transport,omitempty"` // "stdio" | "http" (empty defaults to stdio)
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	URL       string            `json:"url,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Disabled  bool              `json:"disabled,omitempty"`
+}
+
+// NormalizeTransport returns the canonical transport name.
+func (m MCPServerConfig) NormalizeTransport() string {
+	t := strings.ToLower(strings.TrimSpace(m.Transport))
+	if t == "" {
+		return "stdio"
+	}
+	return t
+}
+
+// EnvSlice renders the env map as a slice of KEY=VALUE pairs suitable for
+// exec.Cmd. Empty map returns nil so the underlying exec receives only the
+// inherited process environment.
+func (m MCPServerConfig) EnvSlice() []string {
+	if len(m.Env) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m.Env))
+	for k, v := range m.Env {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 func (c *AppConfig) Merge(other *AppConfig) {
@@ -118,6 +155,9 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if c.Agents == nil {
 		c.Agents = make(map[string]AgentOverride)
+	}
+	if len(other.MCPServers) > 0 {
+		c.MCPServers = mergeMCPServers(c.MCPServers, other.MCPServers)
 	}
 	for name, override := range other.Agents {
 		existing := c.Agents[name]
@@ -193,6 +233,12 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 			if err := json.Unmarshal(localData, &localCfg); err == nil {
 				cfg.Merge(&localCfg)
 			}
+		}
+
+		// Dedicated MCP file (`.agents/mcp.json`) merged on top.
+		mcpPath := filepath.Join(workspacePath[0], ".agents", "mcp.json")
+		if extra, err := LoadMCPFile(mcpPath); err == nil && len(extra) > 0 {
+			cfg.MCPServers = mergeMCPServers(cfg.MCPServers, extra)
 		}
 	}
 
@@ -474,4 +520,75 @@ func (c *AppConfig) sortProviders() {
 	sort.Slice(c.Providers, func(i, j int) bool {
 		return strings.ToLower(c.Providers[i].Name) < strings.ToLower(c.Providers[j].Name)
 	})
+}
+
+// mergeMCPServers combines the base and override MCP server lists. The
+// override list takes precedence: any server with the same name is replaced
+// by the override; new servers are appended. The result is sorted by name
+// for deterministic ordering.
+func mergeMCPServers(base, override []MCPServerConfig) []MCPServerConfig {
+	if len(override) == 0 {
+		return base
+	}
+	byName := make(map[string]MCPServerConfig, len(base)+len(override))
+	order := make([]string, 0, len(base)+len(override))
+	for _, srv := range base {
+		key := mcpServerKey(srv)
+		if _, ok := byName[key]; ok {
+			continue
+		}
+		byName[key] = srv
+		order = append(order, key)
+	}
+	for _, srv := range override {
+		key := mcpServerKey(srv)
+		if existing, ok := byName[key]; ok {
+			byName[key] = srv
+			_ = existing
+			continue
+		}
+		byName[key] = srv
+		order = append(order, key)
+	}
+	sort.Strings(order)
+	out := make([]MCPServerConfig, 0, len(order))
+	for _, key := range order {
+		out = append(out, byName[key])
+	}
+	return out
+}
+
+func mcpServerKey(srv MCPServerConfig) string {
+	name := strings.TrimSpace(srv.Name)
+	if name == "" {
+		if srv.Command != "" {
+			name = srv.Command
+		} else if srv.URL != "" {
+			name = srv.URL
+		} else {
+			name = "mcp-server"
+		}
+	}
+	return strings.ToLower(name)
+}
+
+// LoadMCPFile reads an additional MCP configuration file (typically
+// .agents/mcp.json inside the workspace). It returns an empty list when the
+// file does not exist; an error is returned only for parse failures or
+// unreadable files.
+func LoadMCPFile(path string) ([]MCPServerConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var wrapper struct {
+		MCPServers []MCPServerConfig `json:"mcp_servers"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, fmt.Errorf("failed to decode %s: %w", path, err)
+	}
+	return wrapper.MCPServers, nil
 }
