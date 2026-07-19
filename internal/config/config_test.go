@@ -187,8 +187,8 @@ func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(keyPath); err != nil {
-		t.Fatalf("expected encryption key saved at %s: %v", keyPath, err)
+	if _, statErr := os.Stat(keyPath); statErr != nil {
+		t.Fatalf("expected encryption key saved at %s: %v", keyPath, statErr)
 	}
 	rawContent := string(fileData)
 	if !strings.Contains(rawContent, "enc:") {

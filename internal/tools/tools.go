@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/brain"
@@ -49,6 +50,7 @@ type DynamicTool interface {
 type Registry struct {
 	tools map[string]Tool
 	order []string
+	mu    sync.RWMutex
 }
 
 func NewRegistry() *Registry {
@@ -69,6 +71,8 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Register(tool Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	name := strings.ToLower(tool.Spec().Name)
 	if _, exists := r.tools[name]; !exists {
 		r.order = append(r.order, name)
@@ -77,10 +81,38 @@ func (r *Registry) Register(tool Tool) {
 	sort.Strings(r.order)
 }
 
+// Unregister removes a tool by name (case-insensitive). It returns true when
+// the tool was found and removed, false otherwise.
+func (r *Registry) Unregister(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	name = strings.ToLower(name)
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	for i, n := range r.order {
+		if n == name {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+	return true
+}
+
 func (r *Registry) Specs(ctx ToolContext) []Spec {
-	result := make([]Spec, 0, len(r.order))
-	for _, name := range r.order {
-		tool := r.tools[name]
+	r.mu.RLock()
+	toolsCopy := make([]Tool, len(r.order))
+	for i, name := range r.order {
+		toolsCopy[i] = r.tools[name]
+	}
+	r.mu.RUnlock()
+
+	result := make([]Spec, 0, len(toolsCopy))
+	for _, tool := range toolsCopy {
 		if dt, ok := tool.(DynamicTool); ok {
 			result = append(result, dt.DynamicSpec(ctx))
 		} else {
@@ -91,7 +123,9 @@ func (r *Registry) Specs(ctx ToolContext) []Spec {
 }
 
 func (r *Registry) Spec(ctx ToolContext, name string) (Spec, bool) {
+	r.mu.RLock()
 	tool, ok := r.tools[strings.ToLower(name)]
+	r.mu.RUnlock()
 	if !ok {
 		return Spec{}, false
 	}
@@ -117,7 +151,9 @@ func (r *Registry) Suggestions(ctx ToolContext, prefix string) []Spec {
 }
 
 func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
+	r.mu.RLock()
 	tool, ok := r.tools[strings.ToLower(name)]
+	r.mu.RUnlock()
 	if !ok {
 		return Result{}, fmt.Errorf("tool desconocida: %s", name)
 	}
@@ -170,6 +206,8 @@ func IsWriteTool(name string) bool {
 
 // Registry filtering for sandboxing
 func (r *Registry) Filter(predicate func(Tool) bool) *Registry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	filtered := &Registry{
 		tools: make(map[string]Tool),
 	}
