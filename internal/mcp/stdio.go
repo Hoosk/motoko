@@ -18,12 +18,19 @@ type StdioConfig struct {
 	Env     []string
 }
 
+type readResult struct {
+	line []byte
+	err  error
+}
+
 // StdioTransport implements Transport by exec-ing a child process and
 // exchanging JSON-RPC messages over its stdin/stdout pipes.
 type StdioTransport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	reader *bufio.Reader
+	recvCh chan readResult
+	stopCh chan struct{}
 	mu     sync.Mutex
 	closed bool
 }
@@ -52,11 +59,29 @@ func NewStdioTransport(cfg StdioConfig) (*StdioTransport, error) {
 		_ = stdin.Close()
 		return nil, fmt.Errorf("mcp: start command: %w", err)
 	}
-	return &StdioTransport{
+	t := &StdioTransport{
 		cmd:    cmd,
 		stdin:  stdin,
 		reader: bufio.NewReader(stdout),
-	}, nil
+		recvCh: make(chan readResult),
+		stopCh: make(chan struct{}),
+	}
+	go t.readLoop()
+	return t, nil
+}
+
+func (t *StdioTransport) readLoop() {
+	for {
+		line, err := t.reader.ReadBytes('\n')
+		select {
+		case <-t.stopCh:
+			return
+		case t.recvCh <- readResult{line: line, err: err}:
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // Send writes a JSON-RPC payload terminated with a single newline. Per the
@@ -82,19 +107,15 @@ func (t *StdioTransport) Send(ctx context.Context, payload []byte) error {
 
 // Recv reads one newline-terminated JSON-RPC payload from the child stdout.
 func (t *StdioTransport) Recv(ctx context.Context) ([]byte, error) {
-	type result struct {
-		err  error
-		line []byte
-	}
-	done := make(chan result, 1)
-	go func() {
-		line, err := t.reader.ReadBytes('\n')
-		done <- result{line: line, err: err}
-	}()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case r := <-done:
+	case <-t.stopCh:
+		return nil, ErrTransportClosed
+	case r, ok := <-t.recvCh:
+		if !ok {
+			return nil, ErrTransportClosed
+		}
 		if r.err != nil {
 			if isEOF(r.err) {
 				return nil, io.EOF
@@ -116,6 +137,7 @@ func (t *StdioTransport) Close() error {
 		return nil
 	}
 	t.closed = true
+	close(t.stopCh)
 	t.mu.Unlock()
 
 	_ = t.stdin.Close()
