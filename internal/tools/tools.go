@@ -48,9 +48,9 @@ type DynamicTool interface {
 }
 
 type Registry struct {
-	mu    sync.RWMutex
 	tools map[string]Tool
 	order []string
+	mu    sync.RWMutex
 }
 
 func NewRegistry() *Registry {

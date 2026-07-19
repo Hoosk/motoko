@@ -227,6 +227,23 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
 			return r.tools.Run(ctx, name, args)
 		},
+		MCPServersFn: func() []mcp.ServerStatus {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.Servers()
+		},
+		AddMCPServerFn: func(srv config.MCPServerConfig) {
+			if r.mcpMgr != nil {
+				r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
+			}
+		},
+		RemoveMCPServerFn: func(name string) bool {
+			if r.mcpMgr != nil {
+				return r.mcpMgr.StopServer(name)
+			}
+			return false
+		},
 
 		ProvMgr: r.provMgr,
 

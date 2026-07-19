@@ -19,8 +19,8 @@ type StdioConfig struct {
 }
 
 type readResult struct {
-	line []byte
 	err  error
+	line []byte
 }
 
 // StdioTransport implements Transport by exec-ing a child process and

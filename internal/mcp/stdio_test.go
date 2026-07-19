@@ -77,8 +77,8 @@ func TestStdioTransportEndToEnd(t *testing.T) {
 	client.Start(ctx)
 	defer func() { _ = client.Close() }()
 
-	if _, err := client.Initialize(ctx); err != nil {
-		t.Fatalf("initialize: %v", err)
+	if _, initErr := client.Initialize(ctx); initErr != nil {
+		t.Fatalf("initialize: %v", initErr)
 	}
 
 	tools, err := client.ListAllTools(ctx)

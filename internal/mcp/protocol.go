@@ -21,6 +21,7 @@ const ProtocolVersion = "2025-11-25"
 // jsonRPCVersion is the JSON-RPC envelope version. Per RFC 2.0 every envelope
 // must carry it; we keep the literal in one place to satisfy goconst.
 const jsonRPCVersion = "2.0"
+const jsonRPCField = "jsonrpc"
 
 // JSON-RPC 2.0 error codes reserved by the protocol.
 const (

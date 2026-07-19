@@ -65,26 +65,26 @@ type AgentOverride struct {
 
 type AppConfig struct {
 	Agents            map[string]AgentOverride `json:"agents,omitempty"`
+	Providers         []ProviderConfig         `json:"providers"`
+	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
 	ActiveProvider    string                   `json:"active_provider"`
 	Theme             string                   `json:"theme,omitempty"`
 	Density           string                   `json:"density,omitempty"`
 	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
-	Providers         []ProviderConfig         `json:"providers"`
 	Search            SearchConfig             `json:"search"`
 	MaxIterations     int                      `json:"max_iterations,omitempty"`
-	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
 }
 
 // MCPServerConfig describes a single MCP server. Both stdio and HTTP/Streamable
 // transports are accepted; only stdio is implemented in phase 1.
 type MCPServerConfig struct {
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 	Name      string            `json:"name"`
 	Transport string            `json:"transport,omitempty"` // "stdio" | "http" (empty defaults to stdio)
 	Command   string            `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
 	URL       string            `json:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
 	Disabled  bool              `json:"disabled,omitempty"`
 }
 
@@ -272,6 +272,7 @@ func (c *AppConfig) Save() error {
 	encryptedCfg.Density = c.Density
 	encryptedCfg.ThinkingVerbosity = c.ThinkingVerbosity
 	encryptedCfg.MaxIterations = c.MaxIterations
+	encryptedCfg.MCPServers = c.MCPServers
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p
@@ -289,6 +290,26 @@ func (c *AppConfig) Save() error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func (c *AppConfig) UpsertMCPServer(srv MCPServerConfig) {
+	for i, existing := range c.MCPServers {
+		if strings.EqualFold(existing.Name, srv.Name) {
+			c.MCPServers[i] = srv
+			return
+		}
+	}
+	c.MCPServers = append(c.MCPServers, srv)
+}
+
+func (c *AppConfig) RemoveMCPServer(name string) bool {
+	for i, existing := range c.MCPServers {
+		if strings.EqualFold(existing.Name, name) {
+			c.MCPServers = append(c.MCPServers[:i], c.MCPServers[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func (c *AppConfig) UpsertProvider(provider ProviderConfig) {

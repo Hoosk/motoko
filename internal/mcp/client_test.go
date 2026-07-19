@@ -295,8 +295,8 @@ func TestClientInitializeAndToolsList(t *testing.T) {
 		t.Fatalf("expected 2 tools, got %d", len(all))
 	}
 
-	if err := client.Ping(ctx); err != nil {
-		t.Fatalf("ping: %v", err)
+	if pingErr := client.Ping(ctx); pingErr != nil {
+		t.Fatalf("ping: %v", pingErr)
 	}
 
 	result, err := client.CallTool(ctx, "echo", json.RawMessage(`{"text":"hi"}`))

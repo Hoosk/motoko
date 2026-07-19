@@ -172,6 +172,30 @@ func (m *Manager) Stop() {
 	}
 }
 
+// StopServer shuts down a single server by name and unregisters its tools.
+func (m *Manager) StopServer(name string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	s, ok := m.servers[name]
+	if ok {
+		delete(m.servers, name)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	m.unregisterServerTools(s)
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.client != nil {
+		_ = s.client.Close()
+	}
+	return true
+}
+
 // Servers returns a snapshot of the currently-tracked servers along with
 // their status. Useful for `/mcp servers` and TUI status panels.
 func (m *Manager) Servers() []ServerStatus {

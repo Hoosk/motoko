@@ -10,6 +10,7 @@ import (
 	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/mcp"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/system"
@@ -598,5 +599,80 @@ func TestHandleEmpty(t *testing.T) {
 	resp := d.Handle("", system.ContextInfo{})
 	if len(resp.Entries) != 0 {
 		t.Errorf("expected empty response, got %v", resp.Entries)
+	}
+}
+
+func TestHandleMCPCommand(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPServersFn = func() []mcp.ServerStatus {
+		return []mcp.ServerStatus{
+			{
+				Name:      "alpha",
+				Transport: "stdio",
+				Connected: true,
+				ToolCount: 2,
+				Tools:     []string{"mcp_alpha_read", "mcp_alpha_write"},
+			},
+			{
+				Name:      "beta",
+				Transport: "http",
+				Connected: false,
+				ToolCount: 0,
+			},
+		}
+	}
+	deps.ToolSpecsFn = func() []tools.Spec {
+		return []tools.Spec{
+			{Name: "read", Summary: "read file"},
+			{Name: "mcp_alpha_read", Summary: "mcp alpha read"},
+		}
+	}
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/mcp", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "alpha") {
+		t.Fatalf("unexpected /mcp response: %#v", resp)
+	}
+
+	resp = d.Handle("/mcp tools", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "mcp_alpha_read") {
+		t.Fatalf("unexpected /mcp tools response: %#v", resp)
+	}
+
+	resp = d.Handle("/mcp info alpha", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "Transport: stdio") {
+		t.Fatalf("unexpected /mcp info response: %#v", resp)
+	}
+
+	resp = d.Handle("/mcp info nonexistent", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Fatalf("expected error for nonexistent server info: %#v", resp)
+	}
+
+	addedName := ""
+	deps.AddMCPServerFn = func(srv config.MCPServerConfig) {
+		addedName = srv.Name
+	}
+	d = newDispatcher(deps)
+	resp = d.Handle("/mcp add test-srv npx -y server-test", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "added") {
+		t.Fatalf("unexpected /mcp add response: %#v", resp)
+	}
+	if addedName != "test-srv" {
+		t.Fatalf("expected AddMCPServerFn called with test-srv, got %q", addedName)
+	}
+
+	removedName := ""
+	deps.RemoveMCPServerFn = func(name string) bool {
+		removedName = name
+		return true
+	}
+	d = newDispatcher(deps)
+	resp = d.Handle("/mcp remove test-srv", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "removed") {
+		t.Fatalf("unexpected /mcp remove response: %#v", resp)
+	}
+	if removedName != "test-srv" {
+		t.Fatalf("expected RemoveMCPServerFn called with test-srv, got %q", removedName)
 	}
 }

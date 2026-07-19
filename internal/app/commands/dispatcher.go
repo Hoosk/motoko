@@ -11,6 +11,7 @@ import (
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/mcp"
 	"github.com/Hoosk/motoko/internal/session"
 	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/system"
@@ -29,6 +30,7 @@ const (
 	CmdStatus      = "status"
 	CmdList        = "list"
 	CmdTool        = "tool"
+	CmdTools       = "tools"
 	ValNone        = "none"
 	ThemeCyberpunk = "cyberpunk"
 	DefaultTheme   = ThemeCyberpunk
@@ -70,8 +72,11 @@ type Deps struct {
 	AddScheduleFn    func(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error)
 	RemoveScheduleFn func(id string) error
 
-	ToolSpecsFn func() []tools.Spec
-	RunToolFn   func(ctx context.Context, name, args string) (tools.Result, error)
+	ToolSpecsFn        func() []tools.Spec
+	RunToolFn          func(ctx context.Context, name, args string) (tools.Result, error)
+	MCPServersFn       func() []mcp.ServerStatus
+	AddMCPServerFn     func(srv config.MCPServerConfig)
+	RemoveMCPServerFn  func(name string) bool
 
 	ProvMgr *providerman.Manager
 
@@ -179,12 +184,14 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 		return func(inv Invocation) types.Response { return types.Response{Signal: "open-sessions-popup"} }
 	case "settings":
 		return func(inv Invocation) types.Response { return types.Response{Signal: "open-settings-popup"} }
-	case "tools":
+	case CmdTools:
 		return func(inv Invocation) types.Response {
 			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: formatToolList(d.deps.ToolSpecsFn())}}}
 		}
 	case CmdTool:
 		return d.handleToolCommand
+	case "mcp":
+		return func(inv Invocation) types.Response { return d.handleMCPCommand(inv.Args) }
 	case CmdApprove, "deny":
 		return d.handleApprovalCommand(command)
 	case "trace":
@@ -822,4 +829,152 @@ func parseScheduleArgs(args []string) (instruction string, every bool, duration 
 		return "", false, 0, fmt.Errorf("instruction cannot be empty")
 	}
 	return instruction, every, duration, nil
+}
+
+func (d *Dispatcher) handleMCPCommand(args []string) types.Response {
+	var servers []mcp.ServerStatus
+	if d.deps.MCPServersFn != nil {
+		servers = d.deps.MCPServersFn()
+	}
+
+	if len(args) == 0 || strings.EqualFold(args[0], "list") || strings.EqualFold(args[0], "servers") || strings.EqualFold(args[0], "status") {
+		if len(servers) == 0 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP servers configured or running.\nAdd entries to .agents/mcp.json or application config."}}}
+		}
+		lines := []string{"MCP Servers:"}
+		for _, s := range servers {
+			statusStr := "Connected"
+			if !s.Connected {
+				statusStr = "Disconnected"
+			}
+			if s.Err != nil {
+				statusStr = fmt.Sprintf("Error (%v)", s.Err)
+			}
+			lines = append(lines, fmt.Sprintf("• %s [%s] - %s (%d tools)", s.Name, s.Transport, statusStr, s.ToolCount))
+			if len(s.Tools) > 0 {
+				for _, t := range s.Tools {
+					lines = append(lines, fmt.Sprintf("  └ %s", t))
+				}
+			}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+	}
+
+	sub := strings.ToLower(args[0])
+	switch sub {
+	case "add":
+		if len(args) < 3 {
+			usage := "Usage:\n  /mcp add <name> <command> [args...]\n  /mcp add <name> http <url>\nExamples:\n  /mcp add git npx -y @modelcontextprotocol/server-git .\n  /mcp add remote http https://mcp.example.com/sse"
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: usage}}}
+		}
+		name := args[1]
+		var srv config.MCPServerConfig
+		if strings.EqualFold(args[2], "http") || strings.EqualFold(args[2], "https") {
+			if len(args) < 4 && !strings.Contains(args[2], "://") {
+				return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /mcp add <name> http <url>"}}}
+			}
+			urlStr := args[2]
+			if len(args) >= 4 {
+				urlStr = args[3]
+			}
+			srv = config.MCPServerConfig{
+				Name:      name,
+				Transport: "http",
+				URL:       urlStr,
+			}
+		} else if strings.HasPrefix(strings.ToLower(args[2]), "http://") || strings.HasPrefix(strings.ToLower(args[2]), "https://") {
+			srv = config.MCPServerConfig{
+				Name:      name,
+				Transport: "http",
+				URL:       args[2],
+			}
+		} else {
+			srv = config.MCPServerConfig{
+				Name:      name,
+				Transport: "stdio",
+				Command:   args[2],
+				Args:      args[3:],
+			}
+		}
+
+		cfg := d.deps.ConfigFn()
+		if cfg != nil {
+			cfg.UpsertMCPServer(srv)
+			_ = d.deps.SaveConfigFn()
+		}
+		if d.deps.AddMCPServerFn != nil {
+			d.deps.AddMCPServerFn(srv)
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("MCP server added: %s", name)}}}
+
+	case "remove":
+		if len(args) < 2 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /mcp remove <name>"}}}
+		}
+		name := args[1]
+		removed := false
+		cfg := d.deps.ConfigFn()
+		if cfg != nil {
+			removed = cfg.RemoveMCPServer(name)
+			if removed {
+				_ = d.deps.SaveConfigFn()
+			}
+		}
+		if d.deps.RemoveMCPServerFn != nil {
+			if d.deps.RemoveMCPServerFn(name) {
+				removed = true
+			}
+		}
+		if !removed {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("MCP server not found: %s", name)}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("MCP server removed: %s", name)}}}
+
+	case "tools":
+		if d.deps.ToolSpecsFn == nil {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP tools registered."}}}
+		}
+		specs := d.deps.ToolSpecsFn()
+		var lines []string
+		lines = append(lines, "Registered MCP Tools:")
+		count := 0
+		for _, spec := range specs {
+			if strings.HasPrefix(strings.ToLower(spec.Name), "mcp_") {
+				count++
+				lines = append(lines, fmt.Sprintf("• %s: %s", spec.Name, spec.Summary))
+			}
+		}
+		if count == 0 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP tools registered."}}}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+
+	case "info":
+		if len(args) < 2 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /mcp info <server>"}}}
+		}
+		name := strings.ToLower(args[1])
+		for _, s := range servers {
+			if strings.ToLower(s.Name) == name {
+				statusStr := "Connected"
+				if !s.Connected {
+					statusStr = "Disconnected"
+				}
+				if s.Err != nil {
+					statusStr = fmt.Sprintf("Error (%v)", s.Err)
+				}
+				lines := []string{
+					fmt.Sprintf("Server: %s", s.Name),
+					fmt.Sprintf("Transport: %s", s.Transport),
+					fmt.Sprintf("Status: %s", statusStr),
+					fmt.Sprintf("Tools (%d): %s", s.ToolCount, strings.Join(s.Tools, ", ")),
+				}
+				return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+			}
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("MCP server not found: %s", args[1])}}}
+
+	default:
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown subcommand: %s\nUsage: /mcp [list|add|remove|tools|info <server>]", sub)}}}
+	}
 }

@@ -297,9 +297,9 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 		return nil, err
 	}
 	payload := map[string]any{
-		"jsonrpc": jsonRPCVersion,
-		"id":      json.RawMessage(idRaw),
-		"method":  method,
+		jsonRPCField: jsonRPCVersion,
+		"id":         json.RawMessage(idRaw),
+		"method":     method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
@@ -313,8 +313,8 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 
 func (c *Client) buildNotification(method string, params any) (map[string]any, error) {
 	payload := map[string]any{
-		"jsonrpc": jsonRPCVersion,
-		"method":  method,
+		jsonRPCField: jsonRPCVersion,
+		"method":     method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
@@ -349,9 +349,9 @@ func (c *Client) dispatch(env RPCEnvelope) {
 				} else {
 					raw, _ := json.Marshal(result)
 					resp = map[string]any{
-						"jsonrpc": jsonRPCVersion,
-						"id":      json.RawMessage(id),
-						"result":  json.RawMessage(raw),
+						jsonRPCField: jsonRPCVersion,
+						"id":         json.RawMessage(id),
+						"result":     json.RawMessage(raw),
 					}
 				}
 				data, _ := json.Marshal(resp)
@@ -423,9 +423,9 @@ func buildErrorResponse(id json.RawMessage, code int, msg string, data any) (map
 		id = json.RawMessage("null")
 	}
 	return map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"error":   RPCError{Code: code, Message: msg, Data: data},
+		jsonRPCField: jsonRPCVersion,
+		"id":         id,
+		"error":      RPCError{Code: code, Message: msg, Data: data},
 	}, nil
 }
 

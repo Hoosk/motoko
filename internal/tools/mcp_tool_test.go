@@ -10,10 +10,10 @@ import (
 )
 
 type stubAdapter struct {
-	spec    mcp.ToolSpec
+	err     error
 	summary string
 	output  string
-	err     error
+	spec    mcp.ToolSpec
 }
 
 func (s *stubAdapter) Spec() mcp.ToolSpec { return s.spec }
