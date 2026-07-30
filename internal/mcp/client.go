@@ -332,6 +332,24 @@ func (c *Client) removePending(id string) {
 	delete(c.pending, id)
 }
 
+// failPending closes the read loop gracefully: it unblocks every caller
+// waiting on a request with ErrTransportClosed instead of forcing them
+// to wait for the request timeout. Called when the transport dies.
+func (c *Client) failPending() {
+	c.mu.Lock()
+	pending := c.pending
+	c.pending = make(map[string]chan rpcResult)
+	c.mu.Unlock()
+	for id, ch := range pending {
+		select {
+		case ch <- rpcResult{err: ErrTransportClosed}:
+			tracelog.Logf("MCP: Pending request %q failed with transport error: %v", id, ErrTransportClosed)
+		default:
+			// channel already had a buffered result queued; leave it.
+		}
+	}
+}
+
 func (c *Client) dispatch(env RPCEnvelope) {
 	if env.IsRequest() {
 		id := env.ID.Raw()
@@ -387,6 +405,7 @@ func (c *Client) dispatch(env RPCEnvelope) {
 
 func (c *Client) readLoop(ctx context.Context) {
 	defer close(c.doneCh)
+	defer c.failPending()
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	for {

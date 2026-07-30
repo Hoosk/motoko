@@ -369,3 +369,103 @@ func TestClientPingError(t *testing.T) {
 	}
 	_ = client.Close()
 }
+
+// TestClientPendingFailsOnTransportClose verifies that when the transport
+// dies mid-request, in-flight callers receive ErrTransportClosed immediately
+// instead of waiting for the request timeout.
+func TestClientPendingFailsOnTransportClose(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Fake server that replies to `initialize` (so the client can finish
+	// handshaking) but ignores every other request, leaving them pending.
+	srvCtx, srvCancel := context.WithCancel(ctx)
+	srv := &fakeServer{
+		cancel:       srvCancel,
+		done:         make(chan struct{}),
+		serverWriter: serverWriter,
+	}
+	go func() {
+		defer close(srv.done)
+		reader := bufio.NewReader(serverReader)
+		for {
+			select {
+			case <-srvCtx.Done():
+				return
+			default:
+			}
+			line, err := reader.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			line = trimNewline(line)
+			if len(line) == 0 {
+				continue
+			}
+			var env RPCEnvelope
+			if err := json.Unmarshal(line, &env); err != nil {
+				continue
+			}
+			if env.IsRequest() && env.Method == "initialize" {
+				srv.handleRequest(serverWriter, env)
+				continue
+			}
+			// drop everything else
+		}
+	}()
+	defer func() {
+		srvCancel()
+		<-srv.done
+	}()
+
+	transport := newPipeTransport(
+		bufio.NewReader(clientReader),
+		clientWriter,
+		clientWriter,
+	)
+	start := time.Now()
+	client := NewClient(ClientConfig{
+		Transport:      transport,
+		ClientInfo:     Implementation{Name: "t"},
+		RequestTimeout: 30 * time.Second, // long enough to be the failure mode if our fix is broken
+	})
+	client.Start(ctx)
+	if _, err := client.Initialize(ctx); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+
+	// Fire a request in a goroutine; the server is silent so it will
+	// only resolve when the transport dies.
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.Ping(ctx)
+	}()
+
+	// Give the read loop a moment to register the pending request.
+	time.Sleep(50 * time.Millisecond)
+
+	// Kill the transport. This causes the read loop to return, which
+	// triggers failPending and unblocks the caller.
+	// The server's response writer (serverWriter) is the writer end of the
+	// pipe the client reads from; closing it surfaces EOF on the client
+	// read side and lets the read loop exit. We also close the client's
+	// write end (clientWriter) so the fake server's ReadBytes unblocks
+	// and the deferred cleanup does not hang.
+	if err := serverWriter.Close(); err != nil {
+		t.Fatalf("close server writer: %v", err)
+	}
+	_ = clientWriter.Close()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrTransportClosed) {
+			t.Errorf("expected ErrTransportClosed, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not unblock after transport close (failPending broken?)")
+	}
+	t.Logf("request unblocked with ErrTransportClosed after %v", time.Since(start))
+}
