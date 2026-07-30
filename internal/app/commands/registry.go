@@ -85,7 +85,7 @@ var commandDefinitions = []Definition{
 	{Name: "sessions", Usage: "/sessions", Summary: "List or switch between workspace sessions"},
 	{Name: CmdTools, Usage: "/tools", Summary: "Show all registered tools"},
 	{Name: CmdTool, Usage: "/tool <name> [args]", Summary: "Execute a specific runtime tool"},
-	{Name: "mcp", Usage: "/mcp [list|tools|info <server>]", Summary: "Inspect MCP servers and tools"},
+	{Name: "mcp", Usage: "/mcp [list|add|remove|tools|info|resources|prompts|read|prompt]", Summary: "Inspect and manage MCP servers, tools, resources, and prompts"},
 	{Name: "task", Usage: "/task [list|terminate <id>]", Summary: "Interact with background tasks"},
 	{Name: CmdApprove, Usage: "/approve", Summary: "Execute the pending tool command"},
 	{Name: "deny", Usage: "/deny", Summary: "Cancel the pending tool command"},

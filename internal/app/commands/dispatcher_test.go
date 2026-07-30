@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -674,5 +675,158 @@ func TestHandleMCPCommand(t *testing.T) {
 	}
 	if removedName != "test-srv" {
 		t.Fatalf("expected RemoveMCPServerFn called with test-srv, got %q", removedName)
+	}
+}
+
+func TestHandleMCPResources(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPResourcesFn = func(_ context.Context) []mcp.Resource {
+		return []mcp.Resource{
+			{URI: "file:///a.txt", Name: "alpha.txt", MimeType: "text/plain"},
+			{URI: "file:///b.json", Name: "beta.json", MimeType: "application/json"},
+		}
+	}
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/mcp resources", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatal("expected entries")
+	}
+	text := resp.Entries[0].Text
+	if !strings.Contains(text, "alpha.txt") || !strings.Contains(text, "beta.json") {
+		t.Errorf("expected both resources listed, got %q", text)
+	}
+
+	// Filter argument
+	resp = d.Handle("/mcp resources beta", system.ContextInfo{})
+	text = resp.Entries[0].Text
+	if !strings.Contains(text, "beta.json") {
+		t.Errorf("expected beta.json in filtered output, got %q", text)
+	}
+	if strings.Contains(text, "alpha.txt") {
+		t.Errorf("filter should drop alpha.txt, got %q", text)
+	}
+}
+
+func TestHandleMCPResourcesEmpty(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPResourcesFn = func(_ context.Context) []mcp.Resource { return nil }
+	d := newDispatcher(deps)
+	resp := d.Handle("/mcp resources", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "No MCP resources") {
+		t.Fatalf("expected empty-state message, got %#v", resp.Entries)
+	}
+}
+
+func TestHandleMCPRead(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPResourceReadFn = func(_ context.Context, serverName, uri string) (*mcp.ReadResourceResult, error) {
+		if serverName != "alpha" || uri != "file:///a.txt" {
+			return nil, fmt.Errorf("unexpected call: %s %s", serverName, uri)
+		}
+		return &mcp.ReadResourceResult{
+			Contents: []mcp.ResourceContent{
+				{URI: "file:///a.txt", MimeType: "text/plain", Text: "hello world"},
+			},
+		}, nil
+	}
+	d := newDispatcher(deps)
+	resp := d.Handle("/mcp read alpha file:///a.txt", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatal("expected entries")
+	}
+	if !strings.Contains(resp.Entries[0].Text, "hello world") {
+		t.Errorf("expected read content, got %q", resp.Entries[0].Text)
+	}
+
+	// Missing args
+	resp = d.Handle("/mcp read", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Errorf("expected error for missing args, got %#v", resp.Entries)
+	}
+
+	// Read error
+	deps.MCPResourceReadFn = func(_ context.Context, _, _ string) (*mcp.ReadResourceResult, error) {
+		return nil, fmt.Errorf("boom")
+	}
+	d = newDispatcher(deps)
+	resp = d.Handle("/mcp read alpha file:///missing", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError || !strings.Contains(resp.Entries[0].Text, "boom") {
+		t.Errorf("expected error containing boom, got %#v", resp.Entries)
+	}
+}
+
+func TestHandleMCPPrompts(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPPromptsFn = func(_ context.Context) []mcp.Prompt {
+		return []mcp.Prompt{
+			{
+				Name:        "summarize",
+				Description: "Summarise a file",
+				Arguments: []mcp.PromptArgument{
+					{Name: "path", Required: true},
+					{Name: "max_words"},
+				},
+			},
+			{
+				Name:        "explain",
+				Description: "Explain code",
+			},
+		}
+	}
+	d := newDispatcher(deps)
+	resp := d.Handle("/mcp prompts", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatal("expected entries")
+	}
+	text := resp.Entries[0].Text
+	if !strings.Contains(text, "summarize") || !strings.Contains(text, "explain") {
+		t.Errorf("expected both prompts listed, got %q", text)
+	}
+	if !strings.Contains(text, "path*") {
+		t.Errorf("expected required argument marker *, got %q", text)
+	}
+}
+
+func TestHandleMCPGetPrompt(t *testing.T) {
+	deps := baseDeps()
+	var gotName, gotServer string
+	var gotArgs map[string]string
+	deps.MCPGetPromptFn = func(_ context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+		gotName = name
+		gotServer = serverName
+		gotArgs = args
+		return &mcp.GetPromptResult{
+			Description: "Summary",
+			Messages: []mcp.PromptMessage{
+				{Role: "user", Content: mcp.ContentBlock{Type: "text", Text: "Please summarise /tmp/x"}},
+			},
+		}, nil
+	}
+	d := newDispatcher(deps)
+	resp := d.Handle("/mcp prompt alpha summarize path=/tmp/x max_words=100", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatal("expected entries")
+	}
+	if gotName != "summarize" || gotServer != "alpha" {
+		t.Errorf("unexpected name/server: %q %q", gotName, gotServer)
+	}
+	if gotArgs["path"] != "/tmp/x" || gotArgs["max_words"] != "100" {
+		t.Errorf("unexpected args: %v", gotArgs)
+	}
+	if !strings.Contains(resp.Entries[0].Text, "Please summarise /tmp/x") {
+		t.Errorf("expected prompt text in output, got %q", resp.Entries[0].Text)
+	}
+
+	// Bad kv arg
+	resp = d.Handle("/mcp prompt alpha summarize badkv", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Errorf("expected error for bad kv, got %#v", resp.Entries)
+	}
+
+	// Missing args
+	resp = d.Handle("/mcp prompt", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Errorf("expected error for missing args, got %#v", resp.Entries)
 	}
 }

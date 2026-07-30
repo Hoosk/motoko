@@ -77,6 +77,10 @@ type Deps struct {
 	MCPServersFn       func() []mcp.ServerStatus
 	AddMCPServerFn     func(srv config.MCPServerConfig)
 	RemoveMCPServerFn  func(name string) bool
+	MCPResourcesFn     func(ctx context.Context) []mcp.Resource
+	MCPResourceReadFn  func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error)
+	MCPPromptsFn       func(ctx context.Context) []mcp.Prompt
+	MCPGetPromptFn     func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error)
 
 	ProvMgr *providerman.Manager
 
@@ -976,7 +980,193 @@ func (d *Dispatcher) handleMCPCommand(args []string) types.Response {
 		}
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("MCP server not found: %s", args[1])}}}
 
+	case "resources":
+		return d.handleMCPResources(args[1:])
+	case "prompts":
+		return d.handleMCPPrompts(args[1:])
+	case "read":
+		return d.handleMCPRead(args[1:])
+	case "prompt":
+		return d.handleMCPGetPrompt(args[1:])
+
 	default:
-		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown subcommand: %s\nUsage: /mcp [list|add|remove|tools|info <server>]", sub)}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown subcommand: %s\nUsage: /mcp [list|add|remove|tools|info <server>|resources|prompts|read|prompt]", sub)}}}
+	}
+}
+
+// handleMCPResources lists resources visible to the user. With no
+// arguments, it shows every resource across all connected servers. With
+// one argument, it filters to the given server.
+func (d *Dispatcher) handleMCPResources(args []string) types.Response {
+	if d.deps.MCPResourcesFn == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+	}
+	ctx, cancel := withDispatchTimeout(context.Background())
+	defer cancel()
+	all := d.deps.MCPResourcesFn(ctx)
+	if len(all) == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+	}
+	filter := ""
+	if len(args) > 0 {
+		filter = strings.ToLower(args[0])
+	}
+	var lines []string
+	lines = append(lines, "MCP Resources:")
+	count := 0
+	for _, r := range all {
+		if filter != "" && !strings.Contains(strings.ToLower(r.Name), filter) {
+			continue
+		}
+		count++
+		title := r.Name
+		if r.Title != "" {
+			title = r.Title
+		}
+		lines = append(lines, fmt.Sprintf("• %s  %s  [%s]", title, r.URI, r.MimeType))
+	}
+	if count == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+}
+
+// handleMCPRead reads a resource from a named MCP server. Usage:
+// /mcp read <server> <uri>
+func (d *Dispatcher) handleMCPRead(args []string) types.Response {
+	if len(args) < 2 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /mcp read <server> <uri>"}}}
+	}
+	if d.deps.MCPResourceReadFn == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Resource reads are not available."}}}
+	}
+	ctx, cancel := withDispatchTimeout(context.Background())
+	defer cancel()
+	serverName := args[0]
+	uri := args[1]
+	result, err := d.deps.MCPResourceReadFn(ctx, serverName, uri)
+	if err != nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Read failed: %v", err)}}}
+	}
+	var lines []string
+	for i, c := range result.Contents {
+		header := fmt.Sprintf("[%d] %s (%s)", i+1, c.URI, c.MimeType)
+		if c.Text != "" {
+			header += "\n" + c.Text
+		} else if c.Blob != "" {
+			header += "\n<binary blob, " + humanBlobSize(int64(len(c.Blob))) + ">"
+		}
+		lines = append(lines, header)
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+}
+
+// handleMCPPrompts lists prompt templates exposed by the connected servers.
+func (d *Dispatcher) handleMCPPrompts(args []string) types.Response {
+	if d.deps.MCPPromptsFn == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+	}
+	ctx, cancel := withDispatchTimeout(context.Background())
+	defer cancel()
+	all := d.deps.MCPPromptsFn(ctx)
+	if len(all) == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+	}
+	filter := ""
+	if len(args) > 0 {
+		filter = strings.ToLower(args[0])
+	}
+	var lines []string
+	lines = append(lines, "MCP Prompts:")
+	count := 0
+	for _, p := range all {
+		if filter != "" && !strings.Contains(strings.ToLower(p.Name), filter) {
+			continue
+		}
+		count++
+		desc := p.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		argList := make([]string, 0, len(p.Arguments))
+		for _, a := range p.Arguments {
+			label := a.Name
+			if a.Required {
+				label += "*"
+			}
+			argList = append(argList, label)
+		}
+		argSuffix := ""
+		if len(argList) > 0 {
+			argSuffix = "  args: " + strings.Join(argList, ", ")
+		}
+		lines = append(lines, fmt.Sprintf("• %s — %s%s", p.Name, desc, argSuffix))
+	}
+	if count == 0 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
+}
+
+// handleMCPGetPrompt fetches and renders a prompt. Usage:
+// /mcp prompt <server> <name> [key=value ...]
+func (d *Dispatcher) handleMCPGetPrompt(args []string) types.Response {
+	if len(args) < 2 {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Usage: /mcp prompt <server> <name> [key=value ...]"}}}
+	}
+	if d.deps.MCPGetPromptFn == nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Prompts are not available."}}}
+	}
+	ctx, cancel := withDispatchTimeout(context.Background())
+	defer cancel()
+	serverName := args[0]
+	name := args[1]
+	parsed := make(map[string]string)
+	for _, kv := range args[2:] {
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Invalid argument %q (expected key=value)", kv)}}}
+		}
+		parsed[kv[:eq]] = kv[eq+1:]
+	}
+	result, err := d.deps.MCPGetPromptFn(ctx, serverName, name, parsed)
+	if err != nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Get prompt failed: %v", err)}}}
+	}
+	var lines []string
+	if result.Description != "" {
+		lines = append(lines, result.Description)
+	}
+	for i, m := range result.Messages {
+		header := fmt.Sprintf("[%d] %s:", i+1, m.Role)
+		if m.Content.Text != "" {
+			header += "\n" + m.Content.Text
+		} else if m.Content.Type != "" {
+			header += fmt.Sprintf("\n<%s block>", m.Content.Type)
+		}
+		lines = append(lines, header)
+	}
+	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n\n")}}}
+}
+
+// withDispatchTimeout returns a context bounded to a short timeout. The
+// dispatcher handlers run synchronously in the UI loop, so each MCP
+// round-trip must not block the TUI indefinitely.
+func withDispatchTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 10*time.Second)
+}
+
+// humanBlobSize formats a base64-decoded byte count for display. The MCP
+// payload is base64 so the raw character count would mislead; we keep
+// the formula straightforward (3/4 of the length).
+func humanBlobSize(b64Len int64) string {
+	bytes := b64Len * 3 / 4
+	switch {
+	case bytes < 1024:
+		return fmt.Sprintf("%d B", bytes)
+	case bytes < 1024*1024:
+		return fmt.Sprintf("%.1f KiB", float64(bytes)/1024)
+	default:
+		return fmt.Sprintf("%.1f MiB", float64(bytes)/(1024*1024))
 	}
 }
