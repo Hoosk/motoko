@@ -864,8 +864,10 @@ func (d *Dispatcher) handleMCPCommand(args []string) types.Response {
 	switch sub {
 	case "add":
 		if len(args) < 3 {
-			usage := "Usage:\n  /mcp add <name> <command> [args...]\n  /mcp add <name> http <url>\nExamples:\n  /mcp add git npx -y @modelcontextprotocol/server-git .\n  /mcp add remote http https://mcp.example.com/sse"
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: usage}}}
+			return types.Response{
+				Signal:  "open-mcp-popup",
+				Entries: []types.Entry{{Kind: types.EntrySystem, Text: "Opening MCP server configuration form..."}},
+			}
 		}
 		name := args[1]
 		var srv config.MCPServerConfig

@@ -66,6 +66,7 @@ type Model struct {
 	promptQueue            []string
 	questionPopup          questionPopupState
 	providerForm           providerForm
+	mcpForm                mcpForm
 	modePopup              modePopupState
 	settingsPopup          settingsPopupState
 	sidebar                SidebarModel
@@ -158,6 +159,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// 2. Delegate to Active Popups (Modal state)
 	if m.providerForm.active {
 		cmds = append(cmds, m.providerForm.Update(msg, m.runtime))
+		return m, tea.Batch(cmds...)
+	}
+	if m.mcpForm.active {
+		cmds = append(cmds, m.mcpForm.Update(msg, m.runtime))
 		return m, tea.Batch(cmds...)
 	}
 	if m.modelPicker.active {
@@ -294,6 +299,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, tea.Quit)
 			case "open-provider-popup":
 				m.providerForm.Open(m.runtime)
+			case "open-mcp-popup":
+				m.mcpForm.Open()
 			case "open-models-popup":
 				cmds = append(cmds, m.listModels())
 			case "open-sessions-popup":
@@ -741,6 +748,9 @@ func (m Model) View() string {
 
 	if m.providerForm.active {
 		popup := popupStyle.Render(m.providerForm.View(m.runtime))
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.mcpForm.active {
+		popup := popupStyle.Render(m.mcpForm.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.modelPicker.active {
 		popup := popupStyle.Render(m.modelPicker.View())

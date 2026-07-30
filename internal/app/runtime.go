@@ -665,6 +665,24 @@ func (r *Runtime) BackgroundContext() context.Context {
 	return context.Background()
 }
 
+func (r *Runtime) AddMCPServer(srv config.MCPServerConfig) error {
+	if r.config == nil {
+		return fmt.Errorf("no config loaded")
+	}
+	r.config.UpsertMCPServer(srv)
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	if r.mcpMgr != nil {
+		bgCtx := r.backgroundCtx
+		if bgCtx == nil {
+			bgCtx = context.Background()
+		}
+		r.mcpMgr.Start(bgCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
+	}
+	return nil
+}
+
 func (r *Runtime) Stop() {
 	if r.backgroundCancel != nil {
 		r.backgroundCancel()
