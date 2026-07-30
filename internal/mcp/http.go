@@ -18,15 +18,20 @@ import (
 type HTTPTransport struct {
 	endpointCtx    context.Context
 	endpointCancel context.CancelFunc
-	client         *http.Client
-	headers        map[string]string
-	recvCh         chan []byte
-	errCh          chan error
-	readyCh        chan struct{}
-	sseURL         string
-	msgURL         string
-	mu             sync.Mutex
-	closed         bool
+	// postClient has a per-request timeout; it is used for Send only.
+	postClient *http.Client
+	// streamClient has no per-request timeout; the long-lived SSE GET
+	// is cancelled via the request context instead so the stream can
+	// stay open across multiple messages.
+	streamClient *http.Client
+	headers      map[string]string
+	recvCh       chan []byte
+	errCh        chan error
+	readyCh      chan struct{}
+	sseURL       string
+	msgURL       string
+	mu           sync.Mutex
+	closed       bool
 }
 
 // NewHTTPTransport creates a new HTTPTransport pointing to the given sseURL.
@@ -39,7 +44,8 @@ func NewHTTPTransport(sseURL string, headers map[string]string, timeout time.Dur
 		endpointCtx:    ctx,
 		endpointCancel: cancel,
 		sseURL:         sseURL,
-		client:         &http.Client{Timeout: timeout},
+		postClient:     &http.Client{Timeout: timeout},
+		streamClient:   &http.Client{},
 		headers:        headers,
 		recvCh:         make(chan []byte, 100),
 		errCh:          make(chan error, 1),
@@ -84,7 +90,7 @@ func (t *HTTPTransport) Send(ctx context.Context, payload []byte) error {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := t.client.Do(req)
+	resp, err := t.postClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -123,7 +129,8 @@ func (t *HTTPTransport) Close() error {
 	t.mu.Unlock()
 
 	t.endpointCancel()
-	t.client.CloseIdleConnections()
+	t.postClient.CloseIdleConnections()
+	t.streamClient.CloseIdleConnections()
 	return nil
 }
 
@@ -175,7 +182,7 @@ func (t *HTTPTransport) readSSEStream(ctx context.Context) error {
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Connection", "keep-alive")
 
-	resp, err := t.client.Do(req)
+	resp, err := t.streamClient.Do(req)
 	if err != nil {
 		return err
 	}
