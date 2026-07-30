@@ -274,7 +274,7 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		default:
 		}
 
-		transport, err := buildTransport(s.cfg)
+		transport, cleanup, err := buildTransport(s.cfg)
 		if err != nil {
 			m.markErr(s, fmt.Errorf("transport: %w", err))
 			select {
@@ -303,6 +303,10 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		if _, err := client.Initialize(ctx); err != nil {
 			m.markErr(s, fmt.Errorf("initialize: %w", err))
 			_ = client.Close()
+			if cleanup != nil {
+				cleanup()
+				cleanup = nil
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -339,8 +343,15 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		// Block until context is cancelled or client exits
 		select {
 		case <-ctx.Done():
+			if cleanup != nil {
+				cleanup()
+			}
 			return
 		case <-client.doneCh:
+			if cleanup != nil {
+				cleanup()
+				cleanup = nil
+			}
 			m.mu.Lock()
 			s.client = nil
 			m.unregisterServerTools(s)
@@ -646,18 +657,28 @@ func deriveName(cfg ServerConfig) string {
 	return "mcp-server"
 }
 
-func buildTransport(cfg ServerConfig) (Transport, error) {
+// buildTransport creates a Transport for the given server config. The returned
+// cleanup, when non-nil, must be called once the transport is no longer
+// needed; it flushes and closes per-transport resources (notably the stderr
+// writer for stdio servers).
+func buildTransport(cfg ServerConfig) (Transport, func(), error) {
 	switch strings.ToLower(cfg.Transport) {
 	case "stdio", "":
-		return NewStdioTransport(StdioConfig{
+		stderr := newStderrWriter(cfg.Name)
+		t, err := NewStdioTransport(StdioConfig{
 			Command: cfg.Command,
 			Args:    cfg.Args,
 			Env:     cfg.Env,
+			Stderr:  stderr,
 		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return t, func() { _ = stderr.Close() }, nil
 	case "http", "https", "sse":
-		return NewHTTPTransport(cfg.URL, cfg.Headers, 0), nil
+		return NewHTTPTransport(cfg.URL, cfg.Headers, 0), nil, nil
 	default:
-		return nil, fmt.Errorf("mcp: transport %q not supported", cfg.Transport)
+		return nil, nil, fmt.Errorf("mcp: transport %q not supported", cfg.Transport)
 	}
 }
 

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
 // StdioConfig holds the configuration required to spawn a stdio MCP server.
@@ -176,4 +179,51 @@ func trimNewline(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// stderrWriter funnels child-process stderr into the trace log, prefixing
+// each line with the server name. The writer buffers partial lines because
+// the child may write in chunks that don't end on a newline boundary; the
+// Close method flushes any trailing partial line.
+type stderrWriter struct {
+	serverName string
+	mu         sync.Mutex
+	buf        []byte
+}
+
+func newStderrWriter(serverName string) *stderrWriter {
+	return &stderrWriter{serverName: serverName}
+}
+
+func (w *stderrWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	for {
+		idx := bytes.IndexByte(w.buf, '\n')
+		if idx < 0 {
+			break
+		}
+		line := w.buf[:idx]
+		w.buf = w.buf[idx+1:]
+		w.emit(line)
+	}
+	return len(p), nil
+}
+
+func (w *stderrWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) > 0 {
+		w.emit(w.buf)
+		w.buf = nil
+	}
+	return nil
+}
+
+func (w *stderrWriter) emit(line []byte) {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return
+	}
+	tracelog.Logf("MCP[%s] stderr: %s", w.serverName, string(bytes.TrimRight(line, "\r")))
 }
