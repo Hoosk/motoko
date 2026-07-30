@@ -580,6 +580,14 @@ func (m *Manager) UnsubscribeResource(ctx context.Context, serverName string, ur
 	return s.client.Unsubscribe(ctx, uri)
 }
 
+// PromptHost identifies a prompt by its owning server so callers can route
+// `prompts/get` correctly when a prompt name is hosted by more than one
+// connected server.
+type PromptHost struct {
+	Server string
+	Prompt
+}
+
 // ListPrompts returns all cached prompts across all connected servers.
 func (m *Manager) ListPrompts(ctx context.Context) []Prompt {
 	m.mu.Lock()
@@ -589,6 +597,21 @@ func (m *Manager) ListPrompts(ctx context.Context) []Prompt {
 		all = append(all, s.prompts...)
 	}
 	return all
+}
+
+// ListPromptHosts returns every (server, prompt) pair the manager has cached.
+// Callers use it to build dynamic command surfaces (e.g. /<prompt-name>) that
+// resolve to the right server at invocation time.
+func (m *Manager) ListPromptHosts() []PromptHost {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []PromptHost
+	for _, s := range m.servers {
+		for _, p := range s.prompts {
+			out = append(out, PromptHost{Server: s.cfg.Name, Prompt: p})
+		}
+	}
+	return out
 }
 
 // GetPrompt retrieves a prompt from the specified server.

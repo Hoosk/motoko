@@ -239,10 +239,40 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 			}
 		},
 		RemoveMCPServerFn: func(name string) bool {
-			if r.mcpMgr != nil {
-				return r.mcpMgr.StopServer(name)
+			if r.mcpMgr == nil {
+				return false
 			}
-			return false
+			return r.mcpMgr.StopServer(name)
+		},
+		MCPResourcesFn: func(ctx context.Context) []mcp.Resource {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListResources(ctx)
+		},
+		MCPResourceReadFn: func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error) {
+			if r.mcpMgr == nil {
+				return nil, fmt.Errorf("no MCP manager available")
+			}
+			return r.mcpMgr.ReadResource(ctx, serverName, uri)
+		},
+		MCPPromptsFn: func(ctx context.Context) []mcp.Prompt {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListPrompts(ctx)
+		},
+		MCPPromptHostsFn: func(_ context.Context) []mcp.PromptHost {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListPromptHosts()
+		},
+		MCPGetPromptFn: func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+			if r.mcpMgr == nil {
+				return nil, fmt.Errorf("no MCP manager available")
+			}
+			return r.mcpMgr.GetPrompt(ctx, serverName, name, args)
 		},
 
 		ProvMgr: r.provMgr,

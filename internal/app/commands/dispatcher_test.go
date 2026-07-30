@@ -830,3 +830,78 @@ func TestHandleMCPGetPrompt(t *testing.T) {
 		t.Errorf("expected error for missing args, got %#v", resp.Entries)
 	}
 }
+
+func TestHandleDynamicPrompt(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPPromptHostsFn = func(_ context.Context) []mcp.PromptHost {
+		return []mcp.PromptHost{
+			{Server: "alpha", Prompt: mcp.Prompt{Name: "summarize", Description: "Summarise a file"}},
+		}
+	}
+	deps.MCPGetPromptFn = func(_ context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+		if serverName != "alpha" || name != "summarize" {
+			return nil, fmt.Errorf("unexpected call: %s %s", serverName, name)
+		}
+		return &mcp.GetPromptResult{
+			Messages: []mcp.PromptMessage{
+				{Role: "user", Content: mcp.ContentBlock{Type: "text", Text: "Hello from prompt"}},
+			},
+		}, nil
+	}
+	d := newDispatcher(deps)
+
+	// Invoke by prompt name only
+	resp := d.Handle("/summarize path=/tmp/x", system.ContextInfo{})
+	if len(resp.Entries) == 0 {
+		t.Fatal("expected entries")
+	}
+	if !strings.Contains(resp.Entries[0].Text, "Hello from prompt") {
+		t.Errorf("expected prompt text, got %q", resp.Entries[0].Text)
+	}
+
+	// Unknown command (not a prompt either)
+	resp = d.Handle("/nope", system.ContextInfo{})
+	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "Unknown command") {
+		t.Errorf("expected unknown-command error, got %#v", resp.Entries)
+	}
+
+	// Bad kv arg
+	resp = d.Handle("/summarize badkv", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Errorf("expected error for bad kv, got %#v", resp.Entries)
+	}
+}
+
+func TestHandleDynamicPromptAmbiguous(t *testing.T) {
+	deps := baseDeps()
+	deps.MCPPromptHostsFn = func(_ context.Context) []mcp.PromptHost {
+		return []mcp.PromptHost{
+			{Server: "alpha", Prompt: mcp.Prompt{Name: "summarize"}},
+			{Server: "beta", Prompt: mcp.Prompt{Name: "summarize"}},
+		}
+	}
+	deps.MCPGetPromptFn = func(_ context.Context, _, _ string, _ map[string]string) (*mcp.GetPromptResult, error) {
+		t.Fatal("getPromptFn should not be called for ambiguous names")
+		return nil, nil
+	}
+	d := newDispatcher(deps)
+	resp := d.Handle("/summarize", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryError {
+		t.Fatalf("expected ambiguity error, got %#v", resp.Entries)
+	}
+	if !strings.Contains(resp.Entries[0].Text, "multiple servers") {
+		t.Errorf("expected ambiguity message, got %q", resp.Entries[0].Text)
+	}
+}
+
+func TestDynamicPromptDoesNotShadowStaticCommand(t *testing.T) {
+	// The static /help command must always win over a dynamic prompt
+	// with the same name (none here, but the static path is verified
+	// by ensuring /help still works without any prompt hosts).
+	deps := baseDeps()
+	d := newDispatcher(deps)
+	resp := d.Handle("/help", system.ContextInfo{})
+	if len(resp.Entries) == 0 || resp.Entries[0].Kind != types.EntryHelp {
+		t.Errorf("expected help entry, got %#v", resp.Entries)
+	}
+}

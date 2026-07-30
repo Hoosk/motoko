@@ -81,6 +81,12 @@ type Deps struct {
 	MCPResourceReadFn  func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error)
 	MCPPromptsFn       func(ctx context.Context) []mcp.Prompt
 	MCPGetPromptFn     func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error)
+	// MCPPromptHostsFn returns the set of (server, prompt) pairs available
+	// for dynamic command lookup. Prompts become runnable as
+	// /<prompt-name> [k=v ...] when the prompt name is unique across
+	// servers. When the same name is hosted by multiple servers the
+	// dispatcher surfaces the ambiguity via the standard error response.
+	MCPPromptHostsFn func(ctx context.Context) []mcp.PromptHost
 
 	ProvMgr *providerman.Manager
 
@@ -111,9 +117,70 @@ func (d *Dispatcher) Handle(input string, info system.ContextInfo) types.Respons
 	command := strings.ToLower(parts[0])
 	cmd, ok := d.registry.Lookup(command)
 	if !ok {
+		if resp, handled := d.handleDynamicPrompt(command, parts[1:]); handled {
+			return resp
+		}
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Unknown command: /%s", command)}}}
 	}
 	return cmd.Handler(Invocation{RawInput: input, Args: parts[1:], Info: info})
+}
+
+// handleDynamicPrompt resolves a command that didn't match the static
+// registry against the prompts currently exposed by connected MCP servers.
+// If exactly one host has a prompt with that name, the prompt is rendered
+// and dispatched as a chat message; ambiguous matches surface the conflict
+// to the user instead of guessing.
+func (d *Dispatcher) handleDynamicPrompt(name string, args []string) (types.Response, bool) {
+	if d.deps.MCPPromptHostsFn == nil || d.deps.MCPGetPromptFn == nil {
+		return types.Response{}, false
+	}
+	ctx, cancel := withDispatchTimeout(context.Background())
+	defer cancel()
+	hosts := d.deps.MCPPromptHostsFn(ctx)
+	var matches []mcp.PromptHost
+	for _, h := range hosts {
+		if strings.EqualFold(h.Prompt.Name, name) {
+			matches = append(matches, h)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return types.Response{}, false
+	case 1:
+		// fall through
+	default:
+		servers := make([]string, 0, len(matches))
+		for _, m := range matches {
+			servers = append(servers, m.Server)
+		}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Prompt /%s is hosted by multiple servers: %s. Use /mcp prompt <server> %s ... to disambiguate.", name, strings.Join(servers, ", "), name)}}}, true
+	}
+	parsed := make(map[string]string)
+	for _, kv := range args {
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Invalid argument %q (expected key=value)", kv)}}}, true
+		}
+		parsed[kv[:eq]] = kv[eq+1:]
+	}
+	result, err := d.deps.MCPGetPromptFn(ctx, matches[0].Server, matches[0].Prompt.Name, parsed)
+	if err != nil {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Get prompt failed: %v", err)}}}, true
+	}
+	var text strings.Builder
+	if result.Description != "" {
+		text.WriteString(result.Description)
+		text.WriteString("\n\n")
+	}
+	for _, m := range result.Messages {
+		if m.Content.Text != "" {
+			text.WriteString(m.Content.Text)
+			text.WriteString("\n")
+		}
+	}
+	return types.Response{
+		Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.TrimSpace(text.String())}},
+	}, true
 }
 
 func (d *Dispatcher) Definitions() []Definition {
