@@ -112,11 +112,23 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	c.initialized = true
 	c.mu.Unlock()
 
+	// Notify the transport of the negotiated protocol so it can include
+	// the MCP-Protocol-Version header on subsequent requests.
+	if setter, ok := c.transport.(ProtocolSetter); ok {
+		setter.SetProtocol(result.ProtocolVersion)
+	}
+
 	// notifications/initialized
 	if err := c.Send(ctx, "notifications/initialized", nil); err != nil {
 		return nil, fmt.Errorf("mcp: send initialized: %w", err)
 	}
 	return &result, nil
+}
+
+// ProtocolSetter is implemented by transports that need to know the
+// negotiated protocol version so they can attach it as an HTTP header.
+type ProtocolSetter interface {
+	SetProtocol(version string)
 }
 
 // Ping issues a `ping` request to verify the session is alive.

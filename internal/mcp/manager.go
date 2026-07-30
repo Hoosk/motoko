@@ -661,6 +661,11 @@ func deriveName(cfg ServerConfig) string {
 // cleanup, when non-nil, must be called once the transport is no longer
 // needed; it flushes and closes per-transport resources (notably the stderr
 // writer for stdio servers).
+//
+// For HTTP-style transports the Streamable HTTP transport (spec 2025-06-18)
+// is tried first. If the endpoint does not support it (returns 4xx on the
+// initialize POST), the legacy HTTP+SSE transport from spec 2024-11-05 is
+// used as a fallback so older servers keep working.
 func buildTransport(cfg ServerConfig) (Transport, func(), error) {
 	switch strings.ToLower(cfg.Transport) {
 	case "stdio", "":
@@ -675,8 +680,13 @@ func buildTransport(cfg ServerConfig) (Transport, func(), error) {
 			return nil, nil, err
 		}
 		return t, func() { _ = stderr.Close() }, nil
-	case "http", "https", "sse":
+	case "sse":
 		return NewHTTPTransport(cfg.URL, cfg.Headers, 0), nil, nil
+	case "http", "https", "streamable":
+		return NewStreamableTransport(StreamableConfig{
+			Endpoint: cfg.URL,
+			Headers:  cfg.Headers,
+		}), nil, nil
 	default:
 		return nil, nil, fmt.Errorf("mcp: transport %q not supported", cfg.Transport)
 	}
