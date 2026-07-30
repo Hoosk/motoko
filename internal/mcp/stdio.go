@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -42,7 +43,9 @@ func NewStdioTransport(cfg StdioConfig) (*StdioTransport, error) {
 		return nil, fmt.Errorf("mcp: stdio transport requires Command")
 	}
 	cmd := exec.Command(cfg.Command, cfg.Args...)
-	cmd.Env = append([]string{}, cfg.Env...)
+	if len(cfg.Env) > 0 {
+		cmd.Env = append(os.Environ(), cfg.Env...)
+	}
 	if cfg.Stderr != nil {
 		cmd.Stderr = cfg.Stderr
 	}

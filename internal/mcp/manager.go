@@ -321,23 +321,19 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		backoff = 1 * time.Second
 
 		caps := client.ServerCapabilities()
-		if caps.Tools != nil {
-			if err := m.refreshTools(ctx, s); err != nil {
-				m.markErr(s, err)
-			}
+		if err := m.refreshTools(ctx, s); err != nil && caps.Tools != nil {
+			m.markErr(s, err)
+		}
+		if err := m.refreshResources(ctx, s); err != nil && caps.Resources != nil {
+			m.markErr(s, err)
 		}
 		if caps.Resources != nil {
-			if err := m.refreshResources(ctx, s); err != nil {
-				m.markErr(s, err)
-			}
 			if err := m.refreshTemplates(ctx, s); err != nil {
 				m.markErr(s, err)
 			}
 		}
-		if caps.Prompts != nil {
-			if err := m.refreshPrompts(ctx, s); err != nil {
-				m.markErr(s, err)
-			}
+		if err := m.refreshPrompts(ctx, s); err != nil && caps.Prompts != nil {
+			m.markErr(s, err)
 		}
 
 		// Block until context is cancelled or client exits
