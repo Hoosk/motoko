@@ -75,16 +75,16 @@ type AppConfig struct {
 	MaxIterations     int                      `json:"max_iterations,omitempty"`
 }
 
-// MCPServerConfig describes a single MCP server. Both stdio and HTTP/Streamable
-// transports are accepted; only stdio is implemented in phase 1.
+// MCPServerConfig describes a single MCP server. Both stdio and HTTP
+// transports are accepted.
 type MCPServerConfig struct {
-	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Headers   map[string]string `json:"headers,omitempty"`
 	Name      string            `json:"name"`
-	Transport string            `json:"transport,omitempty"` // "stdio" | "http" (empty defaults to stdio)
+	Transport string            `json:"transport,omitempty"`
 	Command   string            `json:"command,omitempty"`
 	URL       string            `json:"url,omitempty"`
+	Args      []string          `json:"args,omitempty"`
 	Disabled  bool              `json:"disabled,omitempty"`
 }
 
@@ -594,9 +594,8 @@ func mcpServerKey(srv MCPServerConfig) string {
 }
 
 // LoadMCPFile reads an additional MCP configuration file (typically
-// .agents/mcp.json inside the workspace). It returns an empty list when the
-// file does not exist; an error is returned only for parse failures or
-// unreadable files.
+// .agents/mcp.json inside the workspace). It accepts both array format
+// (`"mcp_servers": [...]`) and Claude Desktop map format (`"mcpServers": { "name": {...} }`).
 func LoadMCPFile(path string) ([]MCPServerConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -605,11 +604,43 @@ func LoadMCPFile(path string) ([]MCPServerConfig, error) {
 		}
 		return nil, err
 	}
-	var wrapper struct {
-		MCPServers []MCPServerConfig `json:"mcp_servers"`
+	return parseMCPConfigData(data, path)
+}
+
+func parseMCPConfigData(data []byte, path string) ([]MCPServerConfig, error) {
+	var arrayWrapper struct {
+		MCPServersSnake []MCPServerConfig `json:"mcp_servers"`
+		MCPServersCamel []MCPServerConfig `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return nil, fmt.Errorf("failed to decode %s: %w", path, err)
+	if err := json.Unmarshal(data, &arrayWrapper); err == nil {
+		if len(arrayWrapper.MCPServersSnake) > 0 {
+			return arrayWrapper.MCPServersSnake, nil
+		}
+		if len(arrayWrapper.MCPServersCamel) > 0 {
+			return arrayWrapper.MCPServersCamel, nil
+		}
 	}
-	return wrapper.MCPServers, nil
+
+	var mapWrapper struct {
+		MCPServersSnake map[string]MCPServerConfig `json:"mcp_servers"`
+		MCPServersCamel map[string]MCPServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &mapWrapper); err == nil {
+		m := mapWrapper.MCPServersSnake
+		if len(m) == 0 {
+			m = mapWrapper.MCPServersCamel
+		}
+		if len(m) > 0 {
+			out := make([]MCPServerConfig, 0, len(m))
+			for name, srv := range m {
+				if srv.Name == "" {
+					srv.Name = name
+				}
+				out = append(out, srv)
+			}
+			return out, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to decode %s: invalid MCP config format", path)
 }

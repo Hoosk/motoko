@@ -93,6 +93,30 @@ func TestLoadMCPFileParsesServers(t *testing.T) {
 	}
 }
 
+func TestLoadMCPFileParsesClaudeDesktopFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	payload := `{"mcpServers": {
+		"everything": {
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-everything"]
+		}
+	}}`
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadMCPFile(path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(got))
+	}
+	if got[0].Name != "everything" || got[0].Command != "npx" || len(got[0].Args) != 2 {
+		t.Errorf("everything mismatch: %+v", got[0])
+	}
+}
+
 func TestLoadMCPFileRejectsBadJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mcp.json")
