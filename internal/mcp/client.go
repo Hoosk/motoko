@@ -320,6 +320,15 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 		}
 		payload["params"] = json.RawMessage(raw)
 	}
+	// Stateless mode (2026-07-28) carries protocol version, client identity
+	// and capabilities on every request instead of a handshake.
+	if meta := c.buildMeta(); meta != nil {
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			return nil, fmt.Errorf("mcp: marshal _meta for %s: %w", method, err)
+		}
+		payload[metaField] = json.RawMessage(raw)
+	}
 	return payload, nil
 }
 
@@ -334,6 +343,13 @@ func (c *Client) buildNotification(method string, params any) (map[string]any, e
 			return nil, fmt.Errorf("mcp: marshal params for %s: %w", method, err)
 		}
 		payload["params"] = json.RawMessage(raw)
+	}
+	if meta := c.buildMeta(); meta != nil {
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			return nil, fmt.Errorf("mcp: marshal _meta for %s: %w", method, err)
+		}
+		payload[metaField] = json.RawMessage(raw)
 	}
 	return payload, nil
 }

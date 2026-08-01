@@ -300,8 +300,8 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		})
 		client.Start(ctx)
 
-		if _, err := client.Initialize(ctx); err != nil {
-			m.markErr(s, fmt.Errorf("initialize: %w", err))
+		if err := client.Negotiate(ctx); err != nil {
+			m.markErr(s, fmt.Errorf("negotiate: %w", err))
 			_ = client.Close()
 			if cleanup != nil {
 				cleanup()

@@ -45,6 +45,7 @@ type RPCEnvelope struct {
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
+	Meta    json.RawMessage `json:"_meta,omitempty"`
 }
 
 // IsResponse reports whether the envelope is a non-error response.
