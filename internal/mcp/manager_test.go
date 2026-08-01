@@ -176,9 +176,9 @@ func TestManagerRegistersAndUnregisters(t *testing.T) {
 
 func TestToolPrefixSlugify(t *testing.T) {
 	cases := map[string]string{
-		"my server":      "mcp_my_server_",
-		"My-Server/2":    "mcp_my_server_2_",
-		"Alpha   Beta":   "mcp_alpha_beta_",
+		"my server":    "mcp_my_server_",
+		"My-Server/2":  "mcp_my_server_2_",
+		"Alpha   Beta": "mcp_alpha_beta_",
 	}
 	for in, prefix := range cases {
 		if got := ToolPrefix(in, "x"); got != prefix+"x" {

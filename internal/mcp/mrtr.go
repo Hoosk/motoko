@@ -159,7 +159,7 @@ func (c *Client) buildRequestRaw(method string, paramsJSON json.RawMessage) (map
 	payload := map[string]any{
 		jsonRPCField: jsonRPCVersion,
 		"id":         json.RawMessage(idRaw),
-		methodField: method,
+		methodField:  method,
 	}
 	if len(paramsJSON) > 0 {
 		payload["params"] = paramsJSON

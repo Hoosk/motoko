@@ -16,24 +16,24 @@ import (
 // Request/Send concurrently from multiple goroutines; the inbound reader
 // runs on its own goroutine started by Start.
 type Client struct {
-	serverCaps       ServerCapabilities
-	capabilities     ClientCapabilities
-	transport        Transport
-	stopCh           chan struct{}
-	pending          map[string]chan rpcResult
-	doneCh           chan struct{}
-	onNotification   func(method string, params json.RawMessage)
-	onRequest        func(ctx context.Context, method string, params json.RawMessage) (any, error)
-	onInputRequests  OnInputRequests
-	sema             chan struct{}
-	clientInfo       Implementation
-	serverInfo       Implementation
-	protocol         string
-	nextID           atomic.Int64
-	timeout          time.Duration
-	mu               sync.Mutex
-	initialized      bool
-	closed           bool
+	serverCaps      ServerCapabilities
+	capabilities    ClientCapabilities
+	transport       Transport
+	stopCh          chan struct{}
+	pending         map[string]chan rpcResult
+	doneCh          chan struct{}
+	onNotification  func(method string, params json.RawMessage)
+	onRequest       func(ctx context.Context, method string, params json.RawMessage) (any, error)
+	onInputRequests OnInputRequests
+	sema            chan struct{}
+	clientInfo      Implementation
+	serverInfo      Implementation
+	protocol        string
+	nextID          atomic.Int64
+	timeout         time.Duration
+	mu              sync.Mutex
+	initialized     bool
+	closed          bool
 }
 
 type rpcResult struct {
@@ -43,13 +43,13 @@ type rpcResult struct {
 
 // ClientConfig configures a new Client.
 type ClientConfig struct {
-	Capabilities   ClientCapabilities
-	Transport      Transport
-	OnNotification func(method string, params json.RawMessage)
-	OnRequest      func(ctx context.Context, method string, params json.RawMessage) (any, error)
+	Capabilities    ClientCapabilities
+	Transport       Transport
+	OnNotification  func(method string, params json.RawMessage)
+	OnRequest       func(ctx context.Context, method string, params json.RawMessage) (any, error)
 	OnInputRequests OnInputRequests
-	ClientInfo     Implementation
-	RequestTimeout time.Duration
+	ClientInfo      Implementation
+	RequestTimeout  time.Duration
 }
 
 // NewClient wraps a transport in a Client. Call Start to launch the inbound
@@ -60,17 +60,17 @@ func NewClient(cfg ClientConfig) *Client {
 		cfg.RequestTimeout = 30 * time.Second
 	}
 	return &Client{
-		transport:        cfg.Transport,
-		clientInfo:       cfg.ClientInfo,
-		capabilities:     cfg.Capabilities,
-		timeout:          cfg.RequestTimeout,
-		pending:          make(map[string]chan rpcResult),
-		stopCh:           make(chan struct{}),
-		doneCh:           make(chan struct{}),
-		onNotification:   cfg.OnNotification,
-		onRequest:        cfg.OnRequest,
-		onInputRequests:  cfg.OnInputRequests,
-		sema:             make(chan struct{}, 10),
+		transport:       cfg.Transport,
+		clientInfo:      cfg.ClientInfo,
+		capabilities:    cfg.Capabilities,
+		timeout:         cfg.RequestTimeout,
+		pending:         make(map[string]chan rpcResult),
+		stopCh:          make(chan struct{}),
+		doneCh:          make(chan struct{}),
+		onNotification:  cfg.OnNotification,
+		onRequest:       cfg.OnRequest,
+		onInputRequests: cfg.OnInputRequests,
+		sema:            make(chan struct{}, 10),
 	}
 }
 
@@ -356,7 +356,7 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 	payload := map[string]any{
 		jsonRPCField: jsonRPCVersion,
 		"id":         json.RawMessage(idRaw),
-		methodField: method,
+		methodField:  method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
@@ -380,7 +380,7 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 func (c *Client) buildNotification(method string, params any) (map[string]any, error) {
 	payload := map[string]any{
 		jsonRPCField: jsonRPCVersion,
-		methodField: method,
+		methodField:  method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
@@ -457,7 +457,12 @@ func (c *Client) dispatch(env RPCEnvelope) {
 	}
 	if env.IsNotification() {
 		if c.onNotification != nil {
-			c.onNotification(env.Method, env.Params)
+			// Notifications must not run synchronously inside the read
+			// loop: handlers routinely issue requests back to the server
+			// (e.g. refresh tools/resources on list_changed) and would
+			// deadlock waiting for a response the read loop is blocked
+			// reading.
+			go c.onNotification(env.Method, env.Params)
 		}
 		return
 	}
@@ -607,10 +612,10 @@ func (c *Client) Subscribe(ctx context.Context, uri string) error {
 // SubscriptionFilter selects the notification types a subscriptions/listen
 // stream should deliver (spec 2026-07-28).
 type SubscriptionFilter struct {
-	ToolsListChanged     bool     `json:"toolsListChanged,omitempty"`
-	PromptsListChanged   bool     `json:"promptsListChanged,omitempty"`
-	ResourcesListChanged bool     `json:"resourcesListChanged,omitempty"`
 	ResourceSubscriptions []string `json:"resourceSubscriptions,omitempty"`
+	ToolsListChanged      bool     `json:"toolsListChanged,omitempty"`
+	PromptsListChanged    bool     `json:"promptsListChanged,omitempty"`
+	ResourcesListChanged  bool     `json:"resourcesListChanged,omitempty"`
 }
 
 // OpenSubscriptionStream opens a long-lived notification stream (spec

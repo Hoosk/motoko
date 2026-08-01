@@ -10,8 +10,8 @@ import (
 // InputRequiredResult (spec 2026-07-28) or sent as a server request by
 // legacy servers.
 type ElicitRequest struct {
-	Mode           string          `json:"mode,omitempty"`
-	Message        string          `json:"message"`
+	Mode            string          `json:"mode,omitempty"`
+	Message         string          `json:"message"`
 	RequestedSchema json.RawMessage `json:"requestedSchema,omitempty"`
 	// ContextualInfo is set by legacy servers (2025-11-25 URL mode); it is
 	// passed through to the elicitation callback.

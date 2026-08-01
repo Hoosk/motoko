@@ -541,7 +541,7 @@ func TestStreamableSubscriptionListen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	client := NewClient(ClientConfig{
-		Transport: transport,
+		Transport:  transport,
 		ClientInfo: Implementation{Name: "t"},
 		OnNotification: func(method string, _ json.RawMessage) {
 			select {

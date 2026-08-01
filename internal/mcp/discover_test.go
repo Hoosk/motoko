@@ -346,7 +346,7 @@ func TestMRTRRoundTrip(t *testing.T) {
 								"github_login": map[string]any{
 									"method": "elicitation/create",
 									"params": map[string]any{
-										"message":        "GitHub username?",
+										"message":         "GitHub username?",
 										"requestedSchema": map[string]any{"type": "object"},
 									},
 								},
@@ -463,7 +463,7 @@ func TestMRTRExceedsIterations(t *testing.T) {
 					jsonRPCField: jsonRPCVersion,
 					"id":         env.ID.Raw(),
 					"result": map[string]any{
-						"resultType":  "input_required",
+						"resultType":   "input_required",
 						"requestState": "state-1",
 					},
 				}

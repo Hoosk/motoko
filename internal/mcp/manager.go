@@ -102,13 +102,13 @@ type managedServer struct {
 
 // ManagerConfig configures the manager.
 type ManagerConfig struct {
-	Capabilities ClientCapabilities
-	Registry     ToolRegistrar
-	RootsFn      func(ctx context.Context) ([]Root, error)
-	SamplingFn   func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
+	Capabilities  ClientCapabilities
+	Registry      ToolRegistrar
+	RootsFn       func(ctx context.Context) ([]Root, error)
+	SamplingFn    func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
 	ElicitationFn ElicitationFn
-	ClientInfo   Implementation
-	Timeout      time.Duration
+	ClientInfo    Implementation
+	Timeout       time.Duration
 }
 
 // NewManager creates a manager. The given registry receives the tools
