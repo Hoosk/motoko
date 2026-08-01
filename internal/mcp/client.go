@@ -551,11 +551,32 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*ReadResourceRes
 }
 
 // Subscribe registers interest in a resource to receive notifications/resources/updated.
+// Deprecated in 2026-07-28; legacy servers still use it.
 func (c *Client) Subscribe(ctx context.Context, uri string) error {
 	params := struct {
 		URI string `json:"uri"`
 	}{URI: uri}
 	return c.Request(ctx, "resources/subscribe", params, nil)
+}
+
+// SubscriptionFilter selects the notification types a subscriptions/listen
+// stream should deliver (spec 2026-07-28).
+type SubscriptionFilter struct {
+	ToolsListChanged     bool     `json:"toolsListChanged,omitempty"`
+	PromptsListChanged   bool     `json:"promptsListChanged,omitempty"`
+	ResourcesListChanged bool     `json:"resourcesListChanged,omitempty"`
+	ResourceSubscriptions []string `json:"resourceSubscriptions,omitempty"`
+}
+
+// OpenSubscriptionStream opens a long-lived notification stream (spec
+// 2026-07-28). The POST returns immediately; notifications and the optional
+// graceful-close response arrive on the request's SSE response stream and
+// are routed to the client's OnNotification callback by the read loop.
+func (c *Client) OpenSubscriptionStream(ctx context.Context, filter SubscriptionFilter) error {
+	params := struct {
+		Notifications SubscriptionFilter `json:"notifications"`
+	}{Notifications: filter}
+	return c.Send(ctx, "subscriptions/listen", params)
 }
 
 // Unsubscribe unregisters interest in a resource.

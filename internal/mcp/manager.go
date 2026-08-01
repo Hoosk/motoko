@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
 // ToolRegistrar is the abstraction the manager uses to publish tools into
@@ -340,6 +342,21 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		}
 		if err := m.refreshPrompts(ctx, s); err != nil && caps.Prompts != nil {
 			m.markErr(s, err)
+		}
+
+		// In the stateless protocol, change notifications arrive on a
+		// long-lived subscriptions/listen stream instead of the legacy GET
+		// stream. Open it (fire-and-forget) with the notification types we
+		// know how to react to.
+		if client.NegotiatedProtocol() == ProtocolVersionModern {
+			filter := SubscriptionFilter{
+				ToolsListChanged:     true,
+				PromptsListChanged:   true,
+				ResourcesListChanged: true,
+			}
+			if err := client.OpenSubscriptionStream(ctx, filter); err != nil {
+				tracelog.Logf("MCP: failed to open subscriptions/listen on %q: %v", s.cfg.Name, err)
+			}
 		}
 
 		// Block until context is cancelled or client exits

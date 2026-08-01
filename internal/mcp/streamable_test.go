@@ -492,3 +492,80 @@ func TestEncodeHeaderValue(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamableSubscriptionListen verifies that opening a subscription
+// stream in modern mode delivers change notifications to the client's
+// OnNotification callback.
+func TestStreamableSubscriptionListen(t *testing.T) {
+	notif := make(chan string, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		var env RPCEnvelope
+		if err := json.Unmarshal(body, &env); err != nil {
+			http.Error(w, "bad", http.StatusBadRequest)
+			return
+		}
+		if env.Method == "subscriptions/listen" {
+			// Long-lived SSE stream: acknowledge then emit a list-changed
+			// notification.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			fl := w.(http.Flusher)
+			ack := `data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged","params":{"notifications":{"toolsListChanged":true}}}`
+			_, _ = io.WriteString(w, ack+"\n\n")
+			fl.Flush()
+			chg := `data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`
+			_, _ = io.WriteString(w, chg+"\n\n")
+			fl.Flush()
+			// Keep the stream open until the client goes away.
+			<-r.Context().Done()
+			return
+		}
+		resp := map[string]any{
+			jsonRPCField: jsonRPCVersion,
+			"id":         env.ID.Raw(),
+			"result":     map[string]any{},
+		}
+		data, _ := json.Marshal(resp)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	transport := NewStreamableTransport(StreamableConfig{Endpoint: srv.URL})
+	defer transport.Close()
+	transport.SetProtocol(ProtocolVersionModern)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := NewClient(ClientConfig{
+		Transport: transport,
+		ClientInfo: Implementation{Name: "t"},
+		OnNotification: func(method string, _ json.RawMessage) {
+			select {
+			case notif <- method:
+			default:
+			}
+		},
+	})
+	client.Start(ctx)
+
+	if err := client.OpenSubscriptionStream(ctx, SubscriptionFilter{ToolsListChanged: true}); err != nil {
+		t.Fatalf("open subscription: %v", err)
+	}
+
+	// Collect notifications until the list_changed one arrives (the ack
+	// usually comes first).
+	for deadline := time.After(2 * time.Second); ; {
+		select {
+		case method := <-notif:
+			if method == "notifications/tools/list_changed" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("list_changed notification did not arrive on the subscription stream")
+		}
+	}
+}

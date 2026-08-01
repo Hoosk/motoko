@@ -86,21 +86,23 @@ func (t *StreamableTransport) Send(ctx context.Context, payload []byte) error {
 	if err != nil {
 		return fmt.Errorf("mcp: streamable POST: %w", err)
 	}
-	defer resp.Body.Close()
 
 	switch {
 	case resp.StatusCode == http.StatusAccepted:
+		_ = resp.Body.Close()
 		return nil
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return t.consumePostResponse(ctx, resp)
 	case resp.StatusCode == http.StatusNotFound && t.hasSession():
 		// Session expired (legacy servers only); clear it so the next
 		// attempt re-initialises.
+		_ = resp.Body.Close()
 		tracelog.Logf("MCP[streamable] session expired (404), clearing")
 		t.clearSession()
 		return fmt.Errorf("mcp: session expired (404)")
 	default:
 		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		return fmt.Errorf("mcp: streamable POST error %d: %s", resp.StatusCode, string(body))
 	}
 }
@@ -135,6 +137,7 @@ func (t *StreamableTransport) consumePostResponse(ctx context.Context, resp *htt
 	}
 	contentType := resp.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/json") {
+		defer resp.Body.Close()
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("mcp: read JSON response: %w", err)
@@ -152,8 +155,19 @@ func (t *StreamableTransport) consumePostResponse(ctx context.Context, resp *htt
 		return nil
 	}
 	if strings.HasPrefix(contentType, "text/event-stream") {
-		return t.consumePostSSE(ctx, resp.Body)
+		// The SSE stream may be short (a normal response, terminated by the
+		// final result) or long-lived (subscriptions/listen). Either way the
+		// events are routed to recvCh; consume the body in a background
+		// goroutine so Send never blocks on a stream that stays open. The
+		// goroutine owns the body and closes it.
+		body := resp.Body
+		go func() {
+			defer body.Close()
+			_ = t.consumePostSSE(ctx, body)
+		}()
+		return nil
 	}
+	_ = resp.Body.Close()
 	return fmt.Errorf("mcp: streamable POST returned unexpected content-type %q", contentType)
 }
 
