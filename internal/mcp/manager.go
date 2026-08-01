@@ -37,6 +37,9 @@ type ToolSpec struct {
 	Description string
 	Usage       string
 	ReadOnly    bool
+	// InputSchema is the raw inputSchema advertised by the server, used by
+	// the host to describe the tool natively to the LLM.
+	InputSchema json.RawMessage
 }
 
 // ToolResult is the result of a tool invocation.

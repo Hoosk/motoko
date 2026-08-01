@@ -64,6 +64,32 @@ func TestMCPRemoteToolRunError(t *testing.T) {
 	}
 }
 
+func TestMCPRemoteToolPropagatesInputSchema(t *testing.T) {
+	schema := []byte(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)
+	adapter := &stubAdapter{
+		spec: mcp.ToolSpec{
+			Name:        "mcp_stub_read",
+			Summary:     "read",
+			InputSchema: schema,
+		},
+	}
+	tool := NewMCPRemoteTool(adapter)
+	got := tool.Spec()
+	if string(got.InputSchema) != string(schema) {
+		t.Errorf("expected inputSchema to propagate, got %s", string(got.InputSchema))
+	}
+}
+
+func TestMCPRemoteToolEmptySchemaStaysEmpty(t *testing.T) {
+	adapter := &stubAdapter{
+		spec: mcp.ToolSpec{Name: "mcp_stub_x", Summary: "x"},
+	}
+	tool := NewMCPRemoteTool(adapter)
+	if len(tool.Spec().InputSchema) != 0 {
+		t.Errorf("expected empty inputSchema, got %s", string(tool.Spec().InputSchema))
+	}
+}
+
 func TestRegistryUnregisterRemovesTool(t *testing.T) {
 	r := &Registry{tools: map[string]Tool{}, order: []string{}}
 	r.Register(fakeTool{name: "alpha"})

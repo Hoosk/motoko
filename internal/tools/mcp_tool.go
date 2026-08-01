@@ -26,9 +26,10 @@ func NewMCPRemoteTool(adapter mcp.ToolAdapter) *MCPRemoteTool {
 func (t *MCPRemoteTool) Spec() Spec {
 	s := t.adapter.Spec()
 	return Spec{
-		Name:    s.Name,
-		Summary: firstNonEmpty(s.Summary, s.Description, "MCP tool"),
-		Usage:   s.Usage,
+		Name:        s.Name,
+		Summary:     firstNonEmpty(s.Summary, s.Description, "MCP tool"),
+		Usage:       s.Usage,
+		InputSchema: s.InputSchema,
 	}
 }
 

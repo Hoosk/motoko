@@ -57,6 +57,7 @@ func (r *RemoteTool) Spec() ToolSpec {
 		Description: r.tool.Description,
 		Usage:       usage,
 		ReadOnly:    isReadOnly(r.tool.Annotations),
+		InputSchema: r.tool.InputSchema,
 	}
 }
 
