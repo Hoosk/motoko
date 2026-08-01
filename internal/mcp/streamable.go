@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,13 +23,10 @@ type StreamableConfig struct {
 	RequestTimeout time.Duration
 }
 
-// StreamableTransport implements Transport using the Streamable HTTP transport
-// (spec 2025-06-18). It sends messages via POST to a single MCP endpoint and
-// optionally opens a GET stream for unsolicited server-to-client messages.
-//
-// The transport auto-discovers the session ID returned during initialize and
-// attaches Mcp-Session-Id plus MCP-Protocol-Version to every subsequent
-// request, per spec.
+// StreamableTransport implements Transport using the Streamable HTTP transport.
+// It sends messages via POST to a single MCP endpoint. On modern connections
+// (2026-07-28) it is fully stateless; on legacy connections it captures the
+// session id returned during initialize and sends it back on every request.
 type StreamableTransport struct {
 	endpointCtx    context.Context
 	errCh          chan error
@@ -40,6 +39,7 @@ type StreamableTransport struct {
 	protocol       string
 	endpoint       string
 	sessionID      string
+	lastPayload    []byte
 	streamWg       sync.WaitGroup
 	mu             sync.Mutex
 	closed         bool
@@ -70,6 +70,10 @@ func NewStreamableTransport(cfg StreamableConfig) *StreamableTransport {
 // the response (JSON or SSE) is consumed and a single payload is delivered to
 // the caller via Recv.
 func (t *StreamableTransport) Send(ctx context.Context, payload []byte) error {
+	t.mu.Lock()
+	t.lastPayload = append(t.lastPayload[:0], payload...)
+	t.mu.Unlock()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -90,7 +94,8 @@ func (t *StreamableTransport) Send(ctx context.Context, payload []byte) error {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return t.consumePostResponse(ctx, resp)
 	case resp.StatusCode == http.StatusNotFound && t.hasSession():
-		// Session expired; clear it so the next attempt re-initialises.
+		// Session expired (legacy servers only); clear it so the next
+		// attempt re-initialises.
 		tracelog.Logf("MCP[streamable] session expired (404), clearing")
 		t.clearSession()
 		return fmt.Errorf("mcp: session expired (404)")
@@ -98,6 +103,16 @@ func (t *StreamableTransport) Send(ctx context.Context, payload []byte) error {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("mcp: streamable POST error %d: %s", resp.StatusCode, string(body))
 	}
+}
+
+// requestMeta is the small subset of a JSON-RPC request body the transport
+// needs to mirror into HTTP headers (Mcp-Method / Mcp-Name).
+type requestMeta struct {
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+		URI  string `json:"uri"`
+	} `json:"params"`
 }
 
 // consumePostResponse handles a 2xx response to a POST. The response body is
@@ -179,11 +194,14 @@ func (t *StreamableTransport) consumePostSSE(ctx context.Context, body io.Reader
 	}
 }
 
-// Recv returns the next inbound message. It lazily opens the GET stream the
-// first time it's called.
+// Recv returns the next inbound message. On legacy connections it lazily
+// opens the GET stream the first time it's called; modern (stateless)
+// connections have no GET stream — change notifications arrive on the
+// subscriptions/listen stream instead (not yet wired).
 func (t *StreamableTransport) Recv(ctx context.Context) ([]byte, error) {
 	t.mu.Lock()
-	if t.streamClosedCh == nil {
+	modern := t.protocol == ProtocolVersionModern
+	if t.streamClosedCh == nil && !modern {
 		t.openGetStream()
 	}
 	t.mu.Unlock()
@@ -321,15 +339,59 @@ func (t *StreamableTransport) attachHeaders(req *http.Request) {
 	sessionID := t.sessionID
 	protocol := t.protocol
 	t.mu.Unlock()
-	if sessionID != "" {
+
+	// In the stateless protocol the session id is gone; only legacy
+	// connections (2025-11-25 and earlier) carry it.
+	if sessionID != "" && protocol != ProtocolVersionModern {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
 	if protocol != "" {
 		req.Header.Set("MCP-Protocol-Version", protocol)
 	}
+
+	// Mirror the JSON-RPC method and object name into headers so
+	// intermediaries can route without parsing the body (spec 2026-07-28).
+	var meta requestMeta
+	_ = json.Unmarshal(t.lastPayload, &meta)
+	if meta.Method != "" {
+		req.Header.Set("Mcp-Method", meta.Method)
+	}
+	switch meta.Method {
+	case "tools/call", "resources/read", "prompts/get":
+		name := meta.Params.Name
+		if name == "" {
+			name = meta.Params.URI
+		}
+		if name != "" {
+			req.Header.Set("Mcp-Name", encodeHeaderValue(name))
+		}
+	}
+
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
+}
+
+// encodeHeaderValue renders a value for use as an HTTP header. Values that
+// are plain visible ASCII pass through; values with non-ASCII characters,
+// control characters, or leading/trailing whitespace are wrapped in the
+// base64 sentinel format required by the spec.
+func encodeHeaderValue(v string) string {
+	trimmed := strings.TrimLeft(v, " \t")
+	if trimmed != v || trimmed != strings.TrimRight(v, " \t") {
+		return "=?base64?" + base64.StdEncoding.EncodeToString([]byte(v)) + "?="
+	}
+	safe := true
+	for _, r := range v {
+		if r < 0x21 || r > 0x7E {
+			safe = false
+			break
+		}
+	}
+	if safe && !strings.HasPrefix(v, "=?base64?") {
+		return v
+	}
+	return "=?base64?" + base64.StdEncoding.EncodeToString([]byte(v)) + "?="
 }
 
 // SetSession stores the session id returned by the server.

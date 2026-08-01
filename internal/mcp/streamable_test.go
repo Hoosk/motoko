@@ -349,3 +349,146 @@ func TestStreamableCloseUnblocksRecv(t *testing.T) {
 		t.Fatal("expected error after close")
 	}
 }
+
+// TestStreamableModernModeHeaders verifies that on a modern (stateless)
+// connection the transport sends Mcp-Method / Mcp-Name headers and no
+// Mcp-Session-Id, per spec 2026-07-28.
+func TestStreamableModernModeHeaders(t *testing.T) {
+	var mu sync.Mutex
+	var gotMethod, gotName, gotSession, gotVersion string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotMethod = r.Header.Get("Mcp-Method")
+		gotName = r.Header.Get("Mcp-Name")
+		gotSession = r.Header.Get("Mcp-Session-Id")
+		gotVersion = r.Header.Get("MCP-Protocol-Version")
+		mu.Unlock()
+
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		env, err := DecodeMessage(body)
+		if err != nil {
+			http.Error(w, "bad", http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch env.Method {
+		case "tools/call":
+			result = CallToolResult{Content: []ContentBlock{{Type: "text", Text: "ok"}}}
+		default:
+			http.Error(w, "no", http.StatusNotFound)
+			return
+		}
+		resp := map[string]any{
+			jsonRPCField: jsonRPCVersion,
+			"id":         env.ID.Raw(),
+			"result":     result,
+		}
+		data, _ := json.Marshal(resp)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	transport := NewStreamableTransport(StreamableConfig{Endpoint: srv.URL})
+	defer transport.Close()
+
+	// Simulate a modern negotiated connection.
+	transport.SetProtocol(ProtocolVersionModern)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := NewClient(ClientConfig{
+		Transport:      transport,
+		ClientInfo:     Implementation{Name: "t"},
+		RequestTimeout: 5 * time.Second,
+	})
+	client.Start(ctx)
+
+	var result CallToolResult
+	if err := client.Request(ctx, "tools/call", CallToolParams{Name: "echo", Arguments: json.RawMessage(`{}`)}, &result); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotMethod != "tools/call" {
+		t.Errorf("expected Mcp-Method tools/call, got %q", gotMethod)
+	}
+	if gotName != "echo" {
+		t.Errorf("expected Mcp-Name echo, got %q", gotName)
+	}
+	if gotSession != "" {
+		t.Errorf("expected no Mcp-Session-Id in modern mode, got %q", gotSession)
+	}
+	if gotVersion != ProtocolVersionModern {
+		t.Errorf("expected MCP-Protocol-Version %s, got %q", ProtocolVersionModern, gotVersion)
+	}
+}
+
+// TestStreamableLegacyModeSendsSession verifies the legacy path still sends
+// the session id header when one was captured.
+func TestStreamableLegacyModeSendsSession(t *testing.T) {
+	var mu sync.Mutex
+	var gotSession string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotSession = r.Header.Get("Mcp-Session-Id")
+		mu.Unlock()
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		env, err := DecodeMessage(body)
+		if err != nil {
+			http.Error(w, "bad", http.StatusBadRequest)
+			return
+		}
+		resp := map[string]any{
+			jsonRPCField: jsonRPCVersion,
+			"id":         env.ID.Raw(),
+			"result":     map[string]any{},
+		}
+		data, _ := json.Marshal(resp)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(data)
+	}))
+	defer srv.Close()
+
+	transport := NewStreamableTransport(StreamableConfig{Endpoint: srv.URL})
+	defer transport.Close()
+
+	// Legacy connection: session captured from an earlier response.
+	transport.SetSession("legacy-session-9")
+	transport.SetProtocol("2025-11-25")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := NewClient(ClientConfig{Transport: transport, ClientInfo: Implementation{Name: "t"}})
+	client.Start(ctx)
+	if err := client.Request(ctx, "ping", nil, nil); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotSession != "legacy-session-9" {
+		t.Errorf("expected legacy session header, got %q", gotSession)
+	}
+}
+
+// TestEncodeHeaderValue covers the base64 sentinel encoding rules.
+func TestEncodeHeaderValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"us-west1", "us-west1"},
+		{"Hello, 世界", "=?base64?SGVsbG8sIOS4lueVjA==?="},
+		{"=?base64?literal?=", "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?="},
+		{"padded ", "=?base64?cGFkZGVkIA==?="},
+	}
+	for _, tc := range cases {
+		if got := encodeHeaderValue(tc.in); got != tc.want {
+			t.Errorf("encodeHeaderValue(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
