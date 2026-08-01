@@ -223,21 +223,10 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 	if len(tools.Local) > 0 {
 		var decls []*genai.FunctionDeclaration
 		for _, tool := range tools.Local {
-			parameters := map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					keyInput: map[string]any{
-						"type":        "string",
-						"description": provider.ToolInputDescription(tool),
-					},
-				},
-				"required":             []string{keyInput},
-				"additionalProperties": false,
-			}
 			decls = append(decls, &genai.FunctionDeclaration{
 				Name:                 tool.Name,
 				Description:          strings.TrimSpace(tool.Description),
-				ParametersJsonSchema: parameters,
+				ParametersJsonSchema: provider.InputSchema(tool),
 			})
 		}
 		sdkTools = append(sdkTools, &genai.Tool{

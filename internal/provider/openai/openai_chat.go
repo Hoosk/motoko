@@ -244,17 +244,7 @@ func responseTools(tools provider.ToolSet) []responses.ToolUnionParam {
 	}
 	result := make([]responses.ToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
-		parameters := map[string]any{
-			keyType: keyObject,
-			keyProperties: map[string]any{
-				keyInput: map[string]any{
-					keyType:        keyString,
-					keyDescription: provider.ToolInputDescription(tool),
-				},
-			},
-			keyRequired:             []string{keyInput},
-			keyAdditionalProperties: false,
-		}
+		parameters := provider.InputSchema(tool)
 		result = append(result, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name:        tool.Name,
 			Description: param.NewOpt(strings.TrimSpace(tool.Description)),
@@ -276,17 +266,7 @@ func chatCompletionTools(tools provider.ToolSet) []map[string]any {
 			keyFunction: map[string]any{
 				keyName:        tool.Name,
 				keyDescription: strings.TrimSpace(tool.Description),
-				"parameters": map[string]any{
-					keyType: keyObject,
-					keyProperties: map[string]any{
-						keyInput: map[string]any{
-							keyType:        keyString,
-							keyDescription: provider.ToolInputDescription(tool),
-						},
-					},
-					keyRequired:             []string{keyInput},
-					keyAdditionalProperties: false,
-				},
+				"parameters":   provider.InputSchema(tool),
 			},
 		})
 	}

@@ -350,30 +350,62 @@ func buildSDKTools[T any](tools provider.ToolSet, buildFn func(t provider.LocalT
 	return result
 }
 
-func toolProperties(t provider.LocalToolDefinition) map[string]any {
-	return map[string]any{
-		keyInput: map[string]any{
-			"type":        "string",
-			"description": provider.ToolInputDescription(t),
-		},
-	}
-}
-
 func toSDKTools(tools provider.ToolSet) []sdk.ToolUnionParam {
 	return buildSDKTools(tools, func(t provider.LocalToolDefinition, isLast bool) sdk.ToolUnionParam {
 		tParam := sdk.ToolParam{
 			Name:        t.Name,
 			Description: sdk.String(strings.TrimSpace(t.Description)),
-			InputSchema: sdk.ToolInputSchemaParam{
-				Properties: toolProperties(t),
-				Required:   []string{keyInput},
-			},
+			InputSchema: schemaParam(t),
 		}
 		if isLast {
 			tParam.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		return sdk.ToolUnionParam{OfTool: &tParam}
 	})
+}
+
+// schemaParam converts the tool's input schema into the SDK parameter shape.
+// Raw schemas are passed through via ExtraFields so any JSON Schema 2020-12
+// keyword survives; the synthetic fallback keeps the legacy {"input": string}
+// shape for tools without an explicit schema.
+func schemaParam(t provider.LocalToolDefinition) sdk.ToolInputSchemaParam {
+	raw := provider.InputSchema(t)
+	// Type defaults to "object" when zero; keep the raw type if it's object.
+	var p sdk.ToolInputSchemaParam
+	if props, ok := raw["properties"].(map[string]any); ok {
+		p.Properties = props
+	}
+	p.Required = stringSlice(raw["required"])
+	extras := make(map[string]any, len(raw))
+	for k, v := range raw {
+		switch k {
+		case "properties", "required":
+		default:
+			extras[k] = v
+		}
+	}
+	if len(extras) > 0 {
+		p.ExtraFields = extras
+	}
+	return p
+}
+
+// stringSlice normalises a JSON-decoded "required" value ([]any) or a
+// hand-built Go value ([]string) into a []string.
+func stringSlice(v any) []string {
+	switch s := v.(type) {
+	case []string:
+		return s
+	case []any:
+		out := make([]string, 0, len(s))
+		for _, item := range s {
+			if str, ok := item.(string); ok {
+				out = append(out, str)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func toSDKMessages(messages []provider.ConversationItem) []sdk.MessageParam {
@@ -480,16 +512,34 @@ func toSDKBetaTools(tools provider.ToolSet) []sdk.BetaToolUnionParam {
 		tParam := sdk.BetaToolParam{
 			Name:        t.Name,
 			Description: sdk.String(strings.TrimSpace(t.Description)),
-			InputSchema: sdk.BetaToolInputSchemaParam{
-				Properties: toolProperties(t),
-				Required:   []string{keyInput},
-			},
+			InputSchema: betaSchemaParam(t),
 		}
 		if isLast {
 			tParam.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 		}
 		return sdk.BetaToolUnionParam{OfTool: &tParam}
 	})
+}
+
+func betaSchemaParam(t provider.LocalToolDefinition) sdk.BetaToolInputSchemaParam {
+	raw := provider.InputSchema(t)
+	var p sdk.BetaToolInputSchemaParam
+	if props, ok := raw["properties"].(map[string]any); ok {
+		p.Properties = props
+	}
+	p.Required = stringSlice(raw["required"])
+	extras := make(map[string]any, len(raw))
+	for k, v := range raw {
+		switch k {
+		case "properties", "required":
+		default:
+			extras[k] = v
+		}
+	}
+	if len(extras) > 0 {
+		p.ExtraFields = extras
+	}
+	return p
 }
 
 func responseFromSDK(decoded *sdk.Message) provider.Response {

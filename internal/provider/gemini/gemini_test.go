@@ -151,6 +151,63 @@ func TestBuildGenerateContentConfigTools(t *testing.T) {
 	if !hasSearch || !hasCode || !hasFunc {
 		t.Fatalf("missing one of the expected tools: search=%t, code=%t, func=%t", hasSearch, hasCode, hasFunc)
 	}
+
+	// The legacy synthetic schema keeps the {"input": string} shape.
+	for _, tool := range genaiConfig.Tools {
+		for _, decl := range tool.FunctionDeclarations {
+			if decl.Name != "bash" {
+				continue
+			}
+			schema, ok := decl.ParametersJsonSchema.(map[string]any)
+			if !ok {
+				t.Fatalf("expected schema map, got %#v", decl.ParametersJsonSchema)
+			}
+			props, ok := schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected properties in schema, got %#v", schema)
+			}
+			if _, ok := props["input"]; !ok {
+				t.Errorf("expected input property in synthetic schema, got %#v", props)
+			}
+		}
+	}
+}
+
+func TestBuildGenerateContentConfigRawSchema(t *testing.T) {
+	client := &geminiClient{
+		BaseClient: provider.NewBaseClient("gemini", "", "key", "gemini-2.5-flash"),
+	}
+	raw := []byte(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)
+	tools := provider.ToolSet{Local: []provider.LocalToolDefinition{
+		{Name: "read", Description: "read", Schema: raw},
+	}}
+	cfg := client.buildGenerateContentConfig(context.Background(), "", tools)
+	found := false
+	for _, tool := range cfg.Tools {
+		for _, decl := range tool.FunctionDeclarations {
+			if decl.Name != "read" {
+				continue
+			}
+			found = true
+			schema, ok := decl.ParametersJsonSchema.(map[string]any)
+			if !ok {
+				t.Fatalf("expected schema map, got %#v", decl.ParametersJsonSchema)
+			}
+			props, ok := schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected properties, got %#v", schema)
+			}
+			if _, ok := props["path"]; !ok {
+				t.Errorf("expected path property from raw schema, got %#v", props)
+			}
+			if _, ok := props["input"]; ok {
+				t.Errorf("synthetic input property should not exist with raw schema")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("read tool not found in config")
+	}
 }
 
 func TestNewGeminiClientInitializesFields(t *testing.T) {

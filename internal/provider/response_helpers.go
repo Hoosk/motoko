@@ -5,6 +5,30 @@ import (
 	"strings"
 )
 
+// InputSchema returns the JSON Schema (as a generic map) for a tool's
+// arguments. When the tool defines an explicit schema it is used verbatim;
+// otherwise a synthetic {"input": string} schema is produced from the
+// description/hint, preserving the legacy behaviour for local tools.
+func InputSchema(t LocalToolDefinition) map[string]any {
+	if len(t.Schema) > 0 {
+		var out map[string]any
+		if err := json.Unmarshal(t.Schema, &out); err == nil && out != nil {
+			return out
+		}
+	}
+	return map[string]any{
+		"type":        "object",
+		"properties": map[string]any{
+			"input": map[string]any{
+				"type":        "string",
+				"description": ToolInputDescription(t),
+			},
+		},
+		"required":             []string{"input"},
+		"additionalProperties": false,
+	}
+}
+
 func ResponseFromText(content string, usage Usage) Response {
 	message := strings.TrimSpace(content)
 	resp := Response{FinalText: message, Usage: usage}
