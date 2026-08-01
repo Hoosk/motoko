@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -407,6 +409,9 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 				Role:  "assistant",
 			}, nil
 		},
+		ElicitationFn: func(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return r.handleElicitation(ctx, serverName, req)
+		},
 	})
 
 	return r
@@ -720,6 +725,125 @@ func (r *Runtime) Stop() {
 	if r.mcpMgr != nil {
 		r.mcpMgr.Stop()
 	}
+}
+
+// handleElicitation maps an MCP elicitation request onto the question popup
+// flow. The requestedSchema (a flat object of primitive properties per spec)
+// is turned into one question per property; the collected answers are
+// returned as the JSON content of an "accept" result. The server name is
+// surfaced in the header so users always know who is asking.
+func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	if r.questionBroker == nil {
+		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+	}
+
+	content := make(map[string]any)
+	header := fmt.Sprintf("MCP server %q requests input", serverName)
+	question := req.Message
+	if question == "" {
+		question = "Please provide the requested information."
+	}
+
+	// No schema: a single free-text question whose answer becomes "value".
+	if len(req.RequestedSchema) == 0 {
+		ans, err := r.questionBroker.Ask(ctx, tools.Question{
+			Header:      header,
+			Question:    question,
+			AllowCustom: true,
+		})
+		if err != nil || ans.Cancelled {
+			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
+		}
+		value := strings.TrimSpace(ans.Custom)
+		if value == "" && len(ans.Selections) > 0 {
+			value = ans.Selections[0]
+		}
+		return &mcp.ElicitResult{
+			Action:  mcp.ElicitActionAccept,
+			Content: mustJSON(map[string]any{"value": value}),
+		}, nil
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			Type        string   `json:"type"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Enum        []string `json:"enum"`
+			EnumNames   []string `json:"enumNames"`
+			Default     any      `json:"default"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(req.RequestedSchema, &schema); err != nil {
+		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+	}
+
+	for name, prop := range schema.Properties {
+		label := prop.Title
+		if label == "" {
+			label = name
+		}
+		desc := prop.Description
+		if desc == "" {
+			desc = question
+		}
+		q := tools.Question{
+			Header:      header,
+			Question:    fmt.Sprintf("%s — %s", label, desc),
+			AllowCustom: true,
+		}
+		if len(prop.Enum) > 0 {
+			q.Options = make([]tools.QuestionOption, 0, len(prop.Enum))
+			for i, e := range prop.Enum {
+				display := e
+				if i < len(prop.EnumNames) && prop.EnumNames[i] != "" {
+					display = prop.EnumNames[i]
+				}
+				q.Options = append(q.Options, tools.QuestionOption{Label: e, Description: display})
+			}
+		}
+		if prop.Default != nil {
+			if s, ok := prop.Default.(string); ok {
+				q.Options = append(q.Options, tools.QuestionOption{Label: s, Description: "default"})
+			}
+		}
+		ans, err := r.questionBroker.Ask(ctx, q)
+		if err != nil || ans.Cancelled {
+			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
+		}
+		if prop.Type == "boolean" {
+			content[name] = len(ans.Selections) > 0 && (ans.Selections[0] == "true" || ans.Selections[0] == "yes" || ans.Selections[0] == "1")
+		} else if prop.Type == "number" || prop.Type == "integer" {
+			num, parseErr := strconv.ParseFloat(ans.Custom, 64)
+			if parseErr != nil {
+				return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+			}
+			if prop.Type == "integer" {
+				content[name] = int64(num)
+			} else {
+				content[name] = num
+			}
+		} else {
+			value := strings.TrimSpace(ans.Custom)
+			if value == "" && len(ans.Selections) > 0 {
+				value = ans.Selections[0]
+			}
+			content[name] = value
+		}
+	}
+
+	return &mcp.ElicitResult{
+		Action:  mcp.ElicitActionAccept,
+		Content: mustJSON(content),
+	}, nil
+}
+
+// mustJSON serialises v; the caller guarantees the value marshals (it is
+// built from schema-derived strings, numbers and booleans).
+func mustJSON(v any) json.RawMessage {
+	out, _ := json.Marshal(v)
+	return out
 }
 
 func (r *Runtime) GetContextInfo() system.ContextInfo {

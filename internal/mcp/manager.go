@@ -82,6 +82,7 @@ type Manager struct {
 	onResourceUpdated func(serverName string, uri string)
 	rootsFn           func(ctx context.Context) ([]Root, error)
 	samplingFn        func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
+	elicitationFn     ElicitationFn
 	timeout           time.Duration
 	mu                sync.Mutex
 }
@@ -105,6 +106,7 @@ type ManagerConfig struct {
 	Registry     ToolRegistrar
 	RootsFn      func(ctx context.Context) ([]Root, error)
 	SamplingFn   func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
+	ElicitationFn ElicitationFn
 	ClientInfo   Implementation
 	Timeout      time.Duration
 }
@@ -120,11 +122,12 @@ func NewManager(cfg ManagerConfig) *Manager {
 	_ = cfg.ClientInfo
 	_ = cfg.Capabilities
 	return &Manager{
-		registry:   cfg.Registry,
-		timeout:    cfg.Timeout,
-		servers:    make(map[string]*managedServer),
-		rootsFn:    cfg.RootsFn,
-		samplingFn: cfg.SamplingFn,
+		registry:      cfg.Registry,
+		timeout:       cfg.Timeout,
+		servers:       make(map[string]*managedServer),
+		rootsFn:       cfg.RootsFn,
+		samplingFn:    cfg.SamplingFn,
+		elicitationFn: cfg.ElicitationFn,
 	}
 }
 
@@ -301,6 +304,9 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 			},
 			OnRequest: func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 				return m.handleInboundRequest(ctx, s, method, params)
+			},
+			OnInputRequests: func(ctx context.Context, requests map[string]InputRequest) (map[string]json.RawMessage, error) {
+				return m.onInputRequests(ctx, s, requests)
 			},
 		})
 		client.Start(ctx)
@@ -775,13 +781,15 @@ func defaultClientCapabilities() ClientCapabilities {
 		ListChanged bool `json:"listChanged,omitempty"`
 	}{ListChanged: true}
 	sampling := struct{}{}
-	// Elicitation is intentionally NOT advertised: the capability was being
-	// declared without an implementation (servers received MethodNotFound).
-	// It will be re-added together with the real implementation in a later
-	// phase (legacy elicitation/create request + MRTR support).
+	elicitation := struct{}{}
+	// Elicitation is advertised now that both the legacy inbound request and
+	// the MRTR input-request paths are implemented (elicitationFn set by the
+	// runtime). If the runtime leaves the callback nil, servers that use it
+	// receive a decline rather than MethodNotFound.
 	return ClientCapabilities{
-		Roots:    &roots,
-		Sampling: &sampling,
+		Roots:       &roots,
+		Sampling:    &sampling,
+		Elicitation: &elicitation,
 	}
 }
 
@@ -812,6 +820,31 @@ func (m *Manager) handleInboundRequest(ctx context.Context, s *managedServer, me
 			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
 		}
 		return samplingFn(ctx, cmp)
+
+	case "elicitation/create":
+		// Legacy path (protocol <= 2025-11-25): servers send the request
+		// directly instead of the MRTR result. Modern servers go through
+		// OnInputRequests.
+		var req ElicitRequest
+		if len(params) > 0 {
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: "invalid elicitation/create params"}
+			}
+		}
+		m.mu.Lock()
+		fn := m.elicitationFn
+		m.mu.Unlock()
+		if fn == nil {
+			return ElicitResult{Action: ElicitActionDecline}, nil
+		}
+		res, err := fn(ctx, s.cfg.Name, req)
+		if err != nil {
+			return nil, err
+		}
+		if res == nil {
+			return ElicitResult{Action: ElicitActionCancel}, nil
+		}
+		return res, nil
 
 	default:
 		return nil, &RPCError{Code: ErrCodeMethodNotFound, Message: fmt.Sprintf("method %q not supported", method)}

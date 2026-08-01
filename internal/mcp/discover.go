@@ -154,12 +154,15 @@ func (c *Client) buildMeta() map[string]any {
 
 // modernClientCapabilities filters the legacy capability set to what the
 // stateless protocol accepts. Roots, sampling, and logging are deprecated in
-// 2026-07-28, and elicitation is not implemented yet, so none of them are
-// advertised on modern connections.
+// 2026-07-28, so they are not advertised on modern connections; elicitation
+// is implemented (legacy request + MRTR) and remains a modern capability.
 func modernClientCapabilities(in ClientCapabilities) map[string]any {
 	out := make(map[string]any)
 	if in.Experimental != nil {
 		out["experimental"] = in.Experimental
+	}
+	if in.Elicitation != nil {
+		out["elicitation"] = in.Elicitation
 	}
 	return out
 }

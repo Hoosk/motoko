@@ -172,3 +172,86 @@ func TestManagerInboundRequest(t *testing.T) {
 		t.Errorf("unexpected sampling result: %+v", resSampling)
 	}
 }
+
+func TestManagerElicitationLegacyInbound(t *testing.T) {
+	got := make(chan ElicitRequest, 1)
+	m := NewManager(ManagerConfig{
+		Timeout: 2 * time.Second,
+		ElicitationFn: func(_ context.Context, serverName string, req ElicitRequest) (*ElicitResult, error) {
+			if serverName != "srv" {
+				t.Errorf("expected server name srv, got %q", serverName)
+			}
+			got <- req
+			return &ElicitResult{Action: "accept", Content: json.RawMessage(`{"name":"octocat"}`)}, nil
+		},
+	})
+
+	raw, _ := json.Marshal(ElicitRequest{Message: "username?", RequestedSchema: json.RawMessage(`{"type":"object"}`)})
+	res, err := m.handleInboundRequest(context.Background(), &managedServer{cfg: ServerConfig{Name: "srv"}}, "elicitation/create", raw)
+	if err != nil {
+		t.Fatalf("handle elicitation/create: %v", err)
+	}
+	el, ok := res.(*ElicitResult)
+	if !ok || el.Action != "accept" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	select {
+	case req := <-got:
+		if req.Message != "username?" {
+			t.Errorf("unexpected message: %q", req.Message)
+		}
+	default:
+		t.Error("elicitation fn was not called")
+	}
+}
+
+func TestManagerElicitationDeclinesWhenNil(t *testing.T) {
+	m := NewManager(ManagerConfig{Timeout: 2 * time.Second})
+	raw, _ := json.Marshal(ElicitRequest{Message: "hi"})
+	res, err := m.handleInboundRequest(context.Background(), &managedServer{cfg: ServerConfig{Name: "s"}}, "elicitation/create", raw)
+	if err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	el, ok := res.(ElicitResult)
+	if !ok || el.Action != "decline" {
+		t.Fatalf("expected decline, got %+v", res)
+	}
+}
+
+func TestManagerMRTRElicitation(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		Timeout: 2 * time.Second,
+		ElicitationFn: func(_ context.Context, _ string, req ElicitRequest) (*ElicitResult, error) {
+			return &ElicitResult{Action: "accept", Content: json.RawMessage(`{"name":"octocat"}`)}, nil
+		},
+	})
+	s := &managedServer{cfg: ServerConfig{Name: "srv"}}
+	raw, _ := json.Marshal(ElicitRequest{Message: "username?"})
+	responses, err := m.onInputRequests(context.Background(), s, map[string]InputRequest{
+		"k1": {Method: "elicitation/create", Params: raw},
+	})
+	if err != nil {
+		t.Fatalf("onInputRequests: %v", err)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	var el ElicitResult
+	if err := json.Unmarshal(responses["k1"], &el); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if el.Action != "accept" {
+		t.Errorf("expected accept, got %q", el.Action)
+	}
+}
+
+func TestManagerMRTRUnsupportedRequest(t *testing.T) {
+	m := NewManager(ManagerConfig{Timeout: 2 * time.Second})
+	s := &managedServer{cfg: ServerConfig{Name: "srv"}}
+	_, err := m.onInputRequests(context.Background(), s, map[string]InputRequest{
+		"k1": {Method: "something/else", Params: nil},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported input request")
+	}
+}
