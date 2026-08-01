@@ -15,13 +15,13 @@ import (
 // streamableTestServer is a minimal in-memory MCP server that speaks the
 // Streamable HTTP transport: a single endpoint that handles POST and GET.
 type streamableTestServer struct {
+	postHandler    func(env RPCEnvelope) (any, *RPCError)
+	sessionID      string
+	pendingSSE     []string
+	getConnections int
 	mu             sync.Mutex
 	initialized    bool
-	sessionID      string
-	pendingSSE     []string // buffered server-initiated events for the GET stream
-	postHandler    func(env RPCEnvelope) (any, *RPCError)
 	closed         bool
-	getConnections int
 }
 
 func newStreamableTestServer() *streamableTestServer {

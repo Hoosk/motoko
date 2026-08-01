@@ -16,13 +16,8 @@ import (
 
 // StreamableConfig configures a StreamableTransport.
 type StreamableConfig struct {
-	// Endpoint is the single MCP endpoint URL that supports both POST and GET.
-	Endpoint string
-	// Headers are extra HTTP headers (e.g. Authorization) attached to every
-	// request.
-	Headers map[string]string
-	// RequestTimeout bounds individual POSTs; the long-lived GET stream is
-	// cancelled via the transport context, not this timeout.
+	Headers        map[string]string
+	Endpoint       string
 	RequestTimeout time.Duration
 }
 
@@ -35,18 +30,18 @@ type StreamableConfig struct {
 // request, per spec.
 type StreamableTransport struct {
 	endpointCtx    context.Context
-	endpointCancel context.CancelFunc
+	errCh          chan error
 	postClient     *http.Client
 	streamClient   *http.Client
 	headers        map[string]string
 	recvCh         chan []byte
-	errCh          chan error
+	endpointCancel context.CancelFunc
 	streamClosedCh chan struct{}
-	streamWg       sync.WaitGroup
 	protocol       string
-	mu             sync.Mutex
 	endpoint       string
 	sessionID      string
+	streamWg       sync.WaitGroup
+	mu             sync.Mutex
 	closed         bool
 }
 

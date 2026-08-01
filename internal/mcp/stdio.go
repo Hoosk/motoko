@@ -187,8 +187,8 @@ func trimNewline(b []byte) []byte {
 // Close method flushes any trailing partial line.
 type stderrWriter struct {
 	serverName string
-	mu         sync.Mutex
 	buf        []byte
+	mu         sync.Mutex
 }
 
 func newStderrWriter(serverName string) *stderrWriter {
