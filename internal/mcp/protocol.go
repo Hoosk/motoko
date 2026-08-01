@@ -22,6 +22,7 @@ const ProtocolVersion = "2025-11-25"
 // must carry it; we keep the literal in one place to satisfy goconst.
 const jsonRPCVersion = "2.0"
 const jsonRPCField = "jsonrpc"
+const methodField = "method"
 
 // JSON-RPC 2.0 error codes reserved by the protocol.
 const (

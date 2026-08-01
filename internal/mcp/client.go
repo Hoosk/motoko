@@ -16,23 +16,24 @@ import (
 // Request/Send concurrently from multiple goroutines; the inbound reader
 // runs on its own goroutine started by Start.
 type Client struct {
-	serverCaps     ServerCapabilities
-	capabilities   ClientCapabilities
-	transport      Transport
-	stopCh         chan struct{}
-	pending        map[string]chan rpcResult
-	doneCh         chan struct{}
-	onNotification func(method string, params json.RawMessage)
-	onRequest      func(ctx context.Context, method string, params json.RawMessage) (any, error)
-	sema           chan struct{}
-	clientInfo     Implementation
-	serverInfo     Implementation
-	protocol       string
-	nextID         atomic.Int64
-	timeout        time.Duration
-	mu             sync.Mutex
-	initialized    bool
-	closed         bool
+	serverCaps       ServerCapabilities
+	capabilities     ClientCapabilities
+	transport        Transport
+	stopCh           chan struct{}
+	pending          map[string]chan rpcResult
+	doneCh           chan struct{}
+	onNotification   func(method string, params json.RawMessage)
+	onRequest        func(ctx context.Context, method string, params json.RawMessage) (any, error)
+	onInputRequests  OnInputRequests
+	sema             chan struct{}
+	clientInfo       Implementation
+	serverInfo       Implementation
+	protocol         string
+	nextID           atomic.Int64
+	timeout          time.Duration
+	mu               sync.Mutex
+	initialized      bool
+	closed           bool
 }
 
 type rpcResult struct {
@@ -46,6 +47,7 @@ type ClientConfig struct {
 	Transport      Transport
 	OnNotification func(method string, params json.RawMessage)
 	OnRequest      func(ctx context.Context, method string, params json.RawMessage) (any, error)
+	OnInputRequests OnInputRequests
 	ClientInfo     Implementation
 	RequestTimeout time.Duration
 }
@@ -58,16 +60,17 @@ func NewClient(cfg ClientConfig) *Client {
 		cfg.RequestTimeout = 30 * time.Second
 	}
 	return &Client{
-		transport:      cfg.Transport,
-		clientInfo:     cfg.ClientInfo,
-		capabilities:   cfg.Capabilities,
-		timeout:        cfg.RequestTimeout,
-		pending:        make(map[string]chan rpcResult),
-		stopCh:         make(chan struct{}),
-		doneCh:         make(chan struct{}),
-		onNotification: cfg.OnNotification,
-		onRequest:      cfg.OnRequest,
-		sema:           make(chan struct{}, 10),
+		transport:        cfg.Transport,
+		clientInfo:       cfg.ClientInfo,
+		capabilities:     cfg.Capabilities,
+		timeout:          cfg.RequestTimeout,
+		pending:          make(map[string]chan rpcResult),
+		stopCh:           make(chan struct{}),
+		doneCh:           make(chan struct{}),
+		onNotification:   cfg.OnNotification,
+		onRequest:        cfg.OnRequest,
+		onInputRequests:  cfg.OnInputRequests,
+		sema:             make(chan struct{}, 10),
 	}
 }
 
@@ -270,12 +273,54 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 			tracelog.Logf("MCP: Request %q (id: %s) failed with JSON-RPC error: %s", method, string(idRaw), res.envelope.Error.Error())
 			return res.envelope.Error
 		}
-		tracelog.Logf("MCP: Request %q (id: %s) succeeded", method, string(idRaw))
-		if out == nil || len(res.envelope.Result) == 0 {
+		if !isInputRequired(res.envelope.Result) {
+			tracelog.Logf("MCP: Request %q (id: %s) succeeded", method, string(idRaw))
+			if out == nil || len(res.envelope.Result) == 0 {
+				return nil
+			}
+			return json.Unmarshal(res.envelope.Result, out)
+		}
+		// Multi round-trip request: the server wants more input before it
+		// can answer. Gather the input, retry (bounded), and surface the
+		// final result.
+		tracelog.Logf("MCP: Request %q (id: %s) returned input_required", method, string(idRaw))
+		var irr InputRequiredResult
+		if err := json.Unmarshal(res.envelope.Result, &irr); err != nil {
+			return fmt.Errorf("mcp: decode input_required result for %s: %w", method, err)
+		}
+		origParams, _ := payload["params"].(json.RawMessage)
+		final, err := c.mrtrLoop(ctx, method, origParams, irr)
+		if err != nil {
+			return err
+		}
+		if out == nil || len(final) == 0 {
 			return nil
 		}
-		return json.Unmarshal(res.envelope.Result, out)
+		return json.Unmarshal(final, out)
 	}
+}
+
+// mrtrLoop retries a request that returned input_required, gathering input
+// between round trips, up to maxMRTRIterations.
+func (c *Client) mrtrLoop(ctx context.Context, method string, originalParams json.RawMessage, first InputRequiredResult) (json.RawMessage, error) {
+	current := first
+	params := originalParams
+	for i := 0; i < maxMRTRIterations; i++ {
+		final, err := c.handleInputRequired(ctx, method, params, current)
+		if err != nil {
+			return nil, err
+		}
+		if !isInputRequired(final) {
+			return final, nil
+		}
+		var next InputRequiredResult
+		if err := json.Unmarshal(final, &next); err != nil {
+			return nil, fmt.Errorf("mcp: decode input_required result for %s: %w", method, err)
+		}
+		current = next
+		params = nil // the retry already carried inputResponses/requestState
+	}
+	return nil, fmt.Errorf("mcp: request %q exceeded %d MRTR round trips", method, maxMRTRIterations)
 }
 
 // Send emits a JSON-RPC notification (no id, no response expected).
@@ -311,7 +356,7 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 	payload := map[string]any{
 		jsonRPCField: jsonRPCVersion,
 		"id":         json.RawMessage(idRaw),
-		"method":     method,
+		methodField: method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
@@ -335,7 +380,7 @@ func (c *Client) buildRequest(method string, params any) (map[string]any, error)
 func (c *Client) buildNotification(method string, params any) (map[string]any, error) {
 	payload := map[string]any{
 		jsonRPCField: jsonRPCVersion,
-		"method":     method,
+		methodField: method,
 	}
 	if params != nil {
 		raw, err := json.Marshal(params)
