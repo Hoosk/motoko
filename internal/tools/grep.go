@@ -21,9 +21,10 @@ func NewGrepTool() *GrepTool {
 
 func (t *GrepTool) Spec() Spec {
 	return Spec{
-		Name:    "grep",
-		Summary: "Search text by regex inside workspace files.",
-		Usage:   "grep <regex> [include-glob]",
+		Name:        "grep",
+		Summary:     "Search text by regex inside workspace files.",
+		Usage:       "grep <regex> [include-glob]",
+		InputSchema: schemaGrep,
 	}
 }
 

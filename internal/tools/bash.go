@@ -22,9 +22,10 @@ func NewBashTool() *BashTool {
 
 func (t *BashTool) Spec() Spec {
 	return Spec{
-		Name:    toolNameBash,
-		Summary: "Runs a shell command in the current workspace.",
-		Usage:   "bash <command>",
+		Name:        toolNameBash,
+		Summary:     "Runs a shell command in the current workspace.",
+		Usage:       "bash <command>",
+		InputSchema: schemaBash,
 	}
 }
 

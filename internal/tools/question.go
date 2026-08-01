@@ -128,9 +128,10 @@ func NewQuestionTool(broker *QuestionBroker) *QuestionTool {
 
 func (t *QuestionTool) Spec() Spec {
 	return Spec{
-		Name:    "question",
-		Summary: "Ask the user a structured question with options and block until they answer.",
-		Usage:   `question {"header":"Decision","question":"How should we proceed?","options":[{"label":"Option A","description":"Fastest"}],"multiple":false,"allow_custom":true}`,
+		Name:        "question",
+		Summary:     "Ask the user a structured question with options and block until they answer.",
+		Usage:       `question {"header":"Decision","question":"How should we proceed?","options":[{"label":"Option A","description":"Fastest"}],"multiple":false,"allow_custom":true}`,
+		InputSchema: schemaQuestion,
 	}
 }
 

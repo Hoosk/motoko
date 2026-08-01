@@ -16,9 +16,10 @@ func NewGlobTool() *GlobTool {
 
 func (t *GlobTool) Spec() Spec {
 	return Spec{
-		Name:    "glob",
-		Summary: "Finds file paths by pattern in the workspace.",
-		Usage:   "glob <pattern>",
+		Name:        "glob",
+		Summary:     "Finds file paths by pattern in the workspace.",
+		Usage:       "glob <pattern>",
+		InputSchema: schemaGlob,
 	}
 }
 

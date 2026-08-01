@@ -21,9 +21,10 @@ func NewTaskTool(runner TaskRunner) *TaskTool {
 
 func (t *TaskTool) Spec() Spec {
 	return Spec{
-		Name:    "task",
-		Summary: "Launch a long-running command in the background (returns ID) or cancel a running task.",
-		Usage:   "task <command> | task terminate <idTask>",
+		Name:        "task",
+		Summary:     "Launch a long-running command in the background (returns ID) or cancel a running task.",
+		Usage:       "task <command> | task terminate <idTask>",
+		InputSchema: schemaTask,
 	}
 }
 

@@ -21,9 +21,10 @@ func NewInspectTool(manager *tachikoma.Manager) *InspectTool {
 
 func (t *InspectTool) Spec() Spec {
 	return Spec{
-		Name:    "inspect",
-		Summary: "Get detailed information from a background Tachikoma worker.",
-		Usage:   "inspect <worker_name>",
+		Name:        "inspect",
+		Summary:     "Get detailed information from a background Tachikoma worker.",
+		Usage:       "inspect <worker_name>",
+		InputSchema: schemaInspect,
 	}
 }
 
