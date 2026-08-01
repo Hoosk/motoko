@@ -38,6 +38,70 @@ func TestMCPServerEnvSlice(t *testing.T) {
 	}
 }
 
+func TestMCPServerEnvSliceExpandsVariables(t *testing.T) {
+	t.Setenv("MCP_TEST_TOKEN", "secret-123")
+	t.Setenv("MCP_TEST_HOST", "example.com")
+	got := MCPServerConfig{Env: map[string]string{
+		"A": "${MCP_TEST_TOKEN}",
+		"B": "https://$MCP_TEST_HOST/v1",
+		"C": "no-ref",
+		"D": "${MCP_UNSET_VAR}",
+	}}.EnvSlice()
+	sort.Strings(got)
+	want := []string{
+		"A=secret-123",
+		"B=https://example.com/v1",
+		"C=no-ref",
+		"D=",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestMCPServerInterpolatedHeaders(t *testing.T) {
+	t.Setenv("MCP_BEARER", "tok-abc")
+	got := MCPServerConfig{Headers: map[string]string{
+		"Authorization": "Bearer ${MCP_BEARER}",
+		"X-Static":      "yes",
+		"X-Missing":     "${MCP_DOES_NOT_EXIST}",
+	}}.InterpolatedHeaders()
+	want := map[string]string{
+		"Authorization": "Bearer tok-abc",
+		"X-Static":      "yes",
+		"X-Missing":     "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+	if (MCPServerConfig{}).InterpolatedHeaders() != nil {
+		t.Errorf("empty headers should return nil")
+	}
+}
+
+func TestExpandEnv(t *testing.T) {
+	t.Setenv("FOO", "foo-val")
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"plain", "plain"},
+		{"${FOO}", "foo-val"},
+		{"pre-${FOO}-post", "pre-foo-val-post"},
+		{"$FOO", "foo-val"},
+		{"$FOO/suffix", "foo-val/suffix"},
+		{"$FOO_BAR", ""},                 // FOO_BAR unset
+		{"${UNSET_VAR}", ""},             // unset expands to empty
+		{"a$b", "a"},                     // lone $ followed by non-name char
+		{"${FOO}${FOO}", "foo-valfoo-val"},
+		{"$", "$"},
+		{"${UNCLOSED", "${UNCLOSED"},     // unclosed brace kept as-is
+	}
+	for _, tc := range cases {
+		if got := expandEnv(tc.in); got != tc.want {
+			t.Errorf("expandEnv(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestMergeMCPServersReplacesByName(t *testing.T) {
 	base := []MCPServerConfig{
 		{Name: "alpha", Command: "/bin/true"},

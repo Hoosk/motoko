@@ -99,16 +99,80 @@ func (m MCPServerConfig) NormalizeTransport() string {
 
 // EnvSlice renders the env map as a slice of KEY=VALUE pairs suitable for
 // exec.Cmd. Empty map returns nil so the underlying exec receives only the
-// inherited process environment.
+// inherited process environment. Values may reference environment variables
+// with ${VAR} or $VAR; they are expanded at use time, never persisted.
 func (m MCPServerConfig) EnvSlice() []string {
 	if len(m.Env) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(m.Env))
 	for k, v := range m.Env {
-		out = append(out, k+"="+v)
+		out = append(out, k+"="+expandEnv(v))
 	}
 	return out
+}
+
+// InterpolatedHeaders returns the HTTP headers with ${VAR} / $VAR references
+// expanded from the process environment. Expansion happens at use time so
+// secrets never end up in the persisted config.
+func (m MCPServerConfig) InterpolatedHeaders() map[string]string {
+	if len(m.Headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m.Headers))
+	for k, v := range m.Headers {
+		out[k] = expandEnv(v)
+	}
+	return out
+}
+
+// expandEnv replaces ${VAR} and $VAR references with the process environment
+// values. Unset variables expand to the empty string, matching the common
+// docker-compose / Claude Desktop convention.
+func expandEnv(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '$' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		if i+1 >= len(s) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		// ${VAR} form
+		if s[i+1] == '{' {
+			end := strings.IndexByte(s[i+2:], '}')
+			if end < 0 {
+				b.WriteString(s[i:])
+				break
+			}
+			end += i + 2
+			name := s[i+2 : end]
+			b.WriteString(os.Getenv(name))
+			i = end + 1
+			continue
+		}
+		// $VAR form: name = [A-Za-z0-9_]+
+		j := i + 1
+		for j < len(s) && (isEnvNameChar(s[j])) {
+			j++
+		}
+		if j == i+1 {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		b.WriteString(os.Getenv(s[i+1 : j]))
+		i = j
+	}
+	return b.String()
+}
+
+func isEnvNameChar(c byte) bool {
+	return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
 func (c *AppConfig) Merge(other *AppConfig) {

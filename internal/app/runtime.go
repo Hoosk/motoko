@@ -813,7 +813,7 @@ func mcpServerConfigs(in []config.MCPServerConfig) []mcp.ServerConfig {
 			Args:      s.Args,
 			Env:       s.EnvSlice(),
 			URL:       s.URL,
-			Headers:   s.Headers,
+			Headers:   s.InterpolatedHeaders(),
 			Disabled:  s.Disabled,
 		})
 	}
