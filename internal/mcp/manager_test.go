@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -182,6 +183,46 @@ func TestToolPrefixSlugify(t *testing.T) {
 	for in, prefix := range cases {
 		if got := ToolPrefix(in, "x"); got != prefix+"x" {
 			t.Errorf("ToolPrefix(%q) = %s, want %s", in, got, prefix+"x")
+		}
+	}
+}
+
+func TestToolPrefixSanitizesToolName(t *testing.T) {
+	cases := []struct{ server, tool, want string }{
+		{"srv", "get_user", "mcp_srv_get_user"},
+		{"srv", "my tool", "mcp_srv_my_tool"},
+		{"srv", "weird,name!", "mcp_srv_weird_name_"},
+		{"srv", "UPPER.Case-Name", "mcp_srv_UPPER.Case-Name"}, // case preserved per spec
+	}
+	for _, tc := range cases {
+		if got := ToolPrefix(tc.server, tc.tool); got != tc.want {
+			t.Errorf("ToolPrefix(%q, %q) = %q, want %q", tc.server, tc.tool, got, tc.want)
+		}
+	}
+}
+
+func TestSanitizeToolNameEdgeCases(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "tool"},
+		{"!!!", "tool"},
+		{".", "tool"},
+		{"valid_name-1.2", "valid_name-1.2"},
+		{"a b", "a_b"},
+		// long names are truncated to 128 chars
+		{strings.Repeat("x", 200), strings.Repeat("x", 128)},
+	}
+	for _, tc := range cases {
+		if got := sanitizeToolName(tc.in); got != tc.want {
+			t.Errorf("sanitizeToolName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSanitizeToolNameNeverStartsWithSeparator(t *testing.T) {
+	for _, in := range []string{".hidden", "-dash", "_under", "..double"} {
+		got := sanitizeToolName(in)
+		if strings.HasPrefix(got, ".") || strings.HasPrefix(got, "-") || strings.HasPrefix(got, "_") {
+			t.Errorf("sanitizeToolName(%q) = %q must not start with a separator", in, got)
 		}
 	}
 }

@@ -305,7 +305,6 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 			_ = client.Close()
 			if cleanup != nil {
 				cleanup()
-				cleanup = nil
 			}
 			select {
 			case <-ctx.Done():
@@ -350,7 +349,6 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		case <-client.doneCh:
 			if cleanup != nil {
 				cleanup()
-				cleanup = nil
 			}
 			m.mu.Lock()
 			s.client = nil
@@ -646,7 +644,35 @@ func (m *Manager) unregister(name string) {
 // remote tool's spec so the MCP server sees it unchanged.
 func ToolPrefix(serverName, toolName string) string {
 	serverSlug := slugify(serverName)
-	return "mcp_" + serverSlug + "_" + toolName
+	tool := sanitizeToolName(toolName)
+	return "mcp_" + serverSlug + "_" + tool
+}
+
+// sanitizeToolName enforces the tool-name format from the MCP spec (2026-07-28):
+// 1-128 characters, case-sensitive, only A-Za-z0-9 `_` `-` `.`. Names that
+// contain characters outside that set (e.g. a server exposing "my tool") are
+// normalized by replacing each invalid rune with `_`; the name is truncated to
+// 128 chars and never returns empty. The original name is kept in the remote
+// tool's spec so the server still sees its own name on tools/call.
+func sanitizeToolName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '_', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	name := strings.TrimLeft(b.String(), "._-")
+	if name == "" {
+		return "tool"
+	}
+	if len(name) > 128 {
+		name = name[:128]
+	}
+	return name
 }
 
 func slugify(s string) string {
@@ -729,11 +755,13 @@ func defaultClientCapabilities() ClientCapabilities {
 		ListChanged bool `json:"listChanged,omitempty"`
 	}{ListChanged: true}
 	sampling := struct{}{}
-	elicitation := struct{}{}
+	// Elicitation is intentionally NOT advertised: the capability was being
+	// declared without an implementation (servers received MethodNotFound).
+	// It will be re-added together with the real implementation in a later
+	// phase (legacy elicitation/create request + MRTR support).
 	return ClientCapabilities{
-		Roots:       &roots,
-		Sampling:    &sampling,
-		Elicitation: &elicitation,
+		Roots:    &roots,
+		Sampling: &sampling,
 	}
 }
 
