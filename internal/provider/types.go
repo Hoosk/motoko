@@ -35,6 +35,10 @@ type LocalToolDefinition struct {
 	Description string
 	InputType   string
 	InputHint   string
+	// Schema is the raw JSON Schema (2020-12) for the tool's arguments.
+	// When present, providers MUST use it verbatim instead of synthesising
+	// a {"input": string} schema from InputHint.
+	Schema []byte
 }
 
 type ToolSet struct {

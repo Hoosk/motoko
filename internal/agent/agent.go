@@ -388,6 +388,7 @@ func toolSet(specs []tools.Spec) provider.ToolSet {
 			Description: spec.Summary,
 			InputType:   provider.ToolInputText,
 			InputHint:   spec.Usage,
+			Schema:      spec.InputSchema,
 		})
 	}
 	return provider.ToolSet{Local: result}

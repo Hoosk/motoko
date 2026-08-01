@@ -21,6 +21,11 @@ type Spec struct {
 	Name    string
 	Summary string
 	Usage   string
+	// InputSchema is the JSON Schema (2020-12) describing the tool's
+	// arguments, when the tool defines one. When empty, providers fall back
+	// to a synthetic {"input": string} schema so all existing tools keep
+	// working. MCP remote tools always populate it from the server.
+	InputSchema []byte
 }
 
 type Result struct {
