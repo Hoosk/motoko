@@ -437,6 +437,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if len(msg.Models) == 0 {
 			m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: "The provider returned no available models."})
 			m.timeline.renderMessages()
+		} else if active, ok := m.runtime.GetActiveProviderConfig(); ok && strings.TrimSpace(active.Model) == "" {
+			// Provider has no model selected yet: auto-pick the first one so
+			// the agent becomes immediately usable without requiring a manual
+			// /models use invocation.
+			first := msg.Models[0]
+			cmds = append(cmds, selectModelAndBudget(m.runtime, first, active.ThinkingBudget))
 		} else {
 			m.modelPicker.Open(msg.Models)
 		}

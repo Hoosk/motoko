@@ -485,6 +485,13 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 
 func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.ContextInfo, input string) (context.Context, system.ContextInfo, []provider.ConversationItem, error) {
 	if o.agent == nil || !o.agent.Configured() {
+		// Try to produce a more actionable error message when the active
+		// provider simply has no model selected yet.
+		if cfg := o.configFn(); cfg != nil {
+			if active, ok := cfg.Active(); ok && strings.TrimSpace(active.Model) == "" {
+				return ctx, system.ContextInfo{}, nil, fmt.Errorf("provider %q has no model selected — use /models to pick one", active.Name)
+			}
+		}
 		return ctx, system.ContextInfo{}, nil, fmt.Errorf("agent not configured")
 	}
 	if info.Path == "" {
