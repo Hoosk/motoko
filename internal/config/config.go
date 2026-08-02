@@ -381,7 +381,7 @@ func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
 
 	for i, existing := range c.Providers {
 		if strings.EqualFold(existing.Name, provider.Name) {
-			c.Providers[i] = provider
+			c.Providers[i] = mergeProvider(existing, provider)
 			c.sortProviders()
 			return
 		}
@@ -389,6 +389,48 @@ func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
 
 	c.Providers = append(c.Providers, provider)
 	c.sortProviders()
+}
+
+// mergeProvider returns next with any zero-value metadata fields filled in
+// from prev. This prevents UI forms that only carry Name/Preset/BaseURL/APIKey
+// from inadvertently wiping the model selection and capability metadata that
+// was set by /models use or SetThinkingBudget.
+//
+// Fields that are always overwritten (identity + credentials + connectivity):
+//
+//	Name, Preset, Kind, BaseURL, APIKey, UseSDK,
+//	EnableGoogleSearch, EnableCodeExecution
+//
+// Fields preserved from prev when next is zero:
+//
+//	Model, Models, ContextWindow, SupportsThinking,
+//	EffortPresets, BudgetMin, BudgetMax, ThinkingBudget
+func mergeProvider(prev, next ProviderConfig) ProviderConfig {
+	if strings.TrimSpace(next.Model) == "" {
+		next.Model = prev.Model
+	}
+	if len(next.Models) == 0 {
+		next.Models = append([]string(nil), prev.Models...)
+	}
+	if next.ContextWindow == 0 {
+		next.ContextWindow = prev.ContextWindow
+	}
+	if !next.SupportsThinking {
+		next.SupportsThinking = prev.SupportsThinking
+	}
+	if len(next.EffortPresets) == 0 {
+		next.EffortPresets = append([]string(nil), prev.EffortPresets...)
+	}
+	if next.BudgetMin == 0 {
+		next.BudgetMin = prev.BudgetMin
+	}
+	if next.BudgetMax == 0 {
+		next.BudgetMax = prev.BudgetMax
+	}
+	if next.ThinkingBudget == 0 {
+		next.ThinkingBudget = prev.ThinkingBudget
+	}
+	return next
 }
 
 func (c *AppConfig) RemoveProvider(name string) bool {

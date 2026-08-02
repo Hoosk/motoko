@@ -226,3 +226,96 @@ func TestNormalizeProviderSupportsOpenAICompatiblePreset(t *testing.T) {
 		t.Fatalf("expected openai-compatible default name, got %q", got.Name)
 	}
 }
+
+func TestUpsertProviderPreservesMetadata(t *testing.T) {
+	cfg := &AppConfig{}
+
+	// Initial save via /models use — carries full metadata.
+	full := ProviderConfig{
+		Name:             "gemini",
+		Preset:           ProviderPresetGemini,
+		APIKey:           "key1",
+		Model:            "gemini-2.5-flash",
+		ContextWindow:    1000000,
+		SupportsThinking: true,
+		EffortPresets:    []string{"low", "high"},
+		BudgetMin:        100,
+		BudgetMax:        65536,
+		ThinkingBudget:   8192,
+		Models:           []string{"gemini-2.5-flash", "gemini-2.0-flash"},
+	}
+	cfg.UpsertProvider(full)
+
+	// Re-save via provider form — carries only identity + credentials.
+	sparse := ProviderConfig{
+		Name:   "gemini",
+		Preset: ProviderPresetGemini,
+		APIKey: "key2",
+	}
+	cfg.UpsertProvider(sparse)
+
+	got, ok := cfg.Provider("gemini")
+	if !ok {
+		t.Fatal("provider not found after upsert")
+	}
+
+	// Credentials updated.
+	if got.APIKey != "key2" {
+		t.Errorf("expected APIKey=key2, got %q", got.APIKey)
+	}
+
+	// Metadata preserved.
+	if got.Model != "gemini-2.5-flash" {
+		t.Errorf("expected Model preserved, got %q", got.Model)
+	}
+	if got.ContextWindow != 1000000 {
+		t.Errorf("expected ContextWindow=1000000, got %d", got.ContextWindow)
+	}
+	if !got.SupportsThinking {
+		t.Error("expected SupportsThinking preserved")
+	}
+	if len(got.EffortPresets) != 2 {
+		t.Errorf("expected 2 EffortPresets, got %v", got.EffortPresets)
+	}
+	if got.BudgetMin != 100 || got.BudgetMax != 65536 {
+		t.Errorf("expected BudgetMin/Max preserved, got %d/%d", got.BudgetMin, got.BudgetMax)
+	}
+	if got.ThinkingBudget != 8192 {
+		t.Errorf("expected ThinkingBudget=8192, got %d", got.ThinkingBudget)
+	}
+	if len(got.Models) != 2 {
+		t.Errorf("expected 2 Models, got %v", got.Models)
+	}
+}
+
+func TestUpsertProviderExplicitValueOverrides(t *testing.T) {
+	cfg := &AppConfig{}
+
+	cfg.UpsertProvider(ProviderConfig{
+		Name:           "openai",
+		Preset:         ProviderPresetOpenAI,
+		APIKey:         "oldkey",
+		Model:          "gpt-4",
+		ThinkingBudget: 8192,
+	})
+
+	// Explicit non-zero values in the new config must win.
+	cfg.UpsertProvider(ProviderConfig{
+		Name:           "openai",
+		Preset:         ProviderPresetOpenAI,
+		APIKey:         "newkey",
+		Model:          "gpt-4.1",
+		ThinkingBudget: 24576,
+	})
+
+	got, _ := cfg.Provider("openai")
+	if got.Model != "gpt-4.1" {
+		t.Errorf("expected Model overridden to gpt-4.1, got %q", got.Model)
+	}
+	if got.ThinkingBudget != 24576 {
+		t.Errorf("expected ThinkingBudget overridden to 24576, got %d", got.ThinkingBudget)
+	}
+	if got.APIKey != "newkey" {
+		t.Errorf("expected APIKey overridden, got %q", got.APIKey)
+	}
+}
