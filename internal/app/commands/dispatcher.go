@@ -40,6 +40,9 @@ const (
 	CmdAgent   = "agent"
 	CmdShell   = "shell"
 	CmdApprove = "approve"
+
+	msgNoMCPResources = "No MCP resources available."
+	msgNoMCPPrompts   = "No MCP prompts available."
 )
 
 type Deps struct {
@@ -139,7 +142,7 @@ func (d *Dispatcher) handleDynamicPrompt(name string, args []string) (types.Resp
 	hosts := d.deps.MCPPromptHostsFn(ctx)
 	var matches []mcp.PromptHost
 	for _, h := range hosts {
-		if strings.EqualFold(h.Prompt.Name, name) {
+		if strings.EqualFold(h.Name, name) {
 			matches = append(matches, h)
 		}
 	}
@@ -163,7 +166,7 @@ func (d *Dispatcher) handleDynamicPrompt(name string, args []string) (types.Resp
 		}
 		parsed[kv[:eq]] = kv[eq+1:]
 	}
-	result, err := d.deps.MCPGetPromptFn(ctx, matches[0].Server, matches[0].Prompt.Name, parsed)
+	result, err := d.deps.MCPGetPromptFn(ctx, matches[0].Server, matches[0].Name, parsed)
 	if err != nil {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: fmt.Sprintf("Get prompt failed: %v", err)}}}, true
 	}
@@ -1066,13 +1069,13 @@ func (d *Dispatcher) handleMCPCommand(args []string) types.Response {
 // one argument, it filters to the given server.
 func (d *Dispatcher) handleMCPResources(args []string) types.Response {
 	if d.deps.MCPResourcesFn == nil {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPResources}}}
 	}
 	ctx, cancel := withDispatchTimeout(context.Background())
 	defer cancel()
 	all := d.deps.MCPResourcesFn(ctx)
 	if len(all) == 0 {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPResources}}}
 	}
 	filter := ""
 	if len(args) > 0 {
@@ -1093,7 +1096,7 @@ func (d *Dispatcher) handleMCPResources(args []string) types.Response {
 		lines = append(lines, fmt.Sprintf("• %s  %s  [%s]", title, r.URI, r.MimeType))
 	}
 	if count == 0 {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP resources available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPResources}}}
 	}
 	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
 }
@@ -1131,13 +1134,13 @@ func (d *Dispatcher) handleMCPRead(args []string) types.Response {
 // handleMCPPrompts lists prompt templates exposed by the connected servers.
 func (d *Dispatcher) handleMCPPrompts(args []string) types.Response {
 	if d.deps.MCPPromptsFn == nil {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPPrompts}}}
 	}
 	ctx, cancel := withDispatchTimeout(context.Background())
 	defer cancel()
 	all := d.deps.MCPPromptsFn(ctx)
 	if len(all) == 0 {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPPrompts}}}
 	}
 	filter := ""
 	if len(args) > 0 {
@@ -1170,7 +1173,7 @@ func (d *Dispatcher) handleMCPPrompts(args []string) types.Response {
 		lines = append(lines, fmt.Sprintf("• %s — %s%s", p.Name, desc, argSuffix))
 	}
 	if count == 0 {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No MCP prompts available."}}}
+		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: msgNoMCPPrompts}}}
 	}
 	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: strings.Join(lines, "\n")}}}
 }
