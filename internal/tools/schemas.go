@@ -15,11 +15,18 @@ const (
 // a required list. Tools that expose a schema get their arguments validated
 // and described natively by the LLM providers instead of the synthetic
 // {"input": string} fallback.
+//
+// When properties is nil or empty the key is omitted entirely so that the
+// emitted schema is {"type":"object","additionalProperties":false} rather than
+// {"type":"object","properties":null,...}. Some providers (e.g. DeepSeek)
+// strictly validate that "properties" is an object and reject null.
 func jsonSchema(properties map[string]any, required ...string) []byte {
 	schema := map[string]any{
-		schemaKeyType:       schemaKeyObject,
-		schemaKeyProperties: properties,
+		schemaKeyType:            schemaKeyObject,
 		schemaKeyAdditionalProps: false,
+	}
+	if len(properties) > 0 {
+		schema[schemaKeyProperties] = properties
 	}
 	if len(required) > 0 {
 		schema[schemaKeyRequired] = required

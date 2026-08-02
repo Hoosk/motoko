@@ -7,22 +7,22 @@ import (
 
 func TestToolSchemasAreValidJSON(t *testing.T) {
 	schemas := map[string][]byte{
-		"read":            schemaRead,
-		"write":           schemaWrite,
-		"bash":            schemaBash,
-		"grep":            schemaGrep,
-		"glob":            schemaGlob,
-		"inspect":         schemaInspect,
-		"web_fetch":       schemaWebFetch,
-		"web_search":      schemaWebSearch,
-		"task":            schemaTask,
-		"activate_skill":  schemaActivateSkill,
-		"question":        schemaQuestion,
-		"delegate":        schemaDelegate,
-		"brain_write":     schemaBrainWrite,
-		"brain_read":      schemaBrainRead,
-		"brain_list":      schemaBrainList,
-		"patch":           schemaPatch,
+		"read":           schemaRead,
+		"write":          schemaWrite,
+		"bash":           schemaBash,
+		"grep":           schemaGrep,
+		"glob":           schemaGlob,
+		"inspect":        schemaInspect,
+		"web_fetch":      schemaWebFetch,
+		"web_search":     schemaWebSearch,
+		"task":           schemaTask,
+		"activate_skill": schemaActivateSkill,
+		"question":       schemaQuestion,
+		"delegate":       schemaDelegate,
+		"brain_write":    schemaBrainWrite,
+		"brain_read":     schemaBrainRead,
+		"brain_list":     schemaBrainList,
+		"patch":          schemaPatch,
 	}
 	for name, raw := range schemas {
 		t.Run(name, func(t *testing.T) {
@@ -36,13 +36,23 @@ func TestToolSchemasAreValidJSON(t *testing.T) {
 			if doc["type"] != "object" {
 				t.Errorf("schema for %s must be an object schema, got %v", name, doc["type"])
 			}
-			if _, ok := doc["properties"]; !ok {
-				// brain_list has no properties, that's fine.
-				if name != "brain_list" {
-					t.Errorf("schema for %s missing properties", name)
-				}
+			if v, ok := doc["properties"]; ok && v == nil {
+				t.Errorf("schema for %s must not have properties:null (breaks strict validators)", name)
 			}
 		})
+	}
+}
+
+func TestBrainListSchemaHasNoNullProperties(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(schemaBrainList, &doc); err != nil {
+		t.Fatalf("schemaBrainList is not valid JSON: %v", err)
+	}
+	if v, ok := doc["properties"]; ok && v == nil {
+		t.Error("schemaBrainList must not emit \"properties\":null — strict LLM validators reject it")
+	}
+	if doc["type"] != "object" {
+		t.Errorf("schemaBrainList type must be object, got %v", doc["type"])
 	}
 }
 

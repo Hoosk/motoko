@@ -29,9 +29,9 @@ type Spec struct {
 }
 
 type Result struct {
-	Spec    Spec
 	Summary string
 	Output  string
+	Spec    Spec
 }
 
 type Tool interface {
