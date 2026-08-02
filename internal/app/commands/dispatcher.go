@@ -249,7 +249,7 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 		return func(inv Invocation) types.Response { return d.handleContextCommand(inv.Info) }
 	case "provider":
 		return func(inv Invocation) types.Response { return d.deps.ProvMgr.HandleProviderCommand(inv.Args) }
-	case "models":
+	case "models", "model":
 		return func(inv Invocation) types.Response { return d.deps.ProvMgr.HandleModelsCommand(inv.Args) }
 	case "sessions":
 		return func(inv Invocation) types.Response { return types.Response{Signal: "open-sessions-popup"} }

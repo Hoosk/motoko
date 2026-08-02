@@ -80,6 +80,7 @@ var commandDefinitions = []Definition{
 	{Name: "context", Usage: "/context", Summary: "Show raw system prompt sent to the agent"},
 	{Name: "provider", Usage: "/provider [list|add|use|remove]", Summary: "Manage configured LLM providers"},
 	{Name: "models", Usage: "/models [list|use <model>|info <model>]", Summary: "List or select models from the active provider"},
+	{Name: "model", Usage: "/model [list|use <model>|info <model>]", Summary: "Alias for /models"},
 	{Name: CmdThemes, Usage: "/themes [theme]", Summary: "List or switch visual themes"},
 	{Name: "settings", Usage: "/settings", Summary: "Open Motoko settings"},
 	{Name: "sessions", Usage: "/sessions", Summary: "List or switch between workspace sessions"},
