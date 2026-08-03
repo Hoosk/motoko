@@ -352,6 +352,12 @@ func (t *StreamableTransport) attachHeaders(req *http.Request) {
 	t.mu.Lock()
 	sessionID := t.sessionID
 	protocol := t.protocol
+	// Copy lastPayload under the lock so the read does not race with the
+	// write in Send() which also holds t.mu when updating it.
+	var lastPayload []byte
+	if len(t.lastPayload) > 0 {
+		lastPayload = append(lastPayload, t.lastPayload...)
+	}
 	t.mu.Unlock()
 
 	// In the stateless protocol the session id is gone; only legacy
@@ -366,7 +372,7 @@ func (t *StreamableTransport) attachHeaders(req *http.Request) {
 	// Mirror the JSON-RPC method and object name into headers so
 	// intermediaries can route without parsing the body (spec 2026-07-28).
 	var meta requestMeta
-	_ = json.Unmarshal(t.lastPayload, &meta)
+	_ = json.Unmarshal(lastPayload, &meta)
 	if meta.Method != "" {
 		req.Header.Set("Mcp-Method", meta.Method)
 	}
