@@ -1,7 +1,11 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -334,5 +338,110 @@ func TestToSDKChatMessagesAndTools(t *testing.T) {
 	}
 	if sdkTools[0].OfFunction == nil || sdkTools[0].OfFunction.Function.Name != "ls" {
 		t.Fatalf("unexpected tool mapping: %#v", sdkTools[0])
+	}
+}
+
+func TestResponseFromRawSSEText(t *testing.T) {
+	resp := &rawSSECompletedResponse{
+		Output: []rawSSEOutputItem{
+			{
+				Type: "message",
+				Content: []rawSSEContent{
+					{Type: "output_text", Text: "Hello, world!"},
+				},
+			},
+		},
+		Usage: rawSSEUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+	got := responseFromRawSSE(resp)
+	if got.FinalText != "Hello, world!" {
+		t.Errorf("expected FinalText=%q, got %q", "Hello, world!", got.FinalText)
+	}
+	if got.Usage.InputTokens != 10 || got.Usage.OutputTokens != 5 {
+		t.Errorf("unexpected usage: %+v", got.Usage)
+	}
+}
+
+func TestResponseFromRawSSEFunctionCall(t *testing.T) {
+	resp := &rawSSECompletedResponse{
+		Output: []rawSSEOutputItem{
+			{
+				Type:      "function_call",
+				Name:      "bash",
+				CallID:    "call_1",
+				Arguments: `{"command":"ls"}`,
+			},
+		},
+		Usage: rawSSEUsage{InputTokens: 20, OutputTokens: 10, TotalTokens: 30},
+	}
+	got := responseFromRawSSE(resp)
+	if len(got.PendingCalls) != 1 {
+		t.Fatalf("expected 1 pending call, got %d", len(got.PendingCalls))
+	}
+	call := got.PendingCalls[0]
+	if call.Name != "bash" || call.CallID != "call_1" {
+		t.Errorf("unexpected call: %+v", call)
+	}
+}
+
+func TestResponseFromRawSSENil(t *testing.T) {
+	got := responseFromRawSSE(nil)
+	if got.FinalText != "" || len(got.PendingCalls) != 0 {
+		t.Errorf("expected empty response for nil input, got %+v", got)
+	}
+}
+
+func TestStreamResponsesHandlesKeepAlive(t *testing.T) {
+	// Simulate the Zen SSE format: keep-alive comment + events with event: type lines.
+	sseBody := ": keep-alive\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" world\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello world\"}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":3,\"total_tokens\":8}}}\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseBody)
+	}))
+	defer srv.Close()
+
+	var deltas []string
+	onDelta := func(d provider.Delta) error {
+		if d.Content != "" {
+			deltas = append(deltas, d.Content)
+		}
+		return nil
+	}
+
+	var completed *rawSSECompletedResponse
+	err := postJSONStream(context.Background(), srv.Client(), srv.URL, map[string]any{}, map[string]string{}, func(data string) error {
+		var ev struct {
+			Response *rawSSECompletedResponse `json:"response"`
+			Type     string                   `json:"type"`
+			Delta    string                   `json:"delta"`
+		}
+		if jsonErr := json.Unmarshal([]byte(data), &ev); jsonErr != nil {
+			return nil
+		}
+		switch ev.Type {
+		case "response.output_text.delta":
+			if ev.Delta != "" {
+				return onDelta(provider.Delta{Content: ev.Delta})
+			}
+		case "response.completed":
+			completed = ev.Response
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("postJSONStream error: %v", err)
+	}
+
+	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != " world" {
+		t.Errorf("unexpected deltas: %v", deltas)
+	}
+	if completed == nil || len(completed.Output) == 0 {
+		t.Fatalf("expected completed response, got nil or empty")
+	}
+	resp := responseFromRawSSE(completed)
+	if resp.FinalText != "Hello world" {
+		t.Errorf("expected FinalText=%q, got %q", "Hello world", resp.FinalText)
 	}
 }

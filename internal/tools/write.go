@@ -18,9 +18,10 @@ func NewWriteTool() *WriteTool {
 
 func (t *WriteTool) Spec() Spec {
 	return Spec{
-		Name:    "write",
-		Summary: "Create or fully overwrite a file in the workspace with the given content.",
-		Usage:   "write <path>\\n<content>   (or write {\"path\": \"...\", \"content\": \"...\"})",
+		Name:        "write",
+		Summary:     "Create or fully overwrite a file in the workspace with the given content.",
+		Usage:       "write <path>\\n<content>   (or write {\"path\": \"...\", \"content\": \"...\"})",
+		InputSchema: schemaWrite,
 	}
 }
 

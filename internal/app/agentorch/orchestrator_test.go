@@ -281,3 +281,83 @@ func TestSystemPromptNoAgent(t *testing.T) {
 		t.Errorf("expected 'Agent not configured.', got %q", prompt)
 	}
 }
+
+// stubReadOnlyTool is an MCP-like tool that reports a readOnlyHint.
+type stubReadOnlyTool struct {
+	name     string
+	readOnly bool
+}
+
+func (s stubReadOnlyTool) Spec() tools.Spec { return tools.Spec{Name: s.name} }
+func (s stubReadOnlyTool) Run(context.Context, string) (tools.Result, error) {
+	return tools.Result{}, nil
+}
+func (s stubReadOnlyTool) IsReadOnly() bool { return s.readOnly }
+
+// stubPlainTool does not implement the IsReadOnly interface (a local tool).
+type stubPlainTool struct {
+	name string
+}
+
+func (s stubPlainTool) Spec() tools.Spec { return tools.Spec{Name: s.name} }
+func (s stubPlainTool) Run(context.Context, string) (tools.Result, error) {
+	return tools.Result{}, nil
+}
+
+func TestToolAllowedForAgentReadOnlyFiltering(t *testing.T) {
+	readOnlyDef := agent.AgentDef{Name: "plan"} // AllowWrite defaults to false
+	buildDef := agent.AgentDef{Name: "build", Permissions: agent.AgentPermissions{AllowWrite: true}}
+
+	mcpReadOnly := stubReadOnlyTool{name: "mcp_git_read", readOnly: true}
+	mcpMutating := stubReadOnlyTool{name: "mcp_git_write", readOnly: false}
+	local := stubPlainTool{name: "read"}
+
+	cases := []struct {
+		name string
+		tool tools.Tool
+		def  agent.AgentDef
+		want bool
+	}{
+		{"read-only agent keeps annotated read-only MCP tool", mcpReadOnly, readOnlyDef, true},
+		{"read-only agent excludes mutating MCP tool", mcpMutating, readOnlyDef, false},
+		{"read-only agent keeps local tools (no IsReadOnly interface)", local, readOnlyDef, true},
+		{"build agent keeps mutating MCP tool", mcpMutating, buildDef, true},
+		{"build agent keeps read-only MCP tool", mcpReadOnly, buildDef, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := toolAllowedForAgent(tc.tool, tc.def, nil, nil); got != tc.want {
+				t.Errorf("toolAllowedForAgent(%s) = %v, want %v", tc.tool.Spec().Name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestToolAllowedForAgentExplicitLists(t *testing.T) {
+	def := agent.AgentDef{Name: "custom", Permissions: agent.AgentPermissions{
+		AllowedTools: []string{"read"},
+		AllowWrite:   true,
+	}}
+	// The allow/deny slices are resolved at the call site (agent def or
+	// override) and passed in; nil means "no explicit list".
+	if !toolAllowedForAgent(stubPlainTool{name: "read"}, def, []string{"read"}, nil) {
+		t.Error("read should be allowed by the allowed list")
+	}
+	if toolAllowedForAgent(stubPlainTool{name: "write"}, def, []string{"read"}, nil) {
+		t.Error("write should be excluded by the allowed list")
+	}
+
+	// Deny list: an explicitly denied tool is always excluded, even with
+	// allow-write enabled.
+	defNoWrite := agent.AgentDef{Name: "custom", Permissions: agent.AgentPermissions{AllowWrite: true}}
+	if toolAllowedForAgent(stubPlainTool{name: "write"}, defNoWrite, nil, []string{"write"}) {
+		t.Error("write should be excluded by the denied list")
+	}
+
+	// Write gating: with allow-write false, bash is excluded even without
+	// any explicit list.
+	defReadOnly := agent.AgentDef{Name: "custom"}
+	if toolAllowedForAgent(stubPlainTool{name: "bash"}, defReadOnly, nil, nil) {
+		t.Error("bash should be excluded when allow-write is false")
+	}
+}

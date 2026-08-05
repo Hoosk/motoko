@@ -24,9 +24,10 @@ func NewBrainWriteTool(p BrainProvider) *BrainWriteTool {
 
 func (t *BrainWriteTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_write",
-		Summary: "Write or update a file in the session brain",
-		Usage:   "brain_write <filename> <content>",
+		Name:        "brain_write",
+		Summary:     "Write or update a file in the session brain",
+		Usage:       "brain_write <filename> <content>",
+		InputSchema: schemaBrainWrite,
 	}
 }
 
@@ -114,9 +115,10 @@ func NewBrainReadTool(p BrainProvider) *BrainReadTool {
 
 func (t *BrainReadTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_read",
-		Summary: "Read a file from the session brain, optionally with pagination",
-		Usage:   "brain_read <filename> [offset] [limit]",
+		Name:        "brain_read",
+		Summary:     "Read a file from the session brain, optionally with pagination",
+		Usage:       "brain_read <filename> [offset] [limit]",
+		InputSchema: schemaBrainRead,
 	}
 }
 
@@ -268,9 +270,10 @@ func NewBrainListTool(p BrainProvider) *BrainListTool {
 
 func (t *BrainListTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_list",
-		Summary: "List all files in the session brain",
-		Usage:   "brain_list",
+		Name:        "brain_list",
+		Summary:     "List all files in the session brain",
+		Usage:       "brain_list",
+		InputSchema: schemaBrainList,
 	}
 }
 

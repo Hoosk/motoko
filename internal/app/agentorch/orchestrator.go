@@ -237,53 +237,71 @@ func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.Agen
 	}
 
 	toolsRegistry := o.toolsFn().Filter(func(t tools.Tool) bool {
-		name := t.Spec().Name
-		if len(allowedTools) > 0 {
-			allowed := false
-			for _, allowedName := range allowedTools {
-				if strings.EqualFold(name, allowedName) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return false
-			}
-		}
-		if len(deniedTools) > 0 {
-			for _, deniedName := range deniedTools {
-				if strings.EqualFold(name, deniedName) {
-					return false
-				}
-			}
-		}
-		if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
-			return false
-		}
-		if name == "delegate" && !aDef.Permissions.AllowDelegate {
-			return false
-		}
-		if name == "question" && !aDef.Permissions.AllowQuestion {
-			return false
-		}
-		if name == "task" && !aDef.Permissions.AllowTask {
-			return false
-		}
-		if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
-			if name == "brain_write" {
-				return false
-			}
-		}
-		if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
-			return false
-		}
-		return true
+		return toolAllowedForAgent(t, aDef, allowedTools, deniedTools)
 	})
 
 	newAgent := agent.New(client, toolsRegistry)
 	newAgent.SetDebug(o.debug)
 	newAgent.SetAgentOverride(sysPrompt)
 	return newAgent
+}
+
+// toolAllowedForAgent applies the permission model for a single tool:
+// explicit allow/deny lists, write-tool gating, MCP readOnlyHint gating in
+// read-only agents, and the per-feature capability flags. The allow/deny
+// slices may come from agent overrides, which is why they are passed
+// separately from aDef.Permissions.
+func toolAllowedForAgent(t tools.Tool, aDef agent.AgentDef, allowedTools, deniedTools []string) bool {
+	name := t.Spec().Name
+	if len(allowedTools) > 0 {
+		allowed := false
+		for _, allowedName := range allowedTools {
+			if strings.EqualFold(name, allowedName) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
+	if len(deniedTools) > 0 {
+		for _, deniedName := range deniedTools {
+			if strings.EqualFold(name, deniedName) {
+				return false
+			}
+		}
+	}
+	if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
+		return false
+	}
+	// MCP tools advertise a readOnlyHint. In read-only agents, exclude any
+	// tool that is NOT explicitly annotated read-only: an absent hint means
+	// the tool may mutate state. The hint comes from an untrusted server, so
+	// the conservative default is the safe one.
+	if !aDef.Permissions.AllowWrite {
+		if ro, ok := t.(interface{ IsReadOnly() bool }); ok && !ro.IsReadOnly() {
+			return false
+		}
+	}
+	if name == "delegate" && !aDef.Permissions.AllowDelegate {
+		return false
+	}
+	if name == "question" && !aDef.Permissions.AllowQuestion {
+		return false
+	}
+	if name == "task" && !aDef.Permissions.AllowTask {
+		return false
+	}
+	if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
+		if name == "brain_write" {
+			return false
+		}
+	}
+	if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
+		return false
+	}
+	return true
 }
 
 func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
@@ -467,6 +485,13 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 
 func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.ContextInfo, input string) (context.Context, system.ContextInfo, []provider.ConversationItem, error) {
 	if o.agent == nil || !o.agent.Configured() {
+		// Try to produce a more actionable error message when the active
+		// provider simply has no model selected yet.
+		if cfg := o.configFn(); cfg != nil {
+			if active, ok := cfg.Active(); ok && strings.TrimSpace(active.Model) == "" {
+				return ctx, system.ContextInfo{}, nil, fmt.Errorf("provider %q has no model selected — use /models to pick one", active.Name)
+			}
+		}
 		return ctx, system.ContextInfo{}, nil, fmt.Errorf("agent not configured")
 	}
 	if info.Path == "" {

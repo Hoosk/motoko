@@ -1,0 +1,864 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Hoosk/motoko/internal/tracelog"
+)
+
+// ToolRegistrar is the abstraction the manager uses to publish tools into
+// the host. It is implemented as a pair of callbacks so the mcp package
+// remains free of an import cycle with internal/tools.
+//
+// Register is called once per (server, tool) that the manager wants to make
+// available. Unregister is called when a tool disappears (server shutdown or
+// notifications/tools/list_changed) and receives the same prefixed name the
+// registrar saw in Register.
+type ToolRegistrar struct {
+	Register   func(tool ToolAdapter)
+	Unregister func(name string) bool
+}
+
+// ToolAdapter is the surface a tool must expose to be registered.
+type ToolAdapter interface {
+	Spec() ToolSpec
+	Run(ctx context.Context, args string) (ToolResult, error)
+}
+
+// ToolSpec is the tool metadata exposed to the host.
+type ToolSpec struct {
+	Name        string
+	Title       string
+	Summary     string
+	Description string
+	Usage       string
+	ReadOnly    bool
+	// InputSchema is the raw inputSchema advertised by the server, used by
+	// the host to describe the tool natively to the LLM.
+	InputSchema json.RawMessage
+}
+
+// ToolResult is the result of a tool invocation.
+type ToolResult struct {
+	Summary string
+	Output  string
+	Spec    ToolSpec
+}
+
+// pendingRegistration carries the data required to build a RemoteTool during
+// a refresh pass.
+type pendingRegistration struct {
+	manager *Manager
+	name    string
+	server  string
+	tool    Tool
+}
+
+// ServerConfig is the configuration of a single MCP server. The full struct
+// (with command/args/env/url/headers) is declared in the config package; we
+// only need the transport-agnostic fields here.
+type ServerConfig struct {
+	Headers   map[string]string
+	Name      string
+	Transport string
+	Command   string
+	URL       string
+	Args      []string
+	Env       []string
+	Disabled  bool
+}
+
+// Manager owns the set of connected MCP servers and synchronises their tools
+// with the host's tool registry.
+type Manager struct {
+	registry          ToolRegistrar
+	servers           map[string]*managedServer
+	onResourceUpdated func(serverName string, uri string)
+	rootsFn           func(ctx context.Context) ([]Root, error)
+	samplingFn        func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
+	elicitationFn     ElicitationFn
+	timeout           time.Duration
+	mu                sync.Mutex
+}
+
+// managedServer wraps a Client with the bookkeeping required to track its
+// currently-registered tools, resources and prompts.
+type managedServer struct {
+	err       error
+	client    *Client
+	tools     map[string]bool
+	cancel    context.CancelFunc
+	resources []Resource
+	templates []ResourceTemplate
+	prompts   []Prompt
+	cfg       ServerConfig
+}
+
+// ManagerConfig configures the manager.
+type ManagerConfig struct {
+	Capabilities  ClientCapabilities
+	Registry      ToolRegistrar
+	RootsFn       func(ctx context.Context) ([]Root, error)
+	SamplingFn    func(ctx context.Context, params CreateMessageParams) (*CreateMessageResult, error)
+	ElicitationFn ElicitationFn
+	ClientInfo    Implementation
+	Timeout       time.Duration
+}
+
+// NewManager creates a manager. The given registry receives the tools
+// exposed by every successfully-started server. The ClientInfo and
+// Capabilities are reserved for future customisation; in phase 1 we use
+// the Motoko defaults regardless of the values passed.
+func NewManager(cfg ManagerConfig) *Manager {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	_ = cfg.ClientInfo
+	_ = cfg.Capabilities
+	return &Manager{
+		registry:      cfg.Registry,
+		timeout:       cfg.Timeout,
+		servers:       make(map[string]*managedServer),
+		rootsFn:       cfg.RootsFn,
+		samplingFn:    cfg.SamplingFn,
+		elicitationFn: cfg.ElicitationFn,
+	}
+}
+
+// lookupServer returns a snapshot of the managed server with the given name.
+func (m *Manager) lookupServer(name string) (*managedServer, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.servers[name]
+	if !ok {
+		return nil, fmt.Errorf("mcp: unknown server %q", name)
+	}
+	return s, nil
+}
+
+// Start launches the given servers. Already-running servers with the same
+// name are replaced. Each server runs on its own goroutine.
+func (m *Manager) Start(ctx context.Context, servers []ServerConfig) {
+	if m == nil {
+		return
+	}
+	for _, cfg := range servers {
+		if cfg.Disabled {
+			continue
+		}
+		m.startOne(ctx, cfg)
+	}
+}
+
+// Stop shuts every server down. After Stop returns, no more tools belonging
+// to MCP servers remain in the registry.
+func (m *Manager) Stop() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	servers := make([]*managedServer, 0, len(m.servers))
+	for _, s := range m.servers {
+		servers = append(servers, s)
+	}
+	m.servers = make(map[string]*managedServer)
+	m.mu.Unlock()
+	for _, s := range servers {
+		m.unregisterServerTools(s)
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.client != nil {
+			_ = s.client.Close()
+		}
+	}
+}
+
+// StopServer shuts down a single server by name and unregisters its tools.
+func (m *Manager) StopServer(name string) bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	s, ok := m.servers[name]
+	if ok {
+		delete(m.servers, name)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	m.unregisterServerTools(s)
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.client != nil {
+		_ = s.client.Close()
+	}
+	return true
+}
+
+// Servers returns a snapshot of the currently-tracked servers along with
+// their status. Useful for `/mcp servers` and TUI status panels.
+func (m *Manager) Servers() []ServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	names := make([]string, 0, len(m.servers))
+	for name := range m.servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]ServerStatus, 0, len(names))
+	for _, name := range names {
+		s := m.servers[name]
+		tools := make([]string, 0, len(s.tools))
+		for t := range s.tools {
+			tools = append(tools, t)
+		}
+		sort.Strings(tools)
+		out = append(out, ServerStatus{
+			Name:      name,
+			Transport: s.cfg.Transport,
+			Connected: s.client != nil,
+			ToolCount: len(s.tools),
+			Tools:     tools,
+			Err:       s.err,
+		})
+	}
+	return out
+}
+
+// ServerStatus is the snapshot exposed by Servers.
+type ServerStatus struct {
+	Err       error
+	Name      string
+	Transport string
+	Tools     []string
+	ToolCount int
+	Connected bool
+}
+
+func (m *Manager) startOne(parent context.Context, cfg ServerConfig) {
+	if cfg.Name == "" {
+		// Spec doesn't require names but we need them to deduplicate.
+		cfg.Name = deriveName(cfg)
+	}
+
+	serverCtx, cancel := context.WithCancel(parent)
+	m.mu.Lock()
+	if existing, ok := m.servers[cfg.Name]; ok {
+		// Replace: tear down old client first.
+		m.unregisterServerTools(existing)
+		if existing.cancel != nil {
+			existing.cancel()
+		}
+		if existing.client != nil {
+			_ = existing.client.Close()
+		}
+	}
+	entry := &managedServer{
+		cfg:    cfg,
+		tools:  make(map[string]bool),
+		cancel: cancel,
+	}
+	m.servers[cfg.Name] = entry
+	m.mu.Unlock()
+
+	go m.runServer(serverCtx, entry)
+}
+
+func (m *Manager) runServer(ctx context.Context, s *managedServer) {
+	backoff := 1 * time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		transport, cleanup, err := buildTransport(s.cfg)
+		if err != nil {
+			m.markErr(s, fmt.Errorf("transport: %w", err))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+				backoff = min(backoff*2, 30*time.Second)
+				continue
+			}
+		}
+
+		client := NewClient(ClientConfig{
+			Transport:      transport,
+			ClientInfo:     defaultClientInfo(),
+			Capabilities:   defaultClientCapabilities(),
+			RequestTimeout: m.timeout,
+			OnNotification: func(method string, params json.RawMessage) {
+				m.handleNotification(s, method, params)
+			},
+			OnRequest: func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+				return m.handleInboundRequest(ctx, s, method, params)
+			},
+			OnInputRequests: func(ctx context.Context, requests map[string]InputRequest) (map[string]json.RawMessage, error) {
+				return m.onInputRequests(ctx, s, requests)
+			},
+		})
+		client.Start(ctx)
+
+		if err := client.Negotiate(ctx); err != nil {
+			m.markErr(s, fmt.Errorf("negotiate: %w", err))
+			_ = client.Close()
+			if cleanup != nil {
+				cleanup()
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+				backoff = min(backoff*2, 30*time.Second)
+				continue
+			}
+		}
+
+		m.mu.Lock()
+		s.client = client
+		s.err = nil
+		m.mu.Unlock()
+
+		// Reset backoff on successful connection
+		backoff = 1 * time.Second
+
+		caps := client.ServerCapabilities()
+		if err := m.refreshTools(ctx, s); err != nil && caps.Tools != nil {
+			m.markErr(s, err)
+		}
+		if err := m.refreshResources(ctx, s); err != nil && caps.Resources != nil {
+			m.markErr(s, err)
+		}
+		if caps.Resources != nil {
+			if err := m.refreshTemplates(ctx, s); err != nil {
+				m.markErr(s, err)
+			}
+		}
+		if err := m.refreshPrompts(ctx, s); err != nil && caps.Prompts != nil {
+			m.markErr(s, err)
+		}
+
+		// In the stateless protocol, change notifications arrive on a
+		// long-lived subscriptions/listen stream instead of the legacy GET
+		// stream. Open it (fire-and-forget) with the notification types we
+		// know how to react to.
+		if client.NegotiatedProtocol() == ProtocolVersionModern {
+			filter := SubscriptionFilter{
+				ToolsListChanged:     true,
+				PromptsListChanged:   true,
+				ResourcesListChanged: true,
+			}
+			if err := client.OpenSubscriptionStream(ctx, filter); err != nil {
+				tracelog.Logf("MCP: failed to open subscriptions/listen on %q: %v", s.cfg.Name, err)
+			}
+		}
+
+		// Block until context is cancelled or client exits
+		select {
+		case <-ctx.Done():
+			if cleanup != nil {
+				cleanup()
+			}
+			return
+		case <-client.doneCh:
+			if cleanup != nil {
+				cleanup()
+			}
+			m.mu.Lock()
+			s.client = nil
+			m.unregisterServerTools(s)
+			m.mu.Unlock()
+		}
+	}
+}
+
+func (m *Manager) markErr(s *managedServer, err error) {
+	m.mu.Lock()
+	s.err = err
+	m.mu.Unlock()
+}
+
+func (m *Manager) handleNotification(s *managedServer, method string, params json.RawMessage) {
+	switch method {
+	case "notifications/tools/list_changed":
+		m.mu.Lock()
+		client := s.client
+		m.mu.Unlock()
+		if client == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+		defer cancel()
+		if err := m.refreshTools(ctx, s); err != nil {
+			m.markErr(s, err)
+		}
+	case "notifications/resources/list_changed":
+		m.mu.Lock()
+		client := s.client
+		m.mu.Unlock()
+		if client == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+		defer cancel()
+		if err := m.refreshResources(ctx, s); err != nil {
+			m.markErr(s, err)
+		}
+		if err := m.refreshTemplates(ctx, s); err != nil {
+			m.markErr(s, err)
+		}
+	case "notifications/prompts/list_changed":
+		m.mu.Lock()
+		client := s.client
+		m.mu.Unlock()
+		if client == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+		defer cancel()
+		if err := m.refreshPrompts(ctx, s); err != nil {
+			m.markErr(s, err)
+		}
+	case "notifications/resources/updated":
+		var updated struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(params, &updated); err == nil {
+			m.mu.Lock()
+			cb := m.onResourceUpdated
+			name := s.cfg.Name
+			m.mu.Unlock()
+			if cb != nil {
+				cb(name, updated.URI)
+			}
+		}
+	case "notifications/message", "notifications/progress", "notifications/cancelled":
+		// Phase 1: log to stderr-equivalent; the manager could forward to a
+		// host logger in a later phase. No-op for now.
+	}
+}
+
+func (m *Manager) refreshTools(ctx context.Context, s *managedServer) error {
+	client := s.client
+	if client == nil {
+		return nil
+	}
+	tools, err := client.ListAllTools(ctx)
+	if err != nil {
+		return err
+	}
+	// Compute new set with prefix.
+	newSet := make(map[string]bool, len(tools))
+	pending := make([]pendingRegistration, 0, len(tools))
+	for _, t := range tools {
+		registeredName := ToolPrefix(s.cfg.Name, t.Name)
+		newSet[registeredName] = true
+		pending = append(pending, pendingRegistration{
+			name:    registeredName,
+			server:  s.cfg.Name,
+			tool:    t,
+			manager: m,
+		})
+	}
+
+	// Remove tools that disappeared.
+	m.mu.Lock()
+	old := s.tools
+	m.mu.Unlock()
+	for name := range old {
+		if !newSet[name] {
+			m.unregister(name)
+		}
+	}
+	// Add new / replacement tools.
+	m.mu.Lock()
+	s.tools = newSet
+	m.mu.Unlock()
+	for _, reg := range pending {
+		m.register(NewRemoteToolAdapter(reg.server, reg.name, reg.tool, reg.manager))
+	}
+	return nil
+}
+
+func (m *Manager) unregisterServerTools(s *managedServer) {
+	if s == nil {
+		return
+	}
+	for name := range s.tools {
+		m.unregister(name)
+	}
+}
+
+func (m *Manager) refreshResources(ctx context.Context, s *managedServer) error {
+	client := s.client
+	if client == nil {
+		return nil
+	}
+	resources, err := client.ListAllResources(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	s.resources = resources
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) refreshTemplates(ctx context.Context, s *managedServer) error {
+	client := s.client
+	if client == nil {
+		return nil
+	}
+	templates, err := client.ListAllResourceTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	s.templates = templates
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) refreshPrompts(ctx context.Context, s *managedServer) error {
+	client := s.client
+	if client == nil {
+		return nil
+	}
+	prompts, err := client.ListAllPrompts(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	s.prompts = prompts
+	m.mu.Unlock()
+	return nil
+}
+
+// ListResources returns all cached resources across all connected servers.
+func (m *Manager) ListResources(ctx context.Context) []Resource {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var all []Resource
+	for _, s := range m.servers {
+		all = append(all, s.resources...)
+	}
+	return all
+}
+
+// ListResourceTemplates returns all cached resource templates across all connected servers.
+func (m *Manager) ListResourceTemplates(ctx context.Context) []ResourceTemplate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var all []ResourceTemplate
+	for _, s := range m.servers {
+		all = append(all, s.templates...)
+	}
+	return all
+}
+
+// ReadResource reads a resource from the specified server.
+func (m *Manager) ReadResource(ctx context.Context, serverName string, uri string) (*ReadResourceResult, error) {
+	s, err := m.lookupServer(serverName)
+	if err != nil {
+		return nil, err
+	}
+	if s.client == nil {
+		return nil, fmt.Errorf("mcp: server %q not connected", serverName)
+	}
+	return s.client.ReadResource(ctx, uri)
+}
+
+// SubscribeResource subscribes to updates for a resource on the specified server.
+func (m *Manager) SubscribeResource(ctx context.Context, serverName string, uri string) error {
+	s, err := m.lookupServer(serverName)
+	if err != nil {
+		return err
+	}
+	if s.client == nil {
+		return fmt.Errorf("mcp: server %q not connected", serverName)
+	}
+	return s.client.Subscribe(ctx, uri)
+}
+
+// UnsubscribeResource unsubscribes from updates for a resource on the specified server.
+func (m *Manager) UnsubscribeResource(ctx context.Context, serverName string, uri string) error {
+	s, err := m.lookupServer(serverName)
+	if err != nil {
+		return err
+	}
+	if s.client == nil {
+		return fmt.Errorf("mcp: server %q not connected", serverName)
+	}
+	return s.client.Unsubscribe(ctx, uri)
+}
+
+// PromptHost identifies a prompt by its owning server so callers can route
+// `prompts/get` correctly when a prompt name is hosted by more than one
+// connected server.
+type PromptHost struct {
+	Server string
+	Prompt
+}
+
+// ListPrompts returns all cached prompts across all connected servers.
+func (m *Manager) ListPrompts(ctx context.Context) []Prompt {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var all []Prompt
+	for _, s := range m.servers {
+		all = append(all, s.prompts...)
+	}
+	return all
+}
+
+// ListPromptHosts returns every (server, prompt) pair the manager has cached.
+// Callers use it to build dynamic command surfaces (e.g. /<prompt-name>) that
+// resolve to the right server at invocation time.
+func (m *Manager) ListPromptHosts() []PromptHost {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []PromptHost
+	for _, s := range m.servers {
+		for _, p := range s.prompts {
+			out = append(out, PromptHost{Server: s.cfg.Name, Prompt: p})
+		}
+	}
+	return out
+}
+
+// GetPrompt retrieves a prompt from the specified server.
+func (m *Manager) GetPrompt(ctx context.Context, serverName string, promptName string, arguments map[string]string) (*GetPromptResult, error) {
+	s, err := m.lookupServer(serverName)
+	if err != nil {
+		return nil, err
+	}
+	if s.client == nil {
+		return nil, fmt.Errorf("mcp: server %q not connected", serverName)
+	}
+	return s.client.GetPrompt(ctx, promptName, arguments)
+}
+
+func (m *Manager) register(t ToolAdapter) {
+	if m.registry.Register == nil {
+		return
+	}
+	m.registry.Register(t)
+}
+
+func (m *Manager) unregister(name string) {
+	if m.registry.Unregister == nil {
+		return
+	}
+	m.registry.Unregister(name)
+}
+
+// ToolPrefix produces the registry name for a tool exposed by a given server.
+// We prefix with the server name to avoid collisions across servers and with
+// the local tool catalog. The original (unprefixed) name is preserved in the
+// remote tool's spec so the MCP server sees it unchanged.
+func ToolPrefix(serverName, toolName string) string {
+	serverSlug := slugify(serverName)
+	tool := sanitizeToolName(toolName)
+	return "mcp_" + serverSlug + "_" + tool
+}
+
+// sanitizeToolName enforces the tool-name format from the MCP spec (2026-07-28):
+// 1-128 characters, case-sensitive, only A-Za-z0-9 `_` `-` `.`. Names that
+// contain characters outside that set (e.g. a server exposing "my tool") are
+// normalized by replacing each invalid rune with `_`; the name is truncated to
+// 128 chars and never returns empty. The original name is kept in the remote
+// tool's spec so the server still sees its own name on tools/call.
+func sanitizeToolName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '_', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	name := strings.TrimLeft(b.String(), "._-")
+	if name == "" {
+		return "tool"
+	}
+	if len(name) > 128 {
+		name = name[:128]
+	}
+	return name
+}
+
+func slugify(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('_')
+				prevDash = true
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "_")
+}
+
+func deriveName(cfg ServerConfig) string {
+	if cfg.Name != "" {
+		return cfg.Name
+	}
+	if cfg.Command != "" {
+		return cfg.Command
+	}
+	if cfg.URL != "" {
+		return cfg.URL
+	}
+	return "mcp-server"
+}
+
+// buildTransport creates a Transport for the given server config. The returned
+// cleanup, when non-nil, must be called once the transport is no longer
+// needed; it flushes and closes per-transport resources (notably the stderr
+// writer for stdio servers).
+//
+// For HTTP-style transports the Streamable HTTP transport (spec 2025-06-18)
+// is tried first. If the endpoint does not support it (returns 4xx on the
+// initialize POST), the legacy HTTP+SSE transport from spec 2024-11-05 is
+// used as a fallback so older servers keep working.
+func buildTransport(cfg ServerConfig) (Transport, func(), error) {
+	switch strings.ToLower(cfg.Transport) {
+	case "stdio", "":
+		stderr := newStderrWriter(cfg.Name)
+		t, err := NewStdioTransport(StdioConfig{
+			Command: cfg.Command,
+			Args:    cfg.Args,
+			Env:     cfg.Env,
+			Stderr:  stderr,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return t, func() { _ = stderr.Close() }, nil
+	case "sse":
+		return NewHTTPTransport(cfg.URL, cfg.Headers, 0), nil, nil
+	case "http", "https", "streamable":
+		return NewStreamableTransport(StreamableConfig{
+			Endpoint: cfg.URL,
+			Headers:  cfg.Headers,
+		}), nil, nil
+	default:
+		return nil, nil, fmt.Errorf("mcp: transport %q not supported", cfg.Transport)
+	}
+}
+
+func defaultClientInfo() Implementation {
+	return Implementation{
+		Name:        "motoko",
+		Title:       "Motoko",
+		Version:     "0.1.0",
+		Description: "Motoko terminal coding assistant acting as MCP host.",
+	}
+}
+
+func defaultClientCapabilities() ClientCapabilities {
+	roots := struct {
+		ListChanged bool `json:"listChanged,omitempty"`
+	}{ListChanged: true}
+	sampling := struct{}{}
+	elicitation := struct{}{}
+	// Elicitation is advertised now that both the legacy inbound request and
+	// the MRTR input-request paths are implemented (elicitationFn set by the
+	// runtime). If the runtime leaves the callback nil, servers that use it
+	// receive a decline rather than MethodNotFound.
+	return ClientCapabilities{
+		Roots:       &roots,
+		Sampling:    &sampling,
+		Elicitation: &elicitation,
+	}
+}
+
+func (m *Manager) handleInboundRequest(ctx context.Context, s *managedServer, method string, params json.RawMessage) (any, error) {
+	switch method {
+	case "roots/list":
+		m.mu.Lock()
+		rootsFn := m.rootsFn
+		m.mu.Unlock()
+		if rootsFn == nil {
+			return ListRootsResult{Roots: []Root{}}, nil
+		}
+		roots, err := rootsFn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return ListRootsResult{Roots: roots}, nil
+
+	case "sampling/createMessage":
+		m.mu.Lock()
+		samplingFn := m.samplingFn
+		m.mu.Unlock()
+		if samplingFn == nil {
+			return nil, &RPCError{Code: ErrCodeMethodNotFound, Message: "sampling not supported by host"}
+		}
+		var cmp CreateMessageParams
+		if err := json.Unmarshal(params, &cmp); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return samplingFn(ctx, cmp)
+
+	case "elicitation/create":
+		// Legacy path (protocol <= 2025-11-25): servers send the request
+		// directly instead of the MRTR result. Modern servers go through
+		// OnInputRequests.
+		var req ElicitRequest
+		if len(params) > 0 {
+			if err := json.Unmarshal(params, &req); err != nil {
+				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: "invalid elicitation/create params"}
+			}
+		}
+		m.mu.Lock()
+		fn := m.elicitationFn
+		m.mu.Unlock()
+		if fn == nil {
+			return ElicitResult{Action: ElicitActionDecline}, nil
+		}
+		res, err := fn(ctx, s.cfg.Name, req)
+		if err != nil {
+			return nil, err
+		}
+		if res == nil {
+			return ElicitResult{Action: ElicitActionCancel}, nil
+		}
+		return res, nil
+
+	default:
+		return nil, &RPCError{Code: ErrCodeMethodNotFound, Message: fmt.Sprintf("method %q not supported", method)}
+	}
+}
+
+// NotifyRootsChanged sends a notifications/roots/list_changed notification to all connected servers.
+func (m *Manager) NotifyRootsChanged(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.servers {
+		if s.client != nil {
+			_ = s.client.Send(ctx, "notifications/roots/list_changed", nil)
+		}
+	}
+	return nil
+}

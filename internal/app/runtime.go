@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/mcp"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
@@ -110,6 +114,7 @@ type Runtime struct {
 	tachikomas        *tachikoma.Manager
 	pending           *pendingShell
 	tools             *tools.Registry
+	mcpMgr            *mcp.Manager
 	updateDone        chan struct{}
 	inputMode         InputMode
 	version           string
@@ -224,6 +229,53 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
 			return r.tools.Run(ctx, name, args)
 		},
+		MCPServersFn: func() []mcp.ServerStatus {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.Servers()
+		},
+		AddMCPServerFn: func(srv config.MCPServerConfig) {
+			if r.mcpMgr != nil {
+				r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
+			}
+		},
+		RemoveMCPServerFn: func(name string) bool {
+			if r.mcpMgr == nil {
+				return false
+			}
+			return r.mcpMgr.StopServer(name)
+		},
+		MCPResourcesFn: func(ctx context.Context) []mcp.Resource {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListResources(ctx)
+		},
+		MCPResourceReadFn: func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error) {
+			if r.mcpMgr == nil {
+				return nil, fmt.Errorf("no MCP manager available")
+			}
+			return r.mcpMgr.ReadResource(ctx, serverName, uri)
+		},
+		MCPPromptsFn: func(ctx context.Context) []mcp.Prompt {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListPrompts(ctx)
+		},
+		MCPPromptHostsFn: func(_ context.Context) []mcp.PromptHost {
+			if r.mcpMgr == nil {
+				return nil
+			}
+			return r.mcpMgr.ListPromptHosts()
+		},
+		MCPGetPromptFn: func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+			if r.mcpMgr == nil {
+				return nil, fmt.Errorf("no MCP manager available")
+			}
+			return r.mcpMgr.GetPrompt(ctx, serverName, name, args)
+		},
 
 		ProvMgr: r.provMgr,
 
@@ -277,6 +329,90 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 	if len(sList) > 0 {
 		r.tools.Register(tools.NewActivateSkillTool(sList))
 	}
+
+	// MCP manager is built last so it can publish tools directly into the
+	// already-populated registry. Servers are started on Runtime.Start so the
+	// background context is available for transports and to honour the
+	// process-wide cancellation during shutdown.
+	r.mcpMgr = mcp.NewManager(mcp.ManagerConfig{
+		Registry: mcp.ToolRegistrar{
+			Register: func(adapter mcp.ToolAdapter) {
+				if adapter == nil {
+					return
+				}
+				r.tools.Register(tools.NewMCPRemoteTool(adapter))
+			},
+			Unregister: func(name string) bool {
+				return r.tools.Unregister(name)
+			},
+		},
+		RootsFn: func(ctx context.Context) ([]mcp.Root, error) {
+			var path string
+			if r.sesMgr != nil && r.sesMgr.CurrentSession() != nil {
+				path = r.sesMgr.CurrentSession().Workspace
+			}
+			if path == "" {
+				var err error
+				path, err = os.Getwd()
+				if err != nil {
+					return nil, err
+				}
+			}
+			uri := "file://" + filepath.ToSlash(path)
+			return []mcp.Root{
+				{
+					URI:  uri,
+					Name: "workspace",
+				},
+			}, nil
+		},
+		SamplingFn: func(ctx context.Context, params mcp.CreateMessageParams) (*mcp.CreateMessageResult, error) {
+			items := make([]provider.ConversationItem, len(params.Messages))
+			for i, m := range params.Messages {
+				role := provider.RoleUser
+				if m.Role == "assistant" {
+					role = provider.RoleAssistant
+				}
+				items[i] = provider.ConversationItem{
+					Role:    role,
+					Content: m.Content.Text,
+				}
+			}
+
+			cfg, ok := r.provMgr.GetActiveProviderConfig()
+			if !ok {
+				return nil, fmt.Errorf("no active provider configured")
+			}
+			pClient, err := r.provMgr.ProviderClient(cfg)
+			if err != nil {
+				return nil, err
+			}
+
+			resp, err := pClient.Complete(ctx, params.SystemPrompt, items, provider.ToolSet{})
+			if err != nil {
+				return nil, err
+			}
+
+			var modelName string
+			if base, ok := pClient.(interface{ Model() string }); ok {
+				modelName = base.Model()
+			} else {
+				modelName = pClient.Summary()
+			}
+
+			return &mcp.CreateMessageResult{
+				Content: mcp.ContentBlock{
+					Type: "text",
+					Text: resp.FinalText,
+				},
+				Model: modelName,
+				Role:  "assistant",
+			}, nil
+		},
+		ElicitationFn: func(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return r.handleElicitation(ctx, serverName, req)
+		},
+	})
 
 	return r
 }
@@ -484,6 +620,9 @@ func (r *Runtime) Start(ctx context.Context) {
 	if r.tachikomas != nil {
 		r.tachikomas.Start(r.backgroundCtx)
 	}
+	if r.mcpMgr != nil && r.config != nil && len(r.config.MCPServers) > 0 {
+		r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs(r.config.MCPServers))
+	}
 	_ = provider.LoadCatalog(context.Background())
 	r.agOrch.RefreshAgent()
 	go func() {
@@ -561,10 +700,150 @@ func (r *Runtime) BackgroundContext() context.Context {
 	return context.Background()
 }
 
+func (r *Runtime) AddMCPServer(srv config.MCPServerConfig) error {
+	if r.config == nil {
+		return fmt.Errorf("no config loaded")
+	}
+	r.config.UpsertMCPServer(srv)
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	if r.mcpMgr != nil {
+		bgCtx := r.backgroundCtx
+		if bgCtx == nil {
+			bgCtx = context.Background()
+		}
+		r.mcpMgr.Start(bgCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
+	}
+	return nil
+}
+
 func (r *Runtime) Stop() {
 	if r.backgroundCancel != nil {
 		r.backgroundCancel()
 	}
+	if r.mcpMgr != nil {
+		r.mcpMgr.Stop()
+	}
+}
+
+// handleElicitation maps an MCP elicitation request onto the question popup
+// flow. The requestedSchema (a flat object of primitive properties per spec)
+// is turned into one question per property; the collected answers are
+// returned as the JSON content of an "accept" result. The server name is
+// surfaced in the header so users always know who is asking.
+func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	if r.questionBroker == nil {
+		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+	}
+
+	content := make(map[string]any)
+	header := fmt.Sprintf("MCP server %q requests input", serverName)
+	question := req.Message
+	if question == "" {
+		question = "Please provide the requested information."
+	}
+
+	// No schema: a single free-text question whose answer becomes "value".
+	if len(req.RequestedSchema) == 0 {
+		ans, err := r.questionBroker.Ask(ctx, tools.Question{
+			Header:      header,
+			Question:    question,
+			AllowCustom: true,
+		})
+		if err != nil || ans.Cancelled {
+			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
+		}
+		value := strings.TrimSpace(ans.Custom)
+		if value == "" && len(ans.Selections) > 0 {
+			value = ans.Selections[0]
+		}
+		return &mcp.ElicitResult{
+			Action:  mcp.ElicitActionAccept,
+			Content: mustJSON(map[string]any{"value": value}),
+		}, nil
+	}
+
+	var schema struct {
+		Properties map[string]struct {
+			Type        string   `json:"type"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Enum        []string `json:"enum"`
+			EnumNames   []string `json:"enumNames"`
+			Default     any      `json:"default"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(req.RequestedSchema, &schema); err != nil {
+		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+	}
+
+	for name, prop := range schema.Properties {
+		label := prop.Title
+		if label == "" {
+			label = name
+		}
+		desc := prop.Description
+		if desc == "" {
+			desc = question
+		}
+		q := tools.Question{
+			Header:      header,
+			Question:    fmt.Sprintf("%s — %s", label, desc),
+			AllowCustom: true,
+		}
+		if len(prop.Enum) > 0 {
+			q.Options = make([]tools.QuestionOption, 0, len(prop.Enum))
+			for i, e := range prop.Enum {
+				display := e
+				if i < len(prop.EnumNames) && prop.EnumNames[i] != "" {
+					display = prop.EnumNames[i]
+				}
+				q.Options = append(q.Options, tools.QuestionOption{Label: e, Description: display})
+			}
+		}
+		if prop.Default != nil {
+			if s, ok := prop.Default.(string); ok {
+				q.Options = append(q.Options, tools.QuestionOption{Label: s, Description: "default"})
+			}
+		}
+		ans, err := r.questionBroker.Ask(ctx, q)
+		if err != nil || ans.Cancelled {
+			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
+		}
+		if prop.Type == "boolean" {
+			content[name] = len(ans.Selections) > 0 && (ans.Selections[0] == "true" || ans.Selections[0] == "yes" || ans.Selections[0] == "1")
+		} else if prop.Type == "number" || prop.Type == "integer" {
+			num, parseErr := strconv.ParseFloat(ans.Custom, 64)
+			if parseErr != nil {
+				return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
+			}
+			if prop.Type == "integer" {
+				content[name] = int64(num)
+			} else {
+				content[name] = num
+			}
+		} else {
+			value := strings.TrimSpace(ans.Custom)
+			if value == "" && len(ans.Selections) > 0 {
+				value = ans.Selections[0]
+			}
+			content[name] = value
+		}
+	}
+
+	return &mcp.ElicitResult{
+		Action:  mcp.ElicitActionAccept,
+		Content: mustJSON(content),
+	}, nil
+}
+
+// mustJSON serialises v; the caller guarantees the value marshals (it is
+// built from schema-derived strings, numbers and booleans).
+func mustJSON(v any) json.RawMessage {
+	out, _ := json.Marshal(v)
+	return out
 }
 
 func (r *Runtime) GetContextInfo() system.ContextInfo {
@@ -639,4 +918,28 @@ func trailingMentionToken(input string) (string, bool) {
 		return "", false
 	}
 	return last, true
+}
+
+// mcpServerConfigs converts the persisted config entries into the shape the
+// mcp manager consumes. The conversion is intentionally explicit so future
+// fields (auth, headers, env templates) can be added without leaking the
+// persistence type into the mcp package.
+func mcpServerConfigs(in []config.MCPServerConfig) []mcp.ServerConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]mcp.ServerConfig, 0, len(in))
+	for _, s := range in {
+		out = append(out, mcp.ServerConfig{
+			Name:      s.Name,
+			Transport: s.NormalizeTransport(),
+			Command:   s.Command,
+			Args:      s.Args,
+			Env:       s.EnvSlice(),
+			URL:       s.URL,
+			Headers:   s.InterpolatedHeaders(),
+			Disabled:  s.Disabled,
+		})
+	}
+	return out
 }

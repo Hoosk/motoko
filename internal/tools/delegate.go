@@ -32,9 +32,10 @@ func NewDelegateTool(runner AgentRunner) *DelegateTool {
 
 func (t *DelegateTool) Spec() Spec {
 	return Spec{
-		Name:    "delegate",
-		Summary: "Delegate a sub-task to another agent in the background. Available agents: plan, search.",
-		Usage:   "delegate <agent_name>: <instruction> [|| <json_config>]",
+		Name:        "delegate",
+		Summary:     "Delegate a sub-task to another agent in the background. Available agents: plan, search.",
+		Usage:       "delegate <agent_name>: <instruction> [|| <json_config>]",
+		InputSchema: schemaDelegate,
 	}
 }
 

@@ -26,9 +26,10 @@ func NewReadTool() *ReadTool {
 
 func (t *ReadTool) Spec() Spec {
 	return Spec{
-		Name:    "read",
-		Summary: "Reads a file or lists a directory in the workspace.",
-		Usage:   "read <path> [offset] [limit]",
+		Name:        "read",
+		Summary:     "Reads a file or lists a directory in the workspace.",
+		Usage:       "read <path> [offset] [limit]",
+		InputSchema: schemaRead,
 	}
 }
 

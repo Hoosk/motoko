@@ -646,3 +646,60 @@ func TestNewClientRoutesByModelStyle(t *testing.T) {
 		t.Errorf("expected ProviderKind 'opencode-go', got %q", clientAnt.ProviderKind())
 	}
 }
+
+func TestResolveAPIStyleIgnoresEmptyBaseURL(t *testing.T) {
+	// Populate cache with providers that have empty api fields (like openai,
+	// anthropic, google in the real models.dev catalog).
+	mockData := `{
+		"models": {},
+		"providers": {
+			"openai": {
+				"id": "openai",
+				"name": "OpenAI",
+				"api": "",
+				"npm": "@ai-sdk/openai"
+			},
+			"anthropic": {
+				"id": "anthropic",
+				"name": "Anthropic",
+				"api": "",
+				"npm": "@ai-sdk/anthropic"
+			},
+			"cohere": {
+				"id": "cohere",
+				"name": "Cohere",
+				"api": "",
+				"npm": "@ai-sdk/cohere"
+			},
+			"real-provider": {
+				"id": "real-provider",
+				"name": "Real Provider",
+				"api": "https://api.real-provider.com/v1",
+				"npm": "@ai-sdk/openai-compatible"
+			}
+		}
+	}`
+
+	if err := parseAndPopulate([]byte(mockData)); err != nil {
+		t.Fatalf("parseAndPopulate: %v", err)
+	}
+
+	// Empty base URL must never match — even if catalog has providers with
+	// empty api. Before this fix, map iteration randomness caused non-
+	// deterministic routing (gemini → openai-compatible, anthropic-style, …).
+	style, ok := ResolveAPIStyle("", "any-model")
+	if ok {
+		t.Errorf("ResolveAPIStyle with empty baseURL must return (false), got style=%q ok=%v", style, ok)
+	}
+
+	style2, ok2 := ResolveAPIStyle("   ", "model")
+	if ok2 {
+		t.Errorf("ResolveAPIStyle with whitespace baseURL must return (false), got style=%q ok=%v", style2, ok2)
+	}
+
+	// A non-empty URL must still resolve normally.
+	style3, ok3 := ResolveAPIStyle("https://api.real-provider.com/v1", "model")
+	if !ok3 || style3 != "openai-compatible" {
+		t.Errorf("ResolveAPIStyle with real URL expected (openai-compatible, true), got (%q, %v)", style3, ok3)
+	}
+}

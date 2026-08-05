@@ -30,9 +30,10 @@ func NewWebSearchTool() *WebSearchTool {
 
 func (t *WebSearchTool) Spec() Spec {
 	return Spec{
-		Name:    "web_search",
-		Summary: "Searches the web using the Mojeek search engine.",
-		Usage:   "web_search <query>",
+		Name:        "web_search",
+		Summary:     "Searches the web using the Mojeek search engine.",
+		Usage:       "web_search <query>",
+		InputSchema: schemaWebSearch,
 	}
 }
 
