@@ -2,12 +2,9 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -190,110 +187,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		},
 	})
 	r.provMgr = providerman.NewManager(func() *config.AppConfig { return r.config }, func() func(config.ProviderConfig) (provider.Client, error) { return r.newProviderClient }, r.agOrch.RefreshAgent)
-	r.cmdDispatch = commands.New(commands.Deps{
-		ConfigFn:     func() *config.AppConfig { return r.config },
-		SaveConfigFn: func() error { return r.config.Save() },
-		ThemeFn:      func() string { return r.config.Theme },
-		SetThemeFn: func(name string) error {
-			r.config.Theme = name
-			return r.config.Save()
-		},
-
-		InputModeFn:    func() types.InputMode { return r.inputMode },
-		SetInputModeFn: func(m types.InputMode) { r.inputMode = m },
-
-		ModeFn:            func() types.Mode { return r.agOrch.Mode() },
-		SetAgentModeFn:    func(name string) { r.agOrch.SetAgentMode(name) },
-		AgentNameFn:       func() string { return r.agOrch.AgentName() },
-		AgentNamesFn:      func() []string { return r.agOrch.AgentNames() },
-		AgentConfiguredFn: func() bool { return r.agOrch.AgentConfigured() },
-		DebugFn:           func() bool { return r.agOrch.Debug() },
-		SetDebugFn:        func(d bool) { r.agOrch.SetDebug(d) },
-		AgentFn:           func() *agent.Agent { return r.agOrch.Agent() },
-		SystemPromptFn:    func(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) },
-
-		SessionFn: func() *session.Session { return r.sesMgr.CurrentSession() },
-		SaveSessionFn: func() error {
-			if s := r.sesMgr.CurrentSession(); s != nil {
-				return s.Save()
-			}
-			return nil
-		},
-		BrainFn:        func() *brain.Brain { return r.sesMgr.Brain() },
-		BrainInitErrFn: func() error { return r.sesMgr.BrainInitErr() },
-
-		ListTasksFn:     func() []*taskman.TaskState { return r.taskMgr.List() },
-		TerminateTaskFn: func(id string) error { return r.taskMgr.Terminate(id) },
-
-		ToolSpecsFn: func() []tools.Spec { return r.ToolSpecs() },
-		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
-			return r.tools.Run(ctx, name, args)
-		},
-		MCPServersFn: func() []mcp.ServerStatus {
-			if r.mcpMgr == nil {
-				return nil
-			}
-			return r.mcpMgr.Servers()
-		},
-		AddMCPServerFn: func(srv config.MCPServerConfig) {
-			if r.mcpMgr != nil {
-				r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
-			}
-		},
-		RemoveMCPServerFn: func(name string) bool {
-			if r.mcpMgr == nil {
-				return false
-			}
-			return r.mcpMgr.StopServer(name)
-		},
-		MCPResourcesFn: func(ctx context.Context) []mcp.Resource {
-			if r.mcpMgr == nil {
-				return nil
-			}
-			return r.mcpMgr.ListResources(ctx)
-		},
-		MCPResourceReadFn: func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error) {
-			if r.mcpMgr == nil {
-				return nil, fmt.Errorf("no MCP manager available")
-			}
-			return r.mcpMgr.ReadResource(ctx, serverName, uri)
-		},
-		MCPPromptsFn: func(ctx context.Context) []mcp.Prompt {
-			if r.mcpMgr == nil {
-				return nil
-			}
-			return r.mcpMgr.ListPrompts(ctx)
-		},
-		MCPPromptHostsFn: func(_ context.Context) []mcp.PromptHost {
-			if r.mcpMgr == nil {
-				return nil
-			}
-			return r.mcpMgr.ListPromptHosts()
-		},
-		MCPGetPromptFn: func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error) {
-			if r.mcpMgr == nil {
-				return nil, fmt.Errorf("no MCP manager available")
-			}
-			return r.mcpMgr.GetPrompt(ctx, serverName, name, args)
-		},
-
-		ProvMgr: r.provMgr,
-
-		PendingFn: func() string {
-			if r.pending == nil {
-				return ""
-			}
-			return r.pending.Command
-		},
-		SetPendingFn: func(cmd string) { r.pending = &pendingShell{Command: cmd} },
-		ClearPendingFn: func() string {
-			cmd := r.pending.Command
-			r.pending = nil
-			return cmd
-		},
-
-		ContextWindowFn: func() int { return r.contextWindow },
-	})
+	r.cmdDispatch = commands.New(r.commandDeps())
 	r.cplDeps = completions.Deps{
 		AgentNamesFn:          func() []string { return r.agOrch.AgentNames() },
 		SemanticFn:            func() *semantic.Index { return r.semantic },
@@ -307,112 +201,15 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		styles.SetTheme(r.config.Theme)
 	}
 
-	r.scheduleMgr.SetOnChange(func(defs []scheduleman.Definition) {
-		r.persistSchedules(defs)
-	})
-	r.restoreSchedules()
-
-	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
-	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
-	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
-	r.tachikomas.Add(tachikoma.NewSearchTachikoma(r.semantic))
-	r.tachikomas.Add(tachikoma.NewDependencyTachikoma())
-
-	r.tools.Register(tools.NewInspectTool(r.tachikomas))
-	r.tools.Register(tools.NewDelegateTool(r))
-	r.tools.Register(tools.NewTaskTool(r))
-	r.tools.Register(tools.NewQuestionTool(r.questionBroker))
-	r.tools.Register(tools.NewBrainWriteTool(r))
-	r.tools.Register(tools.NewBrainReadTool(r))
-	r.tools.Register(tools.NewBrainListTool(r))
-
-	if len(sList) > 0 {
-		r.tools.Register(tools.NewActivateSkillTool(sList))
-	}
+	r.setupSchedules()
+	r.setupTachikomas()
+	r.registerTools(sList)
 
 	// MCP manager is built last so it can publish tools directly into the
 	// already-populated registry. Servers are started on Runtime.Start so the
 	// background context is available for transports and to honour the
 	// process-wide cancellation during shutdown.
-	r.mcpMgr = mcp.NewManager(mcp.ManagerConfig{
-		Registry: mcp.ToolRegistrar{
-			Register: func(adapter mcp.ToolAdapter) {
-				if adapter == nil {
-					return
-				}
-				r.tools.Register(tools.NewMCPRemoteTool(adapter))
-			},
-			Unregister: func(name string) bool {
-				return r.tools.Unregister(name)
-			},
-		},
-		RootsFn: func(ctx context.Context) ([]mcp.Root, error) {
-			var path string
-			if r.sesMgr != nil && r.sesMgr.CurrentSession() != nil {
-				path = r.sesMgr.CurrentSession().Workspace
-			}
-			if path == "" {
-				var err error
-				path, err = os.Getwd()
-				if err != nil {
-					return nil, err
-				}
-			}
-			uri := "file://" + filepath.ToSlash(path)
-			return []mcp.Root{
-				{
-					URI:  uri,
-					Name: "workspace",
-				},
-			}, nil
-		},
-		SamplingFn: func(ctx context.Context, params mcp.CreateMessageParams) (*mcp.CreateMessageResult, error) {
-			items := make([]provider.ConversationItem, len(params.Messages))
-			for i, m := range params.Messages {
-				role := provider.RoleUser
-				if m.Role == "assistant" {
-					role = provider.RoleAssistant
-				}
-				items[i] = provider.ConversationItem{
-					Role:    role,
-					Content: m.Content.Text,
-				}
-			}
-
-			cfg, ok := r.provMgr.GetActiveProviderConfig()
-			if !ok {
-				return nil, fmt.Errorf("no active provider configured")
-			}
-			pClient, err := r.provMgr.ProviderClient(cfg)
-			if err != nil {
-				return nil, err
-			}
-
-			resp, err := pClient.Complete(ctx, params.SystemPrompt, items, provider.ToolSet{})
-			if err != nil {
-				return nil, err
-			}
-
-			var modelName string
-			if base, ok := pClient.(interface{ Model() string }); ok {
-				modelName = base.Model()
-			} else {
-				modelName = pClient.Summary()
-			}
-
-			return &mcp.CreateMessageResult{
-				Content: mcp.ContentBlock{
-					Type: "text",
-					Text: resp.FinalText,
-				},
-				Model: modelName,
-				Role:  "assistant",
-			}, nil
-		},
-		ElicitationFn: func(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-			return r.handleElicitation(ctx, serverName, req)
-		},
-	})
+	r.mcpMgr = mcp.NewManager(r.mcpManagerConfig())
 
 	return r
 }
@@ -661,6 +458,35 @@ func (r *Runtime) restoreSchedules() {
 	r.scheduleMgr.Restore(scheduleman.ParseScheduleBrain(content))
 }
 
+func (r *Runtime) setupSchedules() {
+	r.scheduleMgr.SetOnChange(func(defs []scheduleman.Definition) {
+		r.persistSchedules(defs)
+	})
+	r.restoreSchedules()
+}
+
+func (r *Runtime) setupTachikomas() {
+	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
+	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
+	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
+	r.tachikomas.Add(tachikoma.NewSearchTachikoma(r.semantic))
+	r.tachikomas.Add(tachikoma.NewDependencyTachikoma())
+}
+
+func (r *Runtime) registerTools(sList []skills.Skill) {
+	r.tools.Register(tools.NewInspectTool(r.tachikomas))
+	r.tools.Register(tools.NewDelegateTool(r))
+	r.tools.Register(tools.NewTaskTool(r))
+	r.tools.Register(tools.NewQuestionTool(r.questionBroker))
+	r.tools.Register(tools.NewBrainWriteTool(r))
+	r.tools.Register(tools.NewBrainReadTool(r))
+	r.tools.Register(tools.NewBrainListTool(r))
+
+	if len(sList) > 0 {
+		r.tools.Register(tools.NewActivateSkillTool(sList))
+	}
+}
+
 func (r *Runtime) persistSchedules(defs []scheduleman.Definition) {
 	if r.sesMgr == nil || r.sesMgr.Brain() == nil {
 		return
@@ -725,125 +551,6 @@ func (r *Runtime) Stop() {
 	if r.mcpMgr != nil {
 		r.mcpMgr.Stop()
 	}
-}
-
-// handleElicitation maps an MCP elicitation request onto the question popup
-// flow. The requestedSchema (a flat object of primitive properties per spec)
-// is turned into one question per property; the collected answers are
-// returned as the JSON content of an "accept" result. The server name is
-// surfaced in the header so users always know who is asking.
-func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-	if r.questionBroker == nil {
-		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
-	}
-
-	content := make(map[string]any)
-	header := fmt.Sprintf("MCP server %q requests input", serverName)
-	question := req.Message
-	if question == "" {
-		question = "Please provide the requested information."
-	}
-
-	// No schema: a single free-text question whose answer becomes "value".
-	if len(req.RequestedSchema) == 0 {
-		ans, err := r.questionBroker.Ask(ctx, tools.Question{
-			Header:      header,
-			Question:    question,
-			AllowCustom: true,
-		})
-		if err != nil || ans.Cancelled {
-			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
-		}
-		value := strings.TrimSpace(ans.Custom)
-		if value == "" && len(ans.Selections) > 0 {
-			value = ans.Selections[0]
-		}
-		return &mcp.ElicitResult{
-			Action:  mcp.ElicitActionAccept,
-			Content: mustJSON(map[string]any{"value": value}),
-		}, nil
-	}
-
-	var schema struct {
-		Properties map[string]struct {
-			Type        string   `json:"type"`
-			Title       string   `json:"title"`
-			Description string   `json:"description"`
-			Enum        []string `json:"enum"`
-			EnumNames   []string `json:"enumNames"`
-			Default     any      `json:"default"`
-		} `json:"properties"`
-		Required []string `json:"required"`
-	}
-	if err := json.Unmarshal(req.RequestedSchema, &schema); err != nil {
-		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
-	}
-
-	for name, prop := range schema.Properties {
-		label := prop.Title
-		if label == "" {
-			label = name
-		}
-		desc := prop.Description
-		if desc == "" {
-			desc = question
-		}
-		q := tools.Question{
-			Header:      header,
-			Question:    fmt.Sprintf("%s — %s", label, desc),
-			AllowCustom: true,
-		}
-		if len(prop.Enum) > 0 {
-			q.Options = make([]tools.QuestionOption, 0, len(prop.Enum))
-			for i, e := range prop.Enum {
-				display := e
-				if i < len(prop.EnumNames) && prop.EnumNames[i] != "" {
-					display = prop.EnumNames[i]
-				}
-				q.Options = append(q.Options, tools.QuestionOption{Label: e, Description: display})
-			}
-		}
-		if prop.Default != nil {
-			if s, ok := prop.Default.(string); ok {
-				q.Options = append(q.Options, tools.QuestionOption{Label: s, Description: "default"})
-			}
-		}
-		ans, err := r.questionBroker.Ask(ctx, q)
-		if err != nil || ans.Cancelled {
-			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
-		}
-		if prop.Type == "boolean" {
-			content[name] = len(ans.Selections) > 0 && (ans.Selections[0] == "true" || ans.Selections[0] == "yes" || ans.Selections[0] == "1")
-		} else if prop.Type == "number" || prop.Type == "integer" {
-			num, parseErr := strconv.ParseFloat(ans.Custom, 64)
-			if parseErr != nil {
-				return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
-			}
-			if prop.Type == "integer" {
-				content[name] = int64(num)
-			} else {
-				content[name] = num
-			}
-		} else {
-			value := strings.TrimSpace(ans.Custom)
-			if value == "" && len(ans.Selections) > 0 {
-				value = ans.Selections[0]
-			}
-			content[name] = value
-		}
-	}
-
-	return &mcp.ElicitResult{
-		Action:  mcp.ElicitActionAccept,
-		Content: mustJSON(content),
-	}, nil
-}
-
-// mustJSON serialises v; the caller guarantees the value marshals (it is
-// built from schema-derived strings, numbers and booleans).
-func mustJSON(v any) json.RawMessage {
-	out, _ := json.Marshal(v)
-	return out
 }
 
 func (r *Runtime) GetContextInfo() system.ContextInfo {
