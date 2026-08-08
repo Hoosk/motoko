@@ -73,7 +73,7 @@ func (c *Client) handleInputRequired(ctx context.Context, method string, origina
 	// Merge the original params with inputResponses + requestState.
 	var params map[string]any
 	if len(originalParams) > 0 {
-		if err := json.Unmarshal(originalParams, &params); err != nil {
+		if err = json.Unmarshal(originalParams, &params); err != nil {
 			return nil, fmt.Errorf("mcp: decode params for %s retry: %w", method, err)
 		}
 	}
