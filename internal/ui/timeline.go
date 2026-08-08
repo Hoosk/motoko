@@ -101,36 +101,7 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		m.renderMessages()
 
 	case AgentStreamEventMsg:
-		if m.model.Streaming {
-			event := msg.Event
-			if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
-				targetKind := app.EntryAssistant
-				content := event.Content
-				if event.Kind == thinkingDelta {
-					targetKind = app.EntryReasoning
-					content = event.ReasoningContent
-				}
-
-				if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
-					m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
-					m.model.StreamEntryIndex = len(m.model.Entries) - 1
-					m.model.StreamedRunes = nil
-				}
-				if content != "" {
-					m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
-					if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
-						m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
-					}
-				}
-			} else {
-				m.appendStreamEvent(event)
-				if m.model.StreamEntryIndex != -1 {
-					m.model.StreamEntryIndex = -1
-					m.model.StreamedRunes = nil
-				}
-			}
-			m.renderMessages()
-		}
+		m.onAgentStreamEvent(msg)
 
 	case finalizeStreamMsg:
 		m.CompleteStreaming(msg.Text)
@@ -148,61 +119,13 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		}
 
 	case tea.MouseMsg:
-		switch msg.Action {
-		case tea.MouseActionPress:
-			if msg.Button == tea.MouseButtonLeft {
-				cx, cy, ok := m.MouseContentCoords(msg.X, msg.Y)
-				if !ok {
-					if m.CancelSelection() {
-						return nil
-					}
-				} else if m.BeginSelection(cx, cy) {
-					return nil
-				}
-			}
-		case tea.MouseActionMotion:
-			cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
-			if m.UpdateSelection(cx, cy) {
-				return nil
-			}
-		case tea.MouseActionRelease:
-			cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
-			if cmd := m.EndSelection(cx, cy); cmd != nil {
-				return cmd
-			}
+		if cmd, handled := m.onMouse(msg); handled {
+			return cmd
 		}
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case keyUp, keyDown:
-			return nil
-		case "alt+up":
-			if len(m.model.Messages) > 0 {
-				if m.model.SelectedMessage < 0 {
-					m.model.SelectedMessage = len(m.model.Messages) - 1
-				} else {
-					m.model.SelectedMessage = clamp(m.model.SelectedMessage-1, len(m.model.Messages)-1)
-				}
-				m.renderMessages()
-			}
-			return nil
-		case "alt+down":
-			if len(m.model.Messages) > 0 {
-				if m.model.SelectedMessage < 0 {
-					m.model.SelectedMessage = 0
-				} else {
-					m.model.SelectedMessage = clamp(m.model.SelectedMessage+1, len(m.model.Messages)-1)
-				}
-				m.renderMessages()
-			}
-			return nil
-		case "alt+c":
-			if text, ok := m.model.SelectedText(); ok {
-				return copySelection(text)
-			}
-			if m.model.SelectedMessage >= 0 && m.model.SelectedMessage < len(m.model.Messages) {
-				return copySelection(timeline.StripANSI(m.model.Messages[m.model.SelectedMessage]))
-			}
+		if cmd, handled := m.onKey(msg); handled {
+			return cmd
 		}
 	}
 
@@ -211,6 +134,108 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 	cmds = append(cmds, vpCmd)
 
 	return tea.Batch(cmds...)
+}
+
+func (m *TimelineModel) onAgentStreamEvent(msg AgentStreamEventMsg) {
+	if !m.model.Streaming {
+		return
+	}
+	event := msg.Event
+	if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
+		targetKind := app.EntryAssistant
+		content := event.Content
+		if event.Kind == thinkingDelta {
+			targetKind = app.EntryReasoning
+			content = event.ReasoningContent
+		}
+
+		if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
+			m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
+			m.model.StreamEntryIndex = len(m.model.Entries) - 1
+			m.model.StreamedRunes = nil
+		}
+		if content != "" {
+			m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
+			if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
+				m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
+			}
+		}
+	} else {
+		m.appendStreamEvent(event)
+		if m.model.StreamEntryIndex != -1 {
+			m.model.StreamEntryIndex = -1
+			m.model.StreamedRunes = nil
+		}
+	}
+	m.renderMessages()
+}
+
+// onMouse handles sidebar/timeline mouse interactions. The boolean reports
+// whether the message was fully handled; unhandled presses fall through to
+// the viewport update.
+func (m *TimelineModel) onMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			cx, cy, ok := m.MouseContentCoords(msg.X, msg.Y)
+			if !ok {
+				if m.CancelSelection() {
+					return nil, true
+				}
+			} else if m.BeginSelection(cx, cy) {
+				return nil, true
+			}
+		}
+	case tea.MouseActionMotion:
+		cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
+		if m.UpdateSelection(cx, cy) {
+			return nil, true
+		}
+	case tea.MouseActionRelease:
+		cx, cy := m.ClampMouseContentCoords(msg.X, msg.Y)
+		if cmd := m.EndSelection(cx, cy); cmd != nil {
+			return cmd, true
+		}
+	}
+	return nil, false
+}
+
+// onKey handles timeline-specific keys. The boolean reports whether the key
+// was fully handled; unhandled keys fall through to the viewport update.
+func (m *TimelineModel) onKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case keyUp, keyDown:
+		return nil, true
+	case "alt+up":
+		if len(m.model.Messages) > 0 {
+			if m.model.SelectedMessage < 0 {
+				m.model.SelectedMessage = len(m.model.Messages) - 1
+			} else {
+				m.model.SelectedMessage = clamp(m.model.SelectedMessage-1, len(m.model.Messages)-1)
+			}
+			m.renderMessages()
+		}
+		return nil, true
+	case "alt+down":
+		if len(m.model.Messages) > 0 {
+			if m.model.SelectedMessage < 0 {
+				m.model.SelectedMessage = 0
+			} else {
+				m.model.SelectedMessage = clamp(m.model.SelectedMessage+1, len(m.model.Messages)-1)
+			}
+			m.renderMessages()
+		}
+		return nil, true
+	case "alt+c":
+		if text, ok := m.model.SelectedText(); ok {
+			return copySelection(text), true
+		}
+		if m.model.SelectedMessage >= 0 && m.model.SelectedMessage < len(m.model.Messages) {
+			return copySelection(timeline.StripANSI(m.model.Messages[m.model.SelectedMessage])), true
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 func (m *TimelineModel) ApplyStreamBatch(events []app.AgentStreamEvent) {

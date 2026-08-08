@@ -3,7 +3,7 @@
 .antigravitycli/
 
 # Compiled binaries and build outputs
-motoko
+/motoko
 _probe
 *.exe
 *.test
