@@ -4,8 +4,27 @@
 
 # Compiled binaries and build outputs
 motoko
+_probe
+*.exe
+*.test
 /bin/
 
-# Test coverage
+# Go profiles and coverage
 *.out
+*.coverprofile
+*.prof
 coverage.out
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
