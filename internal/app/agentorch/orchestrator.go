@@ -533,29 +533,42 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 		ctx = tools.WithConfig(ctx, cfg)
 	}
 
+	o.enrichBrainSummary(ctx, &info)
+	o.enrichAgentCatalog(&info)
+	o.enrichSemantic(ctx, input, &info)
+	o.enrichGuidelines(&info)
+
+	return info
+}
+
+// enrichBrainSummary builds the session-brain context block.
+func (o *Orchestrator) enrichBrainSummary(ctx context.Context, info *system.ContextInfo) {
 	br := tools.GetBrain(ctx)
 	if br == nil {
 		br = o.brainFn()
 	}
-
-	if br != nil {
-		var sb strings.Builder
-		sb.WriteString(br.Summary())
-		if br.Exists("plan") {
-			if plan := br.PlanSummary(); plan != "" {
-				sb.WriteString("\n\n[plan.md]:\n")
-				sb.WriteString(plan)
-			}
-		}
-		if br.Exists("tasks") {
-			if tasks := br.TasksSummary(); tasks != "" {
-				sb.WriteString("\n\n[tasks.md]:\n")
-				sb.WriteString(tasks)
-			}
-		}
-		info.BrainSummary = sb.String()
+	if br == nil {
+		return
 	}
+	var sb strings.Builder
+	sb.WriteString(br.Summary())
+	if br.Exists("plan") {
+		if plan := br.PlanSummary(); plan != "" {
+			sb.WriteString("\n\n[plan.md]:\n")
+			sb.WriteString(plan)
+		}
+	}
+	if br.Exists("tasks") {
+		if tasks := br.TasksSummary(); tasks != "" {
+			sb.WriteString("\n\n[tasks.md]:\n")
+			sb.WriteString(tasks)
+		}
+	}
+	info.BrainSummary = sb.String()
+}
 
+// enrichAgentCatalog exposes the available skills and agents to the context.
+func (o *Orchestrator) enrichAgentCatalog(info *system.ContextInfo) {
 	skillList := o.AvailableSkills()
 	if len(skillList) > 0 {
 		info.AvailableSkills = make([]system.SkillDef, len(skillList))
@@ -574,15 +587,18 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 			info.AvailableAgents[i] = a.Name
 		}
 	}
+}
 
+// enrichSemantic fills the relevant-files/snippets context from the semantic
+// index, preferring the existing summary when one is already present.
+func (o *Orchestrator) enrichSemantic(ctx context.Context, input string, info *system.ContextInfo) {
 	sem := o.semanticFn()
 	if sem == nil {
-		return info
+		return
 	}
 
 	var snapshot *semantic.Snapshot
 	var err error
-
 	if info.SemanticSummary == "" {
 		snapshot, err = sem.Ensure(ctx)
 		if err != nil {
@@ -590,15 +606,14 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 				info.Signals = make(map[string]string)
 			}
 			info.Signals["semantic_error"] = err.Error()
-			return info
+			return
 		}
 		info.SemanticSummary = snapshot.Summary()
 	} else {
 		snapshot = sem.LatestSnapshot()
 	}
-
 	if snapshot == nil {
-		return info
+		return
 	}
 
 	limits := system.GetSemanticLimits(o.contextWindowFn())
@@ -635,19 +650,21 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 		}
 	}
 	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d on_demand=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets), len(info.OnDemandSignals))
+}
 
-	if info.Path != "" {
-		agentsPath := filepath.Join(info.Path, "AGENTS.md")
-		if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
-			info.Guidelines = string(data)
-		}
-
-		designPath := filepath.Join(info.Path, "DESIGN.md")
-		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
-			info.DesignSpec = string(data)
-		}
-		info.ActiveMode = o.currentAgentName
+// enrichGuidelines loads the workspace AGENTS.md and DESIGN.md content.
+func (o *Orchestrator) enrichGuidelines(info *system.ContextInfo) {
+	if info.Path == "" {
+		return
+	}
+	agentsPath := filepath.Join(info.Path, "AGENTS.md")
+	if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
+		info.Guidelines = string(data)
 	}
 
-	return info
+	designPath := filepath.Join(info.Path, "DESIGN.md")
+	if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
+		info.DesignSpec = string(data)
+	}
+	info.ActiveMode = o.currentAgentName
 }

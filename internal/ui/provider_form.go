@@ -89,125 +89,133 @@ func (f *providerForm) fieldCount(runtime *app.Runtime) int {
 }
 
 func (f *providerForm) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if !f.active {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok || !f.active {
+		return nil
+	}
+	if f.showPicker {
+		return f.updatePicker(key, runtime)
+	}
+	return f.handleKey(key, runtime)
+}
+
+func (f *providerForm) updatePicker(msg tea.KeyMsg, runtime *app.Runtime) tea.Cmd {
+	item, selected, cancelled := f.picker.Update(msg)
+	if cancelled {
+		f.active = false
+		f.showPicker = false
+		return nil
+	}
+	if selected {
+		pItem := item.(providerFilterItem)
+		presets := runtime.ProviderPresets()
+		for i, p := range presets {
+			if p == pItem.preset {
+				f.presetIndex = i
+				break
+			}
+		}
+		f.showPicker = false
+		f.syncPreset(runtime)
+		f.fieldIndex = 1
+	}
+	return nil
+}
+
+func (f *providerForm) handleKey(msg tea.KeyMsg, runtime *app.Runtime) tea.Cmd {
+	switch msg.String() {
+	case keyEsc:
+		f.active = false
+	case keyTab, keyDown, keyCtrlN:
+		f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
+	case keyUp, keyCtrlP:
+		f.fieldIndex--
+		if f.fieldIndex < 0 {
+			f.fieldIndex = f.fieldCount(runtime) - 1
+		}
+	case keyLeft, "right":
+		return f.handleLeftRight(msg.String(), runtime)
+	case keyBackspace:
+		return f.handleBackspace(runtime)
+	case keyEnter:
+		if f.fieldIndex == 0 {
+			f.showPicker = true
+			f.picker.Active = true
 			return nil
 		}
-		if f.showPicker {
-			item, selected, cancelled := f.picker.Update(msg)
-			if cancelled {
-				f.active = false
-				f.showPicker = false
-				return nil
-			}
-			if selected {
-				pItem := item.(providerFilterItem)
-				presets := runtime.ProviderPresets()
-				for i, p := range presets {
-					if p == pItem.preset {
-						f.presetIndex = i
-						break
-					}
-				}
-				f.showPicker = false
-				f.syncPreset(runtime)
-				f.fieldIndex = 1
-			}
-			return nil
+		return f.handleEnter(runtime)
+	default:
+		return f.handleRunes(msg, runtime)
+	}
+	return nil
+}
+
+// handleLeftRight moves focus between the save/cancel buttons.
+func (f *providerForm) handleLeftRight(key string, runtime *app.Runtime) tea.Cmd {
+	if f.fieldIndex == 0 {
+		f.showPicker = true
+		f.picker.Active = true
+		return nil
+	}
+	saveIdx, cancelIdx := f.actionIndexes(runtime)
+	if key == "right" {
+		if f.fieldIndex == saveIdx {
+			f.fieldIndex = cancelIdx
 		}
-		switch msg.String() {
-		case keyEsc:
-			f.active = false
-			return nil
-		case keyTab, keyDown, keyCtrlN:
-			f.fieldIndex = (f.fieldIndex + 1) % f.fieldCount(runtime)
-			return nil
-		case keyUp, keyCtrlP:
-			f.fieldIndex--
-			if f.fieldIndex < 0 {
-				f.fieldIndex = f.fieldCount(runtime) - 1
-			}
-			return nil
-		case keyLeft:
-			if f.fieldIndex == 0 {
-				f.showPicker = true
-				f.picker.Active = true
-				return nil
-			} else {
-				saveIdx := 2
-				cancelIdx := 3
-				if f.isOpenAICompatible(runtime) {
-					saveIdx = 4
-					cancelIdx = 5
-				}
-				if f.fieldIndex == cancelIdx {
-					f.fieldIndex = saveIdx
-				}
-			}
-			return nil
-		case "right":
-			if f.fieldIndex == 0 {
-				f.showPicker = true
-				f.picker.Active = true
-				return nil
-			} else {
-				saveIdx := 2
-				cancelIdx := 3
-				if f.isOpenAICompatible(runtime) {
-					saveIdx = 4
-					cancelIdx = 5
-				}
-				if f.fieldIndex == saveIdx {
-					f.fieldIndex = cancelIdx
-				}
-			}
-			return nil
-		case keyBackspace:
-			if f.isOpenAICompatible(runtime) {
-				switch f.fieldIndex {
-				case 1:
-					f.name = trimLastRune(f.name)
-				case 2:
-					f.baseURL = trimLastRune(f.baseURL)
-				case 3:
-					f.apiKey = trimLastRune(f.apiKey)
-				}
-			} else {
-				if f.fieldIndex == 1 {
-					f.apiKey = trimLastRune(f.apiKey)
-				}
-			}
-			return nil
-		case keyEnter:
-			if f.fieldIndex == 0 {
-				f.showPicker = true
-				f.picker.Active = true
-				return nil
-			}
-			return f.handleEnter(runtime)
-		default:
-			if len(msg.Runes) == 0 {
-				return nil
-			}
-			if f.isOpenAICompatible(runtime) {
-				switch f.fieldIndex {
-				case 1:
-					f.name += string(msg.Runes)
-				case 2:
-					f.baseURL += string(msg.Runes)
-				case 3:
-					f.apiKey += string(msg.Runes)
-				}
-			} else {
-				if f.fieldIndex == 1 {
-					f.apiKey += string(msg.Runes)
-				}
-			}
-			return nil
+	} else {
+		if f.fieldIndex == cancelIdx {
+			f.fieldIndex = saveIdx
 		}
 	}
 	return nil
+}
+
+func (f *providerForm) handleBackspace(runtime *app.Runtime) tea.Cmd {
+	if f.isOpenAICompatible(runtime) {
+		switch f.fieldIndex {
+		case 1:
+			f.name = trimLastRune(f.name)
+		case 2:
+			f.baseURL = trimLastRune(f.baseURL)
+		case 3:
+			f.apiKey = trimLastRune(f.apiKey)
+		}
+	} else {
+		if f.fieldIndex == 1 {
+			f.apiKey = trimLastRune(f.apiKey)
+		}
+	}
+	return nil
+}
+
+func (f *providerForm) handleRunes(msg tea.KeyMsg, runtime *app.Runtime) tea.Cmd {
+	if len(msg.Runes) == 0 {
+		return nil
+	}
+	if f.isOpenAICompatible(runtime) {
+		switch f.fieldIndex {
+		case 1:
+			f.name += string(msg.Runes)
+		case 2:
+			f.baseURL += string(msg.Runes)
+		case 3:
+			f.apiKey += string(msg.Runes)
+		}
+	} else {
+		if f.fieldIndex == 1 {
+			f.apiKey += string(msg.Runes)
+		}
+	}
+	return nil
+}
+
+// actionIndexes returns the save/cancel button field indexes for the current
+// layout. The OpenAI-compatible layout has an extra Name and Base URL field.
+func (f *providerForm) actionIndexes(runtime *app.Runtime) (saveIdx, cancelIdx int) {
+	if f.isOpenAICompatible(runtime) {
+		return 4, 5
+	}
+	return 2, 3
 }
 
 func (f *providerForm) View(runtime *app.Runtime) string {
