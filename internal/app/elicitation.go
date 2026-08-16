@@ -52,9 +52,6 @@ func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req 
 	if err := json.Unmarshal(req.RequestedSchema, &schema); err != nil {
 		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
 	}
-	if err := json.Unmarshal(req.RequestedSchema, &schema); err != nil {
-		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
-	}
 
 	for name, prop := range schema.Properties {
 		q := elicitQuestion(header, question, name, prop.Title, prop.Description, prop.Enum, prop.EnumNames, prop.Default)
