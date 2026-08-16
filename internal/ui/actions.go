@@ -150,6 +150,16 @@ func (m Model) waitQuestion() tea.Cmd {
 	}
 }
 
+func (m Model) waitApproval() tea.Cmd {
+	return func() tea.Msg {
+		pending, err := m.runtime.ApprovalBroker().Next(m.runtime.BackgroundContext())
+		if err != nil || pending == nil {
+			return nil
+		}
+		return ApprovalRequestedMsg{Pending: pending}
+	}
+}
+
 func (m Model) waitScheduleEvent() tea.Cmd {
 	return func() tea.Msg {
 		res := m.runtime.NextScheduleEvent(m.runtime.BackgroundContext())

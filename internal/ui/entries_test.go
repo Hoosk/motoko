@@ -67,6 +67,19 @@ func TestDiffOutputCollapsing(t *testing.T) {
 	}
 }
 
+func TestFullDiffOutputKeepsLargeChangesVisible(t *testing.T) {
+	var lines []string
+	lines = append(lines, "--- a/file.go", "+++ b/file.go", "@@ -1,1 +1,1 @@")
+	for i := range 30 {
+		lines = append(lines, fmt.Sprintf("+line %d", i))
+	}
+
+	got := timeline.RenderFullDiffOutput(strings.Join(lines, "\n"))
+	if strings.Contains(got, "collapsed") || !strings.Contains(got, "+line 29") {
+		t.Fatalf("expected full diff output, got:\n%s", got)
+	}
+}
+
 func TestMessageSelection(t *testing.T) {
 	m := NewTimelineModel()
 	m.SyncLayout(80, 20)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 const (
 	defaultMaxToolIterations = 250
 	inputBloatThresholdPct   = 15.0
+	stepErrorKind            = "error"
 )
 
 type Result struct {
@@ -223,12 +225,30 @@ func (a *Agent) runIteration(ctx context.Context, info system.ContextInfo, i, ma
 		state.history = append(state.history, resp.OutputItems...)
 	}
 
-	toolSteps, toolHistory, err := a.executeTools(ctx, resp.PendingCalls, state.availableTools, onEvent, state.seenToolCalls)
+	toolSteps, toolHistory, rejected, rejection, err := a.executeTools(ctx, resp.PendingCalls, state.availableTools, onEvent, state.seenToolCalls)
 	if err != nil {
 		return Result{}, false, err
 	}
 	state.steps = append(state.steps, toolSteps...)
 	state.history = append(state.history, toolHistory...)
+	if rejected {
+		message := "Execution cancelled: a file change was rejected."
+		if strings.TrimSpace(rejection) != "" {
+			message = "Execution cancelled: " + rejection
+		}
+		state.steps = append(state.steps, Step{Kind: stepErrorKind, Title: "approval", Content: message})
+		state.history = append(state.history, provider.AssistantText(message))
+		return Result{
+			Assistant:  message,
+			Steps:      state.steps,
+			Iterations: state.iterations,
+			Usage:      state.totalUsage,
+			AgentLabel: a.provider.Summary(),
+			Duration:   time.Since(state.startedAt),
+			Context:    state.context,
+			History:    state.history,
+		}, true, nil
+	}
 	return Result{}, false, nil
 }
 
@@ -275,17 +295,21 @@ func accumulateUsage(total *provider.Usage, u provider.Usage) {
 }
 
 type toolResult struct {
+	rejection   string
 	historyItem provider.ConversationItem
 	steps       []Step
 	idx         int
+	rejected    bool
 }
 
 // executeTools runs a batch of tool invocations in parallel and returns the
 // accumulated steps and history items in the original call order.
-func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocation, availableTools []string, onEvent func(StreamEvent) error, seenToolCalls map[string]struct{}) ([]Step, []provider.ConversationItem, error) {
+func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocation, availableTools []string, onEvent func(StreamEvent) error, seenToolCalls map[string]struct{}) ([]Step, []provider.ConversationItem, bool, string, error) {
 	ch := make(chan toolResult, len(pending))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	for idx, call := range pending {
 		toolName := strings.TrimSpace(call.Name)
@@ -304,7 +328,7 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 		mu.Lock()
 		if _, seen := seenToolCalls[toolKey]; seen {
 			mu.Unlock()
-			return nil, nil, fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
+			return nil, nil, false, "", fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
 		}
 		seenToolCalls[toolKey] = struct{}{}
 		mu.Unlock()
@@ -312,7 +336,10 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 		wg.Add(1)
 		go func(idx int, call provider.ToolInvocation, toolName, toolInput string) {
 			defer wg.Done()
-			res := a.runTool(ctx, idx, call, toolName, toolInput, onEvent, &mu)
+			res := a.runTool(execCtx, idx, call, toolName, toolInput, onEvent, &mu)
+			if res.rejected {
+				cancel()
+			}
 			ch <- res
 		}(idx, call, toolName, toolInput)
 	}
@@ -327,11 +354,17 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 
 	var toolSteps []Step
 	var toolHistory []provider.ConversationItem
+	rejected := false
+	rejection := ""
 	for _, res := range orderedResults {
 		toolSteps = append(toolSteps, res.steps...)
 		toolHistory = append(toolHistory, res.historyItem)
+		if res.rejected && !rejected {
+			rejected = true
+			rejection = res.rejection
+		}
 	}
-	return toolSteps, toolHistory, nil
+	return toolSteps, toolHistory, rejected, rejection, nil
 }
 
 // runTool executes a single tool invocation in a worker goroutine and
@@ -350,17 +383,19 @@ func (a *Agent) runTool(ctx context.Context, idx int, call provider.ToolInvocati
 	if err != nil {
 		tracelog.Logf("agent tool error name=%s err=%v", toolName, err)
 		errText := fmt.Sprintf("tool error: %v", err)
-		subSteps = append(subSteps, Step{Kind: "error", Title: toolName, Content: errText})
+		subSteps = append(subSteps, Step{Kind: stepErrorKind, Title: toolName, Content: errText})
 
 		mu.Lock()
 		if onEvent != nil {
-			_ = onEvent(StreamEvent{Kind: "error", Title: toolName, Content: errText})
+			_ = onEvent(StreamEvent{Kind: stepErrorKind, Title: toolName, Content: errText})
 		}
 		mu.Unlock()
 
 		return toolResult{
 			idx:         idx,
 			steps:       subSteps,
+			rejection:   err.Error(),
+			rejected:    errors.Is(err, tools.ErrChangeRejected),
 			historyItem: provider.ToolResultForInvocation(call, errText),
 		}
 	}

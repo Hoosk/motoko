@@ -135,6 +135,9 @@ func (m Model) View() string {
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.approvalPopup.active {
+		popup := widePopupStyle.Render(m.approvalPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.questionPopup.active {
 		popup := widePopupStyle.Render(m.questionPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)

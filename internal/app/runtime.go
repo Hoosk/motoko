@@ -104,6 +104,7 @@ type Runtime struct {
 	scheduleMgr       *scheduleman.Manager
 	sesMgr            *sessionman.Manager
 	questionBroker    *tools.QuestionBroker
+	approvalBroker    *tools.ApprovalBroker
 	agOrch            *agentorch.Orchestrator
 	semantic          *semantic.Index
 	backgroundCancel  context.CancelFunc
@@ -163,6 +164,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		taskMgr:           taskman.NewManager(),
 		scheduleMgr:       scheduleman.NewManager(),
 		questionBroker:    tools.NewQuestionBroker(),
+		approvalBroker:    tools.NewApprovalBroker(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
 	}
@@ -396,16 +398,22 @@ func (r *Runtime) ActiveSubagents() []string                   { return r.agOrch
 func (r *Runtime) SystemPrompt(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) }
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
 	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgent(ctx, info, input)
 }
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
 	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgentStream(ctx, info, input, func(ev types.AgentStreamEvent) error {
 		return onEvent(AgentStreamEvent(ev))
 	})
 }
 func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
 	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunSubagent(ctx, cfg)
 }
 
@@ -518,6 +526,8 @@ func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {
 func (r *Runtime) Tachikomas() *tachikoma.Manager { return r.tachikomas }
 
 func (r *Runtime) QuestionBroker() *tools.QuestionBroker { return r.questionBroker }
+
+func (r *Runtime) ApprovalBroker() *tools.ApprovalBroker { return r.approvalBroker }
 
 func (r *Runtime) BackgroundContext() context.Context {
 	if r.backgroundCtx != nil {

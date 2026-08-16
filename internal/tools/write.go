@@ -44,11 +44,21 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	existed := false
+	previous := ""
 	if info, statErr := os.Stat(absPath); statErr == nil {
 		if info.IsDir() {
 			return Result{}, fmt.Errorf("path is a directory: %s", relPath)
 		}
 		existed = true
+		data, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			return Result{}, fmt.Errorf("failed to read existing file: %w", readErr)
+		}
+		previous = string(data)
+	}
+	diff := patchtool.UnifiedDiff(relPath, previous, content)
+	if err := requestFileChange(ctx, relPath, diff); err != nil {
+		return Result{}, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
@@ -57,6 +67,12 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 
 	if err := os.WriteFile(absPath, []byte(content), 0o600); err != nil {
 		return Result{}, fmt.Errorf("failed to write file: %w", err)
+	}
+	output := diff
+	if strings.TrimSpace(output) == "" {
+		output = fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verbForWrite(existed), relPath, absPath, len(content))
+	} else {
+		output += fmt.Sprintf("\n\n%s file: %s\nabsolute: %s\nbytes: %d", verbForWrite(existed), relPath, absPath, len(content))
 	}
 
 	verb := "created"
@@ -67,8 +83,15 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 	return Result{
 		Spec:    t.Spec(),
 		Summary: fmt.Sprintf("Successfully %s %s (%d bytes)", verb, relPath, len(content)),
-		Output:  fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verb, relPath, absPath, len(content)),
+		Output:  output,
 	}, nil
+}
+
+func verbForWrite(existed bool) string {
+	if existed {
+		return "overwrote"
+	}
+	return "created"
 }
 
 func parseWriteArgs(args string) (string, string, error) {

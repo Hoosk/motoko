@@ -3,10 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Hoosk/motoko/internal/config"
+	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
 )
 
 func TestWriteToolCreatesNewFile(t *testing.T) {
@@ -27,6 +31,57 @@ func TestWriteToolCreatesNewFile(t *testing.T) {
 	}
 	if string(data) != "package new\n\nconst V = 1\n" {
 		t.Errorf("unexpected file content: %q", string(data))
+	}
+}
+
+func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "approved.txt")
+	broker := NewApprovalBroker()
+	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
+	ctx := WithApprovalBroker(WithConfig(context.Background(), cfg), broker)
+	tool := NewWriteTool()
+	result := make(chan error, 1)
+
+	go func() {
+		_, err := tool.Run(ctx, "approved.txt\nnew content\n")
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Change.Path != "approved.txt" || !strings.Contains(pending.Change.Diff, "+new content") {
+		t.Fatalf("unexpected approval request %#v", pending.Change)
+	}
+	pending.Resolve(true)
+	if err := <-result; err != nil {
+		t.Fatalf("approved write failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new content\n" {
+		t.Fatalf("unexpected approved file content %q", data)
+	}
+
+	result = make(chan error, 1)
+	go func() {
+		_, err := tool.Run(ctx, "rejected.txt\nnot written\n")
+		result <- err
+	}()
+	pending, err = broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending.Resolve(false)
+	err = <-result
+	if !errors.Is(err, approvalpkg.ErrChangeRejected) {
+		t.Fatalf("expected rejected write error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "rejected.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("rejected write created a file, stat error: %v", statErr)
 	}
 }
 

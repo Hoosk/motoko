@@ -36,6 +36,7 @@ type Model struct {
 	modelPicker            modelPickerState
 	promptQueue            []string
 	questionPopup          questionPopupState
+	approvalPopup          approvalPopupState
 	providerForm           providerForm
 	mcpForm                mcpForm
 	modePopup              modePopupState
@@ -104,6 +105,7 @@ func (m Model) Init() tea.Cmd {
 		m.footer.Init(),
 		m.sidebar.Init(),
 		m.waitQuestion(),
+		m.waitApproval(),
 		m.waitScheduleEvent(),
 		m.waitTaskEvent(),
 		m.checkForUpdatesCmd(),

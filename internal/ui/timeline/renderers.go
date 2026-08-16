@@ -29,8 +29,7 @@ func (m *Model) RenderEntry(entry app.Entry) string {
 	case app.EntryUser:
 		return RenderUserMessage(entry.Text, max(20, m.Viewport.Width))
 	case app.EntryAssistant:
-		wrapped := WrapText(entry.Text, m.AssistantInnerWidth())
-		return renderAssistantMessage(wrapped)
+		return renderAssistantMarkdown(entry.Text, m.AssistantInnerWidth())
 	case app.EntryReasoning:
 		wrapped := WrapText(entry.Text, m.AssistantInnerWidth())
 		return renderReasoningMessage(wrapped)
@@ -118,6 +117,14 @@ func RenderHelpEntry(text string) string {
 }
 
 func RenderDiffOutput(text string) string {
+	return renderDiffOutput(text, true)
+}
+
+func RenderFullDiffOutput(text string) string {
+	return renderDiffOutput(text, false)
+}
+
+func renderDiffOutput(text string, collapseLarge bool) string {
 	lines := strings.Split(text, "\n")
 	isDiff := false
 	for _, line := range lines {
@@ -141,7 +148,7 @@ func RenderDiffOutput(text string) string {
 		}
 	}
 
-	if changedCount > 20 {
+	if collapseLarge && changedCount > 20 {
 		var result []string
 		for _, line := range lines {
 			if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {

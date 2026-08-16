@@ -161,6 +161,18 @@ func TestLoadAndSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEditApprovalDefaultsToAutoAndNormalizesUnknownValues(t *testing.T) {
+	if got := NormalizeEditApproval(""); got != EditApprovalAuto {
+		t.Fatalf("expected auto default, got %q", got)
+	}
+	if got := NormalizeEditApproval("unexpected"); got != EditApprovalAuto {
+		t.Fatalf("expected unknown mode to normalize to auto, got %q", got)
+	}
+	if got := NormalizeEditApproval("ASK"); got != EditApprovalAsk {
+		t.Fatalf("expected ask mode, got %q", got)
+	}
+}
+
 func TestConfigAPIKeyEncryptionAndDecryption(t *testing.T) {
 	configPath, keyPath := isolateConfigStorage(t)
 

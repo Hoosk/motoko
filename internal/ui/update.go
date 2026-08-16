@@ -105,6 +105,26 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 		cmds = append(cmds, m.commandPalette.Update(msg))
 		return true, tea.Batch(cmds...)
 	}
+	if m.approvalPopup.active {
+		switch msg := msg.(type) {
+		case AgentStreamBatchMsg:
+			cmds = m.onAgentStreamBatch(msg, cmds)
+			return true, tea.Batch(cmds...)
+		case ThinkingTickMsg:
+			cmds = m.onThinkingTick(msg, cmds)
+			return true, tea.Batch(cmds...)
+		case ApprovalRequestedMsg:
+			m.approvalPopup.Open(msg.Pending)
+			return true, tea.Batch(cmds...)
+		case QuestionAskedMsg:
+			m.questionPopup.Open(msg.Pending)
+			return true, tea.Batch(cmds...)
+		}
+		if done := m.approvalPopup.Update(msg); done {
+			cmds = append(cmds, m.waitApproval())
+		}
+		return true, tea.Batch(cmds...)
+	}
 	if m.questionPopup.active {
 		switch msg := msg.(type) {
 		case AgentStreamBatchMsg:
@@ -112,6 +132,9 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 			return true, tea.Batch(cmds...)
 		case ThinkingTickMsg:
 			cmds = m.onThinkingTick(msg, cmds)
+			return true, tea.Batch(cmds...)
+		case ApprovalRequestedMsg:
+			m.approvalPopup.Open(msg.Pending)
 			return true, tea.Batch(cmds...)
 		}
 		if done := m.questionPopup.Update(msg); done {
@@ -171,6 +194,8 @@ func (m *Model) updateGlobal(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		return m.onThinkingBudgetSelected(msg, cmds)
 	case QuestionAskedMsg:
 		return m.onQuestionAsked(msg, cmds)
+	case ApprovalRequestedMsg:
+		return m.onApprovalRequested(msg, cmds)
 	case SessionsMsg:
 		return m.onSessions(msg, cmds)
 	case SessionLoadedMsg:

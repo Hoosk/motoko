@@ -11,6 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
 )
 
 const maxToolOutputBytes = 12_000
@@ -232,7 +233,11 @@ func (r *Registry) Filter(predicate func(Tool) bool) *Registry {
 type configKey struct{}
 
 func WithConfig(ctx context.Context, cfg *config.AppConfig) context.Context {
-	return context.WithValue(ctx, configKey{}, cfg)
+	ctx = context.WithValue(ctx, configKey{}, cfg)
+	if cfg != nil {
+		ctx = approvalpkg.WithMode(ctx, cfg.EditApproval)
+	}
+	return ctx
 }
 
 func GetConfig(ctx context.Context) *config.AppConfig {
@@ -291,4 +296,22 @@ func GetQuestionBroker(ctx context.Context) *QuestionBroker {
 		return broker
 	}
 	return nil
+}
+
+type FileChange = approvalpkg.FileChange
+type PendingApproval = approvalpkg.Pending
+type ApprovalBroker = approvalpkg.Broker
+
+var ErrChangeRejected = approvalpkg.ErrChangeRejected
+
+func NewApprovalBroker() *ApprovalBroker {
+	return approvalpkg.NewBroker()
+}
+
+func WithApprovalBroker(ctx context.Context, broker *ApprovalBroker) context.Context {
+	return approvalpkg.WithBroker(ctx, broker)
+}
+
+func GetApprovalBroker(ctx context.Context) *ApprovalBroker {
+	return approvalpkg.GetBroker(ctx)
 }

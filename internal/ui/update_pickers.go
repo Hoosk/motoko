@@ -51,6 +51,13 @@ func (m *Model) onQuestionAsked(msg QuestionAskedMsg, cmds []tea.Cmd) ([]tea.Cmd
 	return cmds, false
 }
 
+func (m *Model) onApprovalRequested(msg ApprovalRequestedMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
+	if msg.Pending != nil {
+		m.approvalPopup.Open(msg.Pending)
+	}
+	return cmds, false
+}
+
 func (m *Model) onSessions(msg SessionsMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	cmds = append(cmds, m.sessionPicker.Update(msg, m.runtime))
 	return cmds, false

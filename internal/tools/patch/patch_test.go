@@ -2,10 +2,13 @@ package patch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
 )
 
 func withTempWorkspace(t *testing.T) string {
@@ -121,6 +124,40 @@ func TestPatchToolAppliesSearchReplacePatch(t *testing.T) {
 	text := string(updated)
 	if !strings.Contains(text, "# mi moto alpina derrapante\n## Siguientes Pasos") {
 		t.Fatalf("expected inserted heading, got %q", text)
+	}
+}
+
+func TestPatchToolRequiresApprovalBeforeWriting(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "test.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := approvalpkg.NewBroker()
+	ctx := approvalpkg.WithBroker(approvalpkg.WithMode(context.Background(), approvalpkg.ModeAsk), broker)
+	result := make(chan error, 1)
+	go func() {
+		_, err := New().Run(ctx, "test.md\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pending.Change.Diff, "-old") || !strings.Contains(pending.Change.Diff, "+new") {
+		t.Fatalf("unexpected patch diff %q", pending.Change.Diff)
+	}
+	pending.Resolve(false)
+	if err := <-result; !errors.Is(err, approvalpkg.ErrChangeRejected) {
+		t.Fatalf("expected rejected patch, got %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("rejected patch changed file to %q", data)
 	}
 }
 

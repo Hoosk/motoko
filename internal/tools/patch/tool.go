@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
+
+	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
 )
 
 const (
@@ -79,16 +80,15 @@ func New() *Tool {
 }
 
 func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
 	request, err := parsePatchRequest(args)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(request.AST) > 0 {
-		return t.runASTPatch(request.AST)
+		return t.runASTPatch(ctx, request.AST)
 	}
 	if request.Unified != nil {
-		return t.runUnifiedPatch(request.Unified)
+		return t.runUnifiedPatch(ctx, request.Unified)
 	}
 
 	absPath, relPath, err := resolveWorkspaceWritePath(request.Path)
@@ -116,6 +116,12 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		}
 	}
 
+	diff := UnifiedDiff(relPath, current, updated)
+	if broker := approvalpkg.GetBroker(ctx); broker != nil {
+		if err := broker.Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+			return Result{}, err
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return Result{}, err
 	}
@@ -125,11 +131,11 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 
 	return Result{
 		Summary: fmt.Sprintf("Patch applied to %s.", relPath),
-		Output:  diffPreview(request.Search, request.Replace),
+		Output:  diff,
 	}, nil
 }
 
-func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
+func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, error) {
 	if len(requests) == 0 {
 		return Result{}, fmt.Errorf("no AST mutations provided")
 	}
@@ -157,6 +163,12 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 			return Result{}, err
 		}
 	}
+	diff := UnifiedDiff(relPath, string(content), updated)
+	if broker := approvalpkg.GetBroker(ctx); broker != nil {
+		if err := broker.Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+			return Result{}, err
+		}
+	}
 	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
 		return Result{}, err
 	}
@@ -171,10 +183,10 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 	if len(rendered) == 1 {
 		summary = fmt.Sprintf("AST patch applied to %s.", relPath)
 	}
-	return Result{Summary: summary, Output: strings.Join(rendered, "\n\n")}, nil
+	return Result{Summary: summary, Output: diff}, nil
 }
 
-func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
+func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result, error) {
 	path, err := patch.targetPath()
 	if err != nil {
 		return Result{}, err
@@ -194,6 +206,12 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	diff := UnifiedDiff(relPath, string(content), updated)
+	if broker := approvalpkg.GetBroker(ctx); broker != nil {
+		if err := broker.Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+			return Result{}, err
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return Result{}, err
 	}
@@ -202,6 +220,6 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 	}
 	return Result{
 		Summary: fmt.Sprintf("Unified diff applied to %s.", relPath),
-		Output:  patch.Render(),
+		Output:  diff,
 	}, nil
 }

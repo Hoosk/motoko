@@ -24,6 +24,7 @@ When Motoko starts in a workspace, it loads the global configuration first and t
 - **Search Exclusions:** Workspace-specific search `exclude_patterns` are merged with global patterns, keeping a unique sorted set. Other search fields like `max_results` and `case_sensitive` override global values.
 - **Agent Overrides:** Custom agent configurations (e.g., model, temperature, provider, tool filters) in the workspace config are merged with the global agent settings. Any specific override field set in the workspace takes priority.
 - **Thinking Verbosity / Iterations:** `thinking_verbosity` and `max_iterations` can be set globally and overridden per workspace via `.agents/config.json`.
+- **File Edit Approval:** `edit_approval` accepts `auto` (default) or `ask`. In `ask`, Motoko shows the unified diff and requires approval before `write` or `patch` changes a file.
 
 ## Example Config
 
@@ -55,6 +56,7 @@ Here is an example of a workspace-level `<workspace-root>/.agents/config.json` t
     }
   },
   "thinking_verbosity": "concise",
+  "edit_approval": "ask",
   "max_iterations": 250,
   "search": {
     "exclude_patterns": [

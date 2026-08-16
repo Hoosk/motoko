@@ -77,7 +77,15 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 	}
 	entry := visible[entryIdx]
 	switch entry.Kind {
-	case app.EntryAssistant, app.EntryReasoning:
+	case app.EntryAssistant:
+		rendered := strings.Split(StripANSI(renderAssistantMarkdown(entry.Text, m.AssistantInnerWidth())), "\n")
+		meta := make([]RenderLine, 0, len(rendered))
+		for _, line := range rendered {
+			content := strings.TrimPrefix(line, "▎ ")
+			meta = append(meta, RenderLine{Plain: line, Content: content, ContentX: AssistantContentX, Selectable: true})
+		}
+		return meta
+	case app.EntryReasoning:
 		wrapped := strings.Split(WrapText(entry.Text, m.AssistantInnerWidth()), "\n")
 		meta := make([]RenderLine, 0, len(wrapped))
 		contentX := AssistantContentX

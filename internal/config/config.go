@@ -12,6 +12,11 @@ type ProviderKind string
 type ProviderPreset string
 
 const (
+	EditApprovalAuto = "auto"
+	EditApprovalAsk  = "ask"
+)
+
+const (
 	ProviderKindOpenAICompatible ProviderKind = "openai-compatible"
 	ProviderKindAnthropic        ProviderKind = "anthropic"
 	ProviderKindGemini           ProviderKind = "gemini"
@@ -67,6 +72,7 @@ type AppConfig struct {
 	Providers         []ProviderConfig         `json:"providers"`
 	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
 	ActiveProvider    string                   `json:"active_provider"`
+	EditApproval      string                   `json:"edit_approval,omitempty"`
 	Theme             string                   `json:"theme,omitempty"`
 	Density           string                   `json:"density,omitempty"`
 	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
@@ -93,6 +99,9 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if other.ActiveProvider != "" {
 		c.ActiveProvider = other.ActiveProvider
+	}
+	if other.EditApproval != "" {
+		c.EditApproval = NormalizeEditApproval(other.EditApproval)
 	}
 	if other.Theme != "" {
 		c.Theme = other.Theme
@@ -200,6 +209,7 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 	if len(cfg.Search.ExcludePatterns) == 0 {
 		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	}
+	cfg.EditApproval = NormalizeEditApproval(cfg.EditApproval)
 
 	// Load project-scoped config if exists
 	if len(workspacePath) > 0 && workspacePath[0] != "" {
@@ -242,6 +252,7 @@ func (c *AppConfig) Save() error {
 	// Create a copy of config with encrypted API keys
 	var encryptedCfg AppConfig
 	encryptedCfg.ActiveProvider = c.ActiveProvider
+	encryptedCfg.EditApproval = NormalizeEditApproval(c.EditApproval)
 	encryptedCfg.Search = c.Search
 	encryptedCfg.Agents = c.Agents
 	encryptedCfg.Theme = c.Theme
@@ -266,4 +277,11 @@ func (c *AppConfig) Save() error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func NormalizeEditApproval(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), EditApprovalAsk) {
+		return EditApprovalAsk
+	}
+	return EditApprovalAuto
 }

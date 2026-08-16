@@ -108,6 +108,10 @@ type QuestionAskedMsg struct {
 	Pending *tools.PendingQuestion
 }
 
+type ApprovalRequestedMsg struct {
+	Pending *tools.PendingApproval
+}
+
 type ScheduleEventMsg struct {
 	Event scheduleman.Event
 }
