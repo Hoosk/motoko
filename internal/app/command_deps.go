@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/brain"
@@ -13,6 +14,7 @@ import (
 	"github.com/Hoosk/motoko/internal/tools"
 
 	"github.com/Hoosk/motoko/internal/app/commands"
+	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/app/taskman"
 	"github.com/Hoosk/motoko/internal/app/types"
 )
@@ -55,6 +57,12 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		ListTasksFn:     func() []*taskman.TaskState { return r.taskMgr.List() },
 		TerminateTaskFn: func(id string) error { return r.taskMgr.Terminate(id) },
+
+		ListSchedulesFn: func() []scheduleman.Definition { return r.ListSchedules() },
+		AddScheduleFn: func(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error) {
+			return r.AddSchedule(instruction, interval, oneShot)
+		},
+		RemoveScheduleFn: func(id string) error { return r.RemoveSchedule(id) },
 
 		ToolSpecsFn: func() []tools.Spec { return r.ToolSpecs() },
 		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
