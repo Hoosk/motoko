@@ -1,11 +1,19 @@
 package patch
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+var ErrFileChanged = errors.New("file changed while awaiting approval")
+
+var workspaceWriteMu sync.Mutex
 
 func resolveWorkspacePath(target string) (string, string, error) {
 	workspace, err := os.Getwd()
@@ -85,4 +93,50 @@ func resolveWorkspaceWritePath(target string) (string, string, error) {
 // (e.g. the write tool) that need the same validation as the patch engine.
 func ResolveWorkspaceWritePath(target string) (string, string, error) {
 	return resolveWorkspaceWritePath(target)
+}
+
+func WriteWorkspaceFile(ctx context.Context, absPath string, expected, updated []byte, existed bool, dirPerm, filePerm os.FileMode) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	workspaceWriteMu.Lock()
+	defer workspaceWriteMu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	current, err := os.ReadFile(absPath)
+	if existed {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: %s was removed", ErrFileChanged, absPath)
+		}
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(current, expected) {
+			return fmt.Errorf("%w: %s", ErrFileChanged, absPath)
+		}
+	} else {
+		if err == nil {
+			return fmt.Errorf("%w: %s was created", ErrFileChanged, absPath)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), dirPerm); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.WriteFile(absPath, updated, filePerm)
 }

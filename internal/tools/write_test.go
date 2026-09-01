@@ -11,6 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/config"
 	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
+	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
 )
 
 func TestWriteToolCreatesNewFile(t *testing.T) {
@@ -82,6 +83,69 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "rejected.txt")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("rejected write created a file, stat error: %v", statErr)
+	}
+}
+
+func TestWriteToolFailsClosedWithoutApprovalBroker(t *testing.T) {
+	withTempWorkspace(t)
+	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
+	ctx := WithConfig(context.Background(), cfg)
+
+	_, err := NewWriteTool().Run(ctx, "blocked.txt\ncontent")
+	if !errors.Is(err, approvalpkg.ErrApprovalUnavailable) {
+		t.Fatalf("expected missing broker error, got %v", err)
+	}
+	if _, statErr := os.Stat("blocked.txt"); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("write without broker created a file, stat error: %v", statErr)
+	}
+}
+
+func TestWriteToolRejectsStaleApproval(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "stale.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := NewApprovalBroker()
+	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
+	ctx := WithApprovalBroker(WithConfig(context.Background(), cfg), broker)
+	result := make(chan error, 1)
+	go func() {
+		_, err := NewWriteTool().Run(ctx, "stale.txt\nproposed\n")
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("external\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pending.Resolve(true)
+	if err := <-result; !errors.Is(err, patchtool.ErrFileChanged) {
+		t.Fatalf("expected stale file error, got %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "external\n" {
+		t.Fatalf("stale approval overwrote external content: %q", data)
+	}
+}
+
+func TestWriteToolHonorsCancelledContext(t *testing.T) {
+	root := withTempWorkspace(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewWriteTool().Run(ctx, "cancelled.txt\ncontent")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "cancelled.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("cancelled write created a file, stat error: %v", statErr)
 	}
 }
 

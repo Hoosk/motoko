@@ -81,6 +81,7 @@ const (
 	ActionTask    = types.ActionTask
 	ActionAgent   = types.ActionAgent
 	ActionCompact = types.ActionCompact
+	ActionTool    = types.ActionTool
 )
 
 type TaskState = taskman.TaskState
@@ -415,6 +416,18 @@ func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (st
 	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
 	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunSubagent(ctx, cfg)
+}
+
+func (r *Runtime) RunTool(ctx context.Context, name, args string) (tools.Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
+	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithConfig(ctx, r.config)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
+	return r.tools.Run(ctx, name, args)
 }
 
 func (r *Runtime) Start(ctx context.Context) {

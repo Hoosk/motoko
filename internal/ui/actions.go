@@ -118,6 +118,13 @@ func (m *Model) runShell(command string) tea.Cmd {
 	}
 }
 
+func (m *Model) runTool(name, args string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.runtime.RunTool(m.runtime.BackgroundContext(), name, args)
+		return ToolResultMsg{Name: name, Result: result, Err: err}
+	}
+}
+
 func (m *Model) runTask(command string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := m.runtime.StartTask(context.Background(), command)

@@ -92,6 +92,20 @@ func TestRenderAssistantMarkdownAlwaysInterpretsCommonSyntax(t *testing.T) {
 	}
 }
 
+func TestAppendRenderedBlockPreservesEmptySelectableContent(t *testing.T) {
+	m := New(80, 10)
+	m.AppendRenderedBlock("\x1b[1m▎ \x1b[0m", []RenderLine{{
+		Plain:      "▎ ",
+		Content:    "",
+		ContentX:   AssistantContentX,
+		Selectable: true,
+	}}, false)
+
+	if got := m.RenderLines[0].Content; got != "" {
+		t.Fatalf("expected empty content for visual rail line, got %q", got)
+	}
+}
+
 func TestModelNew(t *testing.T) {
 	m := New(100, 30)
 	if m.Width != 100 {

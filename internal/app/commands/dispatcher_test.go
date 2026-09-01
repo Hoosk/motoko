@@ -314,6 +314,22 @@ func TestHandleToolMissingName(t *testing.T) {
 	}
 }
 
+func TestHandleWriteToolUsesAsyncActionWhenApprovalIsRequired(t *testing.T) {
+	deps := baseDeps()
+	deps.ConfigFn = func() *config.AppConfig {
+		return &config.AppConfig{EditApproval: config.EditApprovalAsk}
+	}
+	d := newDispatcher(deps)
+
+	resp := d.Handle("/tool write file.txt\ncontent", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionTool {
+		t.Fatalf("expected tool action, got %#v", resp)
+	}
+	if resp.Action.ToolName != "write" || resp.Action.ToolArgs != "file.txt\ncontent" {
+		t.Fatalf("unexpected tool action %#v", resp.Action)
+	}
+}
+
 func TestHandleApproveNoPending(t *testing.T) {
 	d := newDispatcher(baseDeps())
 	resp := d.Handle("/approve", system.ContextInfo{})

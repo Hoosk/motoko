@@ -53,7 +53,7 @@ func (m *Model) onQuestionAsked(msg QuestionAskedMsg, cmds []tea.Cmd) ([]tea.Cmd
 
 func (m *Model) onApprovalRequested(msg ApprovalRequestedMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	if msg.Pending != nil {
-		m.approvalPopup.Open(msg.Pending)
+		m.approvalPopup.Open(msg.Pending, m.width, m.height)
 	}
 	return cmds, false
 }

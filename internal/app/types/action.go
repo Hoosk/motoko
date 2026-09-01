@@ -7,6 +7,7 @@ const (
 	ActionTask    ActionType = "task"
 	ActionAgent   ActionType = "agent"
 	ActionCompact ActionType = "compact"
+	ActionTool    ActionType = "tool"
 )
 
 type Action struct {
@@ -14,4 +15,6 @@ type Action struct {
 	ShellCommand string
 	TaskCommand  string
 	AgentPrompt  string
+	ToolName     string
+	ToolArgs     string
 }

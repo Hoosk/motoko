@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
@@ -26,7 +25,12 @@ func (t *WriteTool) Spec() Spec {
 }
 
 func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	path, content, err := parseWriteArgs(args)
 	if err != nil {
 		return Result{}, err
@@ -61,11 +65,7 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
-		return Result{}, fmt.Errorf("failed to create parent directories: %w", err)
-	}
-
-	if err := os.WriteFile(absPath, []byte(content), 0o600); err != nil {
+	if err := patchtool.WriteWorkspaceFile(ctx, absPath, []byte(previous), []byte(content), existed, 0o700, 0o600); err != nil {
 		return Result{}, fmt.Errorf("failed to write file: %w", err)
 	}
 	output := diff

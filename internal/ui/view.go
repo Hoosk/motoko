@@ -108,7 +108,10 @@ func (m Model) View() string {
 	}
 	widePopupStyle := styles.PopupStyle.Width(widePopupWidth)
 
-	if m.providerForm.active {
+	if m.approvalPopup.active {
+		popup := widePopupStyle.Render(m.approvalPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.providerForm.active {
 		popup := popupStyle.Render(m.providerForm.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.mcpForm.active {
@@ -134,9 +137,6 @@ func (m Model) View() string {
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.approvalPopup.active {
-		popup := widePopupStyle.Render(m.approvalPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.questionPopup.active {
 		popup := widePopupStyle.Render(m.questionPopup.View())

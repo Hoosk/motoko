@@ -66,7 +66,7 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		ToolSpecsFn: func() []tools.Spec { return r.ToolSpecs() },
 		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
-			return r.tools.Run(ctx, name, args)
+			return r.RunTool(ctx, name, args)
 		},
 		MCPServersFn: func() []mcp.ServerStatus {
 			if r.mcpMgr == nil {

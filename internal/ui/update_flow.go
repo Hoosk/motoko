@@ -67,6 +67,9 @@ func (m *Model) onSubmitPrompt(msg SubmitPromptMsg, cmds []tea.Cmd) ([]tea.Cmd, 
 		case app.ActionShell:
 			cmds = append(cmds, m.runShell(resp.Action.ShellCommand))
 
+		case app.ActionTool:
+			cmds = append(cmds, m.runTool(resp.Action.ToolName, resp.Action.ToolArgs))
+
 		case app.ActionTask:
 			cmds = append(cmds, m.runTask(resp.Action.TaskCommand))
 
@@ -139,6 +142,21 @@ func (m *Model) onShellResult(msg ShellResultMsg, cmds []tea.Cmd) ([]tea.Cmd, bo
 			kind = app.EntryError
 		}
 		m.timeline.appendEntry(app.Entry{Kind: kind, Text: msg.Result.Output})
+	}
+	m.timeline.renderMessages()
+	return cmds, false
+}
+
+func (m *Model) onToolResult(msg ToolResultMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
+	if msg.Err != nil {
+		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
+	} else {
+		if strings.TrimSpace(msg.Result.Summary) != "" {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: msg.Result.Summary})
+		}
+		if strings.TrimSpace(msg.Result.Output) != "" {
+			m.timeline.appendEntry(app.Entry{Kind: app.EntryOutput, Text: msg.Result.Output})
+		}
 	}
 	m.timeline.renderMessages()
 	return cmds, false

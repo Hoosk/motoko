@@ -18,6 +18,7 @@ const (
 )
 
 var ErrChangeRejected = errors.New("change rejected by user")
+var ErrApprovalUnavailable = errors.New("file change approval broker unavailable")
 
 type FileChange struct {
 	Path string
@@ -42,20 +43,25 @@ func (p *Pending) Resolve(approved bool) {
 }
 
 type Broker struct {
-	pending chan *Pending
+	pending []*Pending
+	wake    chan struct{}
+	mu      sync.Mutex
 	nextID  atomic.Int64
 }
 
 func NewBroker() *Broker {
-	return &Broker{pending: make(chan *Pending, 1)}
+	return &Broker{wake: make(chan struct{}, 1)}
 }
 
 func (b *Broker) Request(ctx context.Context, change FileChange) error {
-	if b == nil || ApprovalMode(ctx) != ModeAsk || strings.TrimSpace(change.Diff) == "" {
+	if ApprovalMode(ctx) != ModeAsk || strings.TrimSpace(change.Diff) == "" {
 		return nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if b == nil {
+		return ErrApprovalUnavailable
 	}
 	change.Path = strings.TrimSpace(change.Path)
 	change.ID = b.nextID.Add(1)
@@ -67,10 +73,8 @@ func (b *Broker) Request(ctx context.Context, change FileChange) error {
 	deadlineCtx, cancel := context.WithTimeout(ctx, approvalTimeout)
 	defer cancel()
 
-	select {
-	case b.pending <- pending:
-	case <-deadlineCtx.Done():
-		return deadlineCtx.Err()
+	if err := b.enqueue(deadlineCtx, pending); err != nil {
+		return err
 	}
 
 	select {
@@ -80,6 +84,7 @@ func (b *Broker) Request(ctx context.Context, change FileChange) error {
 		}
 		return nil
 	case <-deadlineCtx.Done():
+		b.remove(pending)
 		pending.Resolve(false)
 		if errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("%w: approval timed out for %s", ErrChangeRejected, change.Path)
@@ -95,11 +100,74 @@ func (b *Broker) Next(ctx context.Context) (*Pending, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	for {
+		b.mu.Lock()
+		b.ensureWakeLocked()
+		if len(b.pending) > 0 {
+			pending := b.pending[0]
+			b.pending = b.pending[1:]
+			b.mu.Unlock()
+			b.signal()
+			return pending, nil
+		}
+		wake := b.wake
+		b.mu.Unlock()
+
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func (b *Broker) enqueue(ctx context.Context, pending *Pending) error {
+	for {
+		b.mu.Lock()
+		b.ensureWakeLocked()
+		if len(b.pending) == 0 {
+			b.pending = append(b.pending, pending)
+			b.mu.Unlock()
+			b.signal()
+			return nil
+		}
+		wake := b.wake
+		b.mu.Unlock()
+
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (b *Broker) remove(target *Pending) {
+	b.mu.Lock()
+	for i, pending := range b.pending {
+		if pending == target {
+			b.pending = append(b.pending[:i], b.pending[i+1:]...)
+			break
+		}
+	}
+	b.mu.Unlock()
+	b.signal()
+}
+
+func (b *Broker) ensureWakeLocked() {
+	if b.wake == nil {
+		b.wake = make(chan struct{}, 1)
+	}
+}
+
+func (b *Broker) signal() {
+	b.mu.Lock()
+	b.ensureWakeLocked()
+	wake := b.wake
+	b.mu.Unlock()
 	select {
-	case pending := <-b.pending:
-		return pending, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case wake <- struct{}{}:
+	default:
 	}
 }
 

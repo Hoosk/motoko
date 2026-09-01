@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/styles"
 	"github.com/Hoosk/motoko/internal/ui"
 	"github.com/Hoosk/motoko/internal/updater"
@@ -123,6 +124,10 @@ func runCheckUpdate(ctx context.Context) {
 // runQuestion executes a single prompt headlessly, streaming the result to
 // stdout before exiting.
 func runQuestion(ctx context.Context, runtimeObj *app.Runtime, question string) {
+	if cfg := runtimeObj.Config(); cfg != nil && config.NormalizeEditApproval(cfg.EditApproval) == config.EditApprovalAsk {
+		fmt.Fprintln(os.Stderr, "Error: --question cannot use edit_approval=ask; run interactively or set edit_approval=auto")
+		os.Exit(1)
+	}
 	runtimeObj.Start(ctx)
 
 	// Wait up to 2 seconds for Tachikomas to complete their first run

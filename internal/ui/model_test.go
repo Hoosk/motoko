@@ -104,6 +104,34 @@ func TestSubmitPromptQueuesWhileThinking(t *testing.T) {
 	}
 }
 
+func TestApprovalRequestTakesPriorityOverOtherPopups(t *testing.T) {
+	m := Model{settingsPopup: settingsPopupState{active: true}}
+	pending := &tools.PendingApproval{}
+
+	updated, _ := m.Update(ApprovalRequestedMsg{Pending: pending})
+	got := updated.(Model)
+	if !got.approvalPopup.active || got.approvalPopup.pending != pending {
+		t.Fatalf("expected approval popup to open, got %#v", got.approvalPopup)
+	}
+}
+
+func TestApprovalPopupTracksTerminalResize(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.width = 100
+	m.height = 30
+	updated, _ := m.Update(ApprovalRequestedMsg{Pending: &tools.PendingApproval{}})
+	m = updated.(Model)
+
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	got := updated.(Model)
+	if got.width != 50 || got.height != 20 {
+		t.Fatalf("expected model size 50x20, got %dx%d", got.width, got.height)
+	}
+	if got.approvalPopup.width != 34 || got.approvalPopup.height != 8 {
+		t.Fatalf("expected approval viewport 34x8, got %dx%d", got.approvalPopup.width, got.approvalPopup.height)
+	}
+}
+
 func TestNextPromptAfterAgentKeepsGoalAliveWithoutTasks(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	br := m.runtime.GetBrain()

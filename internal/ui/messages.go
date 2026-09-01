@@ -112,6 +112,12 @@ type ApprovalRequestedMsg struct {
 	Pending *tools.PendingApproval
 }
 
+type ToolResultMsg struct {
+	Name   string
+	Result tools.Result
+	Err    error
+}
+
 type ScheduleEventMsg struct {
 	Event scheduleman.Event
 }

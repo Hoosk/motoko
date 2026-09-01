@@ -43,9 +43,6 @@ func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer 
 			if lineMeta.Plain == "" {
 				lineMeta.Plain = plainLines[i]
 			}
-			if lineMeta.Content == "" {
-				lineMeta.Content = plainLines[i]
-			}
 		}
 		m.RenderLines = append(m.RenderLines, RenderLine{
 			Styled:     line,
@@ -78,7 +75,7 @@ func (m *Model) RenderLineMetadata(idx int) []RenderLine {
 	entry := visible[entryIdx]
 	switch entry.Kind {
 	case app.EntryAssistant:
-		rendered := strings.Split(StripANSI(renderAssistantMarkdown(entry.Text, m.AssistantInnerWidth())), "\n")
+		rendered := strings.Split(StripANSI(m.Messages[idx]), "\n")
 		meta := make([]RenderLine, 0, len(rendered))
 		for _, line := range rendered {
 			content := strings.TrimPrefix(line, "▎ ")

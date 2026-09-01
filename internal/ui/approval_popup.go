@@ -19,14 +19,28 @@ type approvalPopupState struct {
 	height   int
 }
 
-func (p *approvalPopupState) Open(pending *tools.PendingApproval) {
+func (p *approvalPopupState) Open(pending *tools.PendingApproval, width, height int) {
 	p.pending = pending
 	p.active = pending != nil
-	p.width = 68
-	p.height = 14
+	p.resize(width, height)
 	p.viewport = viewport.New(p.width, p.height)
 	if pending != nil {
 		p.viewport.SetContent(timeline.RenderFullDiffOutput(pending.Change.Diff))
+	}
+}
+
+func (p *approvalPopupState) resize(width, height int) {
+	if width <= 0 {
+		width = 84
+	}
+	if height <= 0 {
+		height = 24
+	}
+	p.width = max(24, min(width-16, 68))
+	p.height = max(8, min(height-14, 18))
+	if p.viewport.Width > 0 {
+		p.viewport.Width = p.width
+		p.viewport.Height = p.height
 	}
 }
 
@@ -35,10 +49,7 @@ func (p *approvalPopupState) Update(msg tea.Msg) bool {
 		return false
 	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		p.width = max(24, min(size.Width-16, 68))
-		p.height = max(8, min(size.Height-14, 18))
-		p.viewport.Width = p.width
-		p.viewport.Height = p.height
+		p.resize(size.Width, size.Height)
 		return false
 	}
 	if key, ok := msg.(tea.KeyMsg); ok {
