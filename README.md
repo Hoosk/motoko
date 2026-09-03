@@ -110,7 +110,7 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 
 | Command | Action |
 | :--- | :--- |
-| **`!cmd`** | Run shell command directly (e.g. `!go test ./...`) |
+| **`!cmd`** | Run a shell command (safe commands execute directly; sensitive commands open an approval dialog) |
 | **`/help`** | Display all available commands and help overlay |
 | **`/clear`** | Reset the visible timeline and active session history |
 | **`/chat`** | Switch input mode to standard chat |
@@ -136,7 +136,6 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **`/status`** | Display current model, provider, and workspace states |
 | **`/compact`** | Trigger manual conversation compaction |
 | **`/task`** | Manage background commands and task logs |
-| **`/approve`** / **`/deny`** | Accept or reject a pending shell execution request |
 | **`/metrics`** | Show session token usage metrics |
 | **`/debug`** | Toggle agent debugging log output |
 | **`/trace`** | Toggle tracing logs (requires compilation with `-tags motoko_trace`) |

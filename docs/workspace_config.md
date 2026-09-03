@@ -24,7 +24,7 @@ When Motoko starts in a workspace, it loads the global configuration first and t
 - **Search Exclusions:** Workspace-specific search `exclude_patterns` are merged with global patterns, keeping a unique sorted set. Other search fields like `max_results` and `case_sensitive` override global values.
 - **Agent Overrides:** Custom agent configurations (e.g., model, temperature, provider, tool filters) in the workspace config are merged with the global agent settings. Any specific override field set in the workspace takes priority.
 - **Thinking Verbosity / Iterations:** `thinking_verbosity` and `max_iterations` can be set globally and overridden per workspace via `.agents/config.json`.
-- **File Edit Approval:** `edit_approval` accepts `auto` (default) or `ask`. In `ask`, Motoko shows the unified diff and requires approval before `write` or `patch` changes a file.
+- **File Edit Approval:** `edit_approval` accepts `auto` (default) or `ask`. In `ask`, Motoko sends `write` and `patch` changes through the unified user-dialog broker and shows the unified diff in an approval popup before modifying a file.
 
 ## Example Config
 
@@ -73,6 +73,16 @@ In this setup:
 3. The **`build`** agent is configured to use the `anthropic` provider with the `claude-4.6-sonnet` model (loaded from your global configuration keys) with a custom temperature of `0.2` for maximum code generation stability.
 4. Custom exclude patterns (`coverage.out`, `*.bin`) are added to the search exclusions list for this workspace.
 5. The workspace uses a more concise reasoning style and raises the default iteration budget.
+
+## Approval Dialogs
+
+Motoko uses one user-dialog broker for interactive questions, file changes, and shell commands that need confirmation. Each request is shown one at a time in the TUI so the response is unambiguous.
+
+- File changes show a scrollable unified diff when `edit_approval` is `ask`.
+- Explicit shell commands from `!<cmd>`, shell input mode, or `/tool bash` show the command and the reason for approval when the shell policy requires it.
+- Press `Enter` or `y` to approve, and `Esc` or `n` to reject.
+- Unanswered requests expire after five minutes and are rejected.
+- Dangerous shell commands are rejected by policy without an approval dialog.
 
 ## Custom Modes (`.agents/modes/*.md`)
 
