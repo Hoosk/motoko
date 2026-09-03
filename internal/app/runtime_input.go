@@ -107,30 +107,7 @@ func (r *Runtime) HandleTaskResult(result TaskEvent) Response {
 }
 
 func (r *Runtime) handleShell(command string) Response {
-	if command == "" {
-		return Response{Entries: []Entry{{Kind: EntryError, Text: "Missing command after !"}}}
-	}
-
-	decision := shell.Classify(r.agOrch.Mode(), command)
-	if decision.Deny {
-		return Response{Entries: []Entry{{Kind: EntryError, Text: decision.Reason}}}
-	}
-
-	if decision.RequiresApproval {
-		r.pending = &pendingShell{Command: command}
-		return Response{Entries: []Entry{
-			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: fmt.Sprintf("Pending action: %s Use /approve or /deny.", decision.Reason)},
-		}}
-	}
-
-	return Response{
-		Entries: []Entry{
-			{Kind: EntryCommand, Text: "$ " + command},
-			{Kind: EntrySystem, Text: "Executing command..."},
-		},
-		Action: &Action{Type: ActionShell, ShellCommand: command},
-	}
+	return shell.PrepareCommand(r.agOrch.Mode(), command)
 }
 
 func (r *Runtime) handleCommand(command string) Response {

@@ -68,9 +68,7 @@ func baseDeps() Deps {
 			func() {},
 		),
 
-		PendingFn:      func() string { return "" },
-		SetPendingFn:   func(string) {},
-		ClearPendingFn: func() string { return "" },
+		PendingDialogsFn: func() int { return 0 },
 
 		ContextWindowFn: func() int { return 128_000 },
 	}
@@ -330,51 +328,14 @@ func TestHandleWriteToolUsesAsyncActionWhenApprovalIsRequired(t *testing.T) {
 	}
 }
 
-func TestHandleApproveNoPending(t *testing.T) {
+func TestHandleShellApprovalReturnsDialogAction(t *testing.T) {
 	d := newDispatcher(baseDeps())
-	resp := d.Handle("/approve", system.ContextInfo{})
-	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "No pending") {
-		t.Error("expected 'no pending' message")
+	resp := d.Handle("/tool bash git add file.go", system.ContextInfo{})
+	if resp.Action == nil || resp.Action.Type != types.ActionShellApproval {
+		t.Fatalf("expected shell approval action, got %#v", resp.Action)
 	}
-}
-
-func TestHandleApproveWithPending(t *testing.T) {
-	cleared := ""
-	deps := baseDeps()
-	deps.PendingFn = func() string { return "git status" }
-	deps.ClearPendingFn = func() string { cleared = "git status"; return "git status" }
-	d := newDispatcher(deps)
-
-	resp := d.Handle("/approve", system.ContextInfo{})
-	if cleared != "git status" {
-		t.Error("expected ClearPendingFn to be called")
-	}
-	if resp.Action == nil || resp.Action.Type != types.ActionShell || resp.Action.ShellCommand != "git status" {
-		t.Error("expected shell action with git status")
-	}
-}
-
-func TestHandleDeny(t *testing.T) {
-	cleared := ""
-	deps := baseDeps()
-	deps.PendingFn = func() string { return "rm -rf /" }
-	deps.ClearPendingFn = func() string { cleared = "rm -rf /"; return "rm -rf /" }
-	d := newDispatcher(deps)
-
-	resp := d.Handle("/deny", system.ContextInfo{})
-	if cleared != "rm -rf /" {
-		t.Error("expected ClearPendingFn to be called")
-	}
-	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "cancelled") {
-		t.Error("expected cancelled message")
-	}
-}
-
-func TestHandleDenyNoPending(t *testing.T) {
-	d := newDispatcher(baseDeps())
-	resp := d.Handle("/deny", system.ContextInfo{})
-	if len(resp.Entries) == 0 || !strings.Contains(resp.Entries[0].Text, "No pending") {
-		t.Error("expected 'no pending' message")
+	if resp.Action.ShellCommand != "git add file.go" || resp.Action.ShellReason == "" {
+		t.Fatalf("unexpected shell approval action %#v", resp.Action)
 	}
 }
 

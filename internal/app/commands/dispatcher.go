@@ -30,11 +30,10 @@ const (
 	ThemeCyberpunk = "cyberpunk"
 	DefaultTheme   = ThemeCyberpunk
 
-	CmdQuit    = "quit"
-	CmdThemes  = "themes"
-	CmdAgent   = "agent"
-	CmdShell   = "shell"
-	CmdApprove = "approve"
+	CmdQuit   = "quit"
+	CmdThemes = "themes"
+	CmdAgent  = "agent"
+	CmdShell  = "shell"
 )
 
 type Deps struct {
@@ -67,15 +66,15 @@ type Deps struct {
 	AddScheduleFn    func(instruction string, interval time.Duration, oneShot bool) (scheduleman.Definition, error)
 	RemoveScheduleFn func(id string) error
 
-	ToolSpecsFn        func() []tools.Spec
-	RunToolFn          func(ctx context.Context, name, args string) (tools.Result, error)
-	MCPServersFn       func() []mcp.ServerStatus
-	AddMCPServerFn     func(srv config.MCPServerConfig)
-	RemoveMCPServerFn  func(name string) bool
-	MCPResourcesFn     func(ctx context.Context) []mcp.Resource
-	MCPResourceReadFn  func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error)
-	MCPPromptsFn       func(ctx context.Context) []mcp.Prompt
-	MCPGetPromptFn     func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error)
+	ToolSpecsFn       func() []tools.Spec
+	RunToolFn         func(ctx context.Context, name, args string) (tools.Result, error)
+	MCPServersFn      func() []mcp.ServerStatus
+	AddMCPServerFn    func(srv config.MCPServerConfig)
+	RemoveMCPServerFn func(name string) bool
+	MCPResourcesFn    func(ctx context.Context) []mcp.Resource
+	MCPResourceReadFn func(ctx context.Context, serverName, uri string) (*mcp.ReadResourceResult, error)
+	MCPPromptsFn      func(ctx context.Context) []mcp.Prompt
+	MCPGetPromptFn    func(ctx context.Context, serverName, name string, args map[string]string) (*mcp.GetPromptResult, error)
 	// MCPPromptHostsFn returns the set of (server, prompt) pairs available
 	// for dynamic command lookup. Prompts become runnable as
 	// /<prompt-name> [k=v ...] when the prompt name is unique across
@@ -85,9 +84,7 @@ type Deps struct {
 
 	ProvMgr *providerman.Manager
 
-	PendingFn      func() string
-	SetPendingFn   func(cmd string)
-	ClearPendingFn func() string
+	PendingDialogsFn func() int
 
 	ContextWindowFn func() int
 }
@@ -200,8 +197,6 @@ func (d *Dispatcher) handlerFor(command string) Handler {
 		return d.handleToolCommand
 	case "mcp":
 		return func(inv Invocation) types.Response { return d.handleMCPCommand(inv.Args) }
-	case CmdApprove, "deny":
-		return d.handleApprovalCommand(command)
 	case "trace":
 		return func(inv Invocation) types.Response { return d.handleTraceCommand() }
 	default:

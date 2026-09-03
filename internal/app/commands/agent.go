@@ -59,20 +59,6 @@ func (d *Dispatcher) handleContextCommand(info system.ContextInfo) types.Respons
 	return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "--- RAW AGENT SYSTEM PROMPT ---\n\n" + rawPrompt}}}
 }
 
-func (d *Dispatcher) handleApprovalCommand(command string) Handler {
-	return func(inv Invocation) types.Response {
-		pending := d.deps.PendingFn()
-		if pending == "" {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: "No pending action."}}}
-		}
-		cleared := d.deps.ClearPendingFn()
-		if command == "approve" {
-			return types.Response{Entries: []types.Entry{{Kind: types.EntryCommand, Text: "$ " + cleared}, {Kind: types.EntrySystem, Text: "Approval received. Executing command..."}}, Action: &types.Action{Type: types.ActionShell, ShellCommand: cleared}}
-		}
-		return types.Response{Entries: []types.Entry{{Kind: types.EntrySystem, Text: fmt.Sprintf("Action cancelled: %s", cleared)}}}
-	}
-}
-
 func (d *Dispatcher) handleTraceCommand() types.Response {
 	if !tracelog.Available() {
 		return types.Response{}

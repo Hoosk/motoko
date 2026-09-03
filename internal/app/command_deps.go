@@ -118,18 +118,7 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		ProvMgr: r.provMgr,
 
-		PendingFn: func() string {
-			if r.pending == nil {
-				return ""
-			}
-			return r.pending.Command
-		},
-		SetPendingFn: func(cmd string) { r.pending = &pendingShell{Command: cmd} },
-		ClearPendingFn: func() string {
-			cmd := r.pending.Command
-			r.pending = nil
-			return cmd
-		},
+		PendingDialogsFn: func() int { return r.PendingDialogs() },
 
 		ContextWindowFn: func() int { return r.contextWindow },
 	}

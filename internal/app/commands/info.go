@@ -57,36 +57,15 @@ func (d *Dispatcher) handleClearCommand() types.Response {
 }
 
 func (d *Dispatcher) handleShell(command string) types.Response {
-	if command == "" {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Missing command after !"}}}
-	}
-
-	decision := shell.Classify(d.deps.ModeFn(), command)
-	if decision.Deny {
-		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: decision.Reason}}}
-	}
-
-	if decision.RequiresApproval {
-		d.deps.SetPendingFn(command)
-		return types.Response{Entries: []types.Entry{
-			{Kind: types.EntryCommand, Text: "$ " + command},
-			{Kind: types.EntrySystem, Text: fmt.Sprintf("Pending action: %s Use /approve or /deny.", decision.Reason)},
-		}}
-	}
-
-	return types.Response{
-		Entries: []types.Entry{
-			{Kind: types.EntryCommand, Text: "$ " + command},
-			{Kind: types.EntrySystem, Text: "Executing command..."},
-		},
-		Action: &types.Action{Type: types.ActionShell, ShellCommand: command},
-	}
+	return shell.PrepareCommand(d.deps.ModeFn(), command)
 }
 
 func (d *Dispatcher) statusText(info system.ContextInfo) string {
 	pending := ValNone
-	if p := d.deps.PendingFn(); p != "" {
-		pending = p
+	if d.deps.PendingDialogsFn != nil {
+		if count := d.deps.PendingDialogsFn(); count > 0 {
+			pending = fmt.Sprintf("%d dialog(s)", count)
+		}
 	}
 
 	agentsStatus := "not found"
