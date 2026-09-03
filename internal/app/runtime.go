@@ -77,21 +77,18 @@ const (
 )
 
 const (
-	ActionShell   = types.ActionShell
-	ActionTask    = types.ActionTask
-	ActionAgent   = types.ActionAgent
-	ActionCompact = types.ActionCompact
-	ActionTool    = types.ActionTool
+	ActionShell         = types.ActionShell
+	ActionShellApproval = types.ActionShellApproval
+	ActionTask          = types.ActionTask
+	ActionAgent         = types.ActionAgent
+	ActionCompact       = types.ActionCompact
+	ActionTool          = types.ActionTool
 )
 
 type TaskState = taskman.TaskState
 
 var ThinkingBudgetLevels = providerman.ThinkingBudgetLevels
 var ThinkingBudgetLabels = providerman.ThinkingBudgetLabels
-
-type pendingShell struct {
-	Command string
-}
 
 type Runtime struct {
 	cplDeps           completions.Deps
@@ -104,14 +101,12 @@ type Runtime struct {
 	taskMgr           *taskman.Manager
 	scheduleMgr       *scheduleman.Manager
 	sesMgr            *sessionman.Manager
-	questionBroker    *tools.QuestionBroker
-	approvalBroker    *tools.ApprovalBroker
+	broker            *tools.Broker
 	agOrch            *agentorch.Orchestrator
 	semantic          *semantic.Index
 	backgroundCancel  context.CancelFunc
 	updateInfo        *updater.VersionInfo
 	tachikomas        *tachikoma.Manager
-	pending           *pendingShell
 	tools             *tools.Registry
 	mcpMgr            *mcp.Manager
 	updateDone        chan struct{}
@@ -164,8 +159,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		tachikomas:        tachikoma.NewManager(),
 		taskMgr:           taskman.NewManager(),
 		scheduleMgr:       scheduleman.NewManager(),
-		questionBroker:    tools.NewQuestionBroker(),
-		approvalBroker:    tools.NewApprovalBroker(),
+		broker:            tools.NewBroker(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
 	}
@@ -241,13 +235,6 @@ func (r *Runtime) Completions(input string) []string {
 
 func (r *Runtime) MentionSuggestions(input string) []string {
 	return completions.MentionSuggestions(r.cplDeps, input)
-}
-
-func (r *Runtime) PendingApproval() string {
-	if r.pending == nil {
-		return ""
-	}
-	return r.pending.Command
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
@@ -398,22 +385,19 @@ func (r *Runtime) CompactSession(ctx context.Context) Response {
 func (r *Runtime) ActiveSubagents() []string                   { return r.agOrch.ActiveSubagents() }
 func (r *Runtime) SystemPrompt(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) }
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
-	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
 	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgent(ctx, info, input)
 }
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
-	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
 	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgentStream(ctx, info, input, func(ev types.AgentStreamEvent) error {
 		return onEvent(AgentStreamEvent(ev))
 	})
 }
 func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
-	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
 	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunSubagent(ctx, cfg)
 }
@@ -423,8 +407,7 @@ func (r *Runtime) RunTool(ctx context.Context, name, args string) (tools.Result,
 		ctx = context.Background()
 	}
 	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
-	ctx = tools.WithApprovalBroker(ctx, r.approvalBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
 	ctx = tools.WithConfig(ctx, r.config)
 	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
 	return r.tools.Run(ctx, name, args)
@@ -498,7 +481,7 @@ func (r *Runtime) registerTools(sList []skills.Skill) {
 	r.tools.Register(tools.NewInspectTool(r.tachikomas))
 	r.tools.Register(tools.NewDelegateTool(r))
 	r.tools.Register(tools.NewTaskTool(r))
-	r.tools.Register(tools.NewQuestionTool(r.questionBroker))
+	r.tools.Register(tools.NewQuestionTool(r.broker))
 	r.tools.Register(tools.NewBrainWriteTool(r))
 	r.tools.Register(tools.NewBrainReadTool(r))
 	r.tools.Register(tools.NewBrainListTool(r))
@@ -538,9 +521,19 @@ func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {
 
 func (r *Runtime) Tachikomas() *tachikoma.Manager { return r.tachikomas }
 
-func (r *Runtime) QuestionBroker() *tools.QuestionBroker { return r.questionBroker }
+func (r *Runtime) Broker() *tools.Broker {
+	if r == nil {
+		return nil
+	}
+	return r.broker
+}
 
-func (r *Runtime) ApprovalBroker() *tools.ApprovalBroker { return r.approvalBroker }
+func (r *Runtime) PendingDialogs() int {
+	if r == nil || r.broker == nil {
+		return 0
+	}
+	return r.broker.PendingCount()
+}
 
 func (r *Runtime) BackgroundContext() context.Context {
 	if r.backgroundCtx != nil {

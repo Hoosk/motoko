@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 func withTempWorkspace(t *testing.T) string {
@@ -134,8 +134,8 @@ func TestPatchToolAcceptsSchemaJSONEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := approvalpkg.NewBroker()
-	ctx := approvalpkg.WithBroker(approvalpkg.WithMode(context.Background(), approvalpkg.ModeAsk), broker)
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
 	result := make(chan error, 1)
 	go func() {
 		_, err := New().Run(ctx, `{"path":"json.md","edits":[{"old":"old\n","new":"new\n"}]}`)
@@ -148,7 +148,7 @@ func TestPatchToolAcceptsSchemaJSONEdits(t *testing.T) {
 	if !strings.Contains(pending.Change.Diff, "-old") || !strings.Contains(pending.Change.Diff, "+new") {
 		t.Fatalf("unexpected JSON patch diff %q", pending.Change.Diff)
 	}
-	pending.Resolve(true)
+	pending.Resolve(dialogpkg.Decision{Approved: true})
 	if err := <-result; err != nil {
 		t.Fatalf("JSON patch failed: %v", err)
 	}
@@ -168,8 +168,8 @@ func TestPatchToolRequiresApprovalBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := approvalpkg.NewBroker()
-	ctx := approvalpkg.WithBroker(approvalpkg.WithMode(context.Background(), approvalpkg.ModeAsk), broker)
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
 	result := make(chan error, 1)
 	go func() {
 		_, err := New().Run(ctx, "test.md\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
@@ -182,8 +182,8 @@ func TestPatchToolRequiresApprovalBeforeWriting(t *testing.T) {
 	if !strings.Contains(pending.Change.Diff, "-old") || !strings.Contains(pending.Change.Diff, "+new") {
 		t.Fatalf("unexpected patch diff %q", pending.Change.Diff)
 	}
-	pending.Resolve(false)
-	if err := <-result; !errors.Is(err, approvalpkg.ErrChangeRejected) {
+	pending.Resolve(dialogpkg.Decision{Approved: false})
+	if err := <-result; !errors.Is(err, dialogpkg.ErrChangeRejected) {
 		t.Fatalf("expected rejected patch, got %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -202,8 +202,8 @@ func TestPatchToolRejectsStaleApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := approvalpkg.NewBroker()
-	ctx := approvalpkg.WithBroker(approvalpkg.WithMode(context.Background(), approvalpkg.ModeAsk), broker)
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
 	result := make(chan error, 1)
 	go func() {
 		_, err := New().Run(ctx, "stale.md\n<<<<<<< SEARCH\nold\n=======\nproposed\n>>>>>>> REPLACE")
@@ -216,7 +216,7 @@ func TestPatchToolRejectsStaleApproval(t *testing.T) {
 	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(true)
+	pending.Resolve(dialogpkg.Decision{Approved: true})
 	if err := <-result; !errors.Is(err, ErrFileChanged) {
 		t.Fatalf("expected stale file error, got %v", err)
 	}
@@ -231,8 +231,8 @@ func TestPatchToolRejectsStaleApproval(t *testing.T) {
 
 func TestPatchToolRefusesEmptyNewFile(t *testing.T) {
 	root := withTempWorkspace(t)
-	broker := approvalpkg.NewBroker()
-	ctx := approvalpkg.WithBroker(approvalpkg.WithMode(context.Background(), approvalpkg.ModeAsk), broker)
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
 
 	_, err := New().Run(ctx, "empty.txt\n<<<<<<< SEARCH\n=======\n>>>>>>> REPLACE")
 	if err == nil || !strings.Contains(err.Error(), "empty file") {

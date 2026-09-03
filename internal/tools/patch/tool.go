@@ -6,7 +6,7 @@ import (
 	"os"
 	"regexp"
 
-	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 const (
@@ -124,7 +124,7 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	diff := UnifiedDiff(relPath, current, updated)
-	if err := approvalpkg.GetBroker(ctx).Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
 	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
@@ -175,7 +175,7 @@ func (t *Tool) runJSONPatch(ctx context.Context, path string, edits []jsonPatchE
 	}
 
 	diff := UnifiedDiff(relPath, string(content), updated)
-	if err := approvalpkg.GetBroker(ctx).Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
 	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
@@ -228,7 +228,7 @@ func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, e
 		}
 	}
 	diff := UnifiedDiff(relPath, string(content), updated)
-	if err := approvalpkg.GetBroker(ctx).Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
 	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), true, 0o755, 0o644); err != nil {
@@ -273,7 +273,7 @@ func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result
 		return Result{}, fmt.Errorf("refusing to create an empty file with unified patch: %s", relPath)
 	}
 	diff := UnifiedDiff(relPath, string(content), updated)
-	if err := approvalpkg.GetBroker(ctx).Request(ctx, approvalpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
 	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), existed, 0o755, 0o644); err != nil {

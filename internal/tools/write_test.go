@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/config"
-	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
 	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
 )
 
@@ -38,9 +37,9 @@ func TestWriteToolCreatesNewFile(t *testing.T) {
 func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	root := withTempWorkspace(t)
 	path := filepath.Join(root, "approved.txt")
-	broker := NewApprovalBroker()
+	broker := NewBroker()
 	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
-	ctx := WithApprovalBroker(WithConfig(context.Background(), cfg), broker)
+	ctx := WithBroker(WithConfig(context.Background(), cfg), broker)
 	tool := NewWriteTool()
 	result := make(chan error, 1)
 
@@ -55,7 +54,7 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	if pending.Change.Path != "approved.txt" || !strings.Contains(pending.Change.Diff, "+new content") {
 		t.Fatalf("unexpected approval request %#v", pending.Change)
 	}
-	pending.Resolve(true)
+	pending.Resolve(DialogDecision{Approved: true})
 	if err := <-result; err != nil {
 		t.Fatalf("approved write failed: %v", err)
 	}
@@ -76,9 +75,9 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(false)
+	pending.Resolve(DialogDecision{Approved: false})
 	err = <-result
-	if !errors.Is(err, approvalpkg.ErrChangeRejected) {
+	if !errors.Is(err, ErrChangeRejected) {
 		t.Fatalf("expected rejected write error, got %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "rejected.txt")); !errors.Is(statErr, os.ErrNotExist) {
@@ -86,13 +85,13 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	}
 }
 
-func TestWriteToolFailsClosedWithoutApprovalBroker(t *testing.T) {
+func TestWriteToolFailsClosedWithoutDialogBroker(t *testing.T) {
 	withTempWorkspace(t)
 	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
 	ctx := WithConfig(context.Background(), cfg)
 
 	_, err := NewWriteTool().Run(ctx, "blocked.txt\ncontent")
-	if !errors.Is(err, approvalpkg.ErrApprovalUnavailable) {
+	if !errors.Is(err, ErrApprovalUnavailable) {
 		t.Fatalf("expected missing broker error, got %v", err)
 	}
 	if _, statErr := os.Stat("blocked.txt"); !errors.Is(statErr, os.ErrNotExist) {
@@ -107,9 +106,9 @@ func TestWriteToolRejectsStaleApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := NewApprovalBroker()
+	broker := NewBroker()
 	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
-	ctx := WithApprovalBroker(WithConfig(context.Background(), cfg), broker)
+	ctx := WithBroker(WithConfig(context.Background(), cfg), broker)
 	result := make(chan error, 1)
 	go func() {
 		_, err := NewWriteTool().Run(ctx, "stale.txt\nproposed\n")
@@ -122,7 +121,7 @@ func TestWriteToolRejectsStaleApproval(t *testing.T) {
 	if err := os.WriteFile(path, []byte("external\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(true)
+	pending.Resolve(DialogDecision{Approved: true})
 	if err := <-result; !errors.Is(err, patchtool.ErrFileChanged) {
 		t.Fatalf("expected stale file error, got %v", err)
 	}

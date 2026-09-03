@@ -11,7 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
-	approvalpkg "github.com/Hoosk/motoko/internal/tools/approval"
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 const maxToolOutputBytes = 12_000
@@ -235,7 +235,7 @@ type configKey struct{}
 func WithConfig(ctx context.Context, cfg *config.AppConfig) context.Context {
 	ctx = context.WithValue(ctx, configKey{}, cfg)
 	if cfg != nil {
-		ctx = approvalpkg.WithMode(ctx, cfg.EditApproval)
+		ctx = dialogpkg.WithMode(ctx, cfg.EditApproval)
 	}
 	return ctx
 }
@@ -282,36 +282,39 @@ func GetMaxOutputSize(ctx context.Context) int {
 	return maxToolOutputBytes
 }
 
-type questionBrokerKey struct{}
+type QuestionOption = dialogpkg.QuestionOption
+type Question = dialogpkg.Question
+type Answer = dialogpkg.Answer
+type FileChange = dialogpkg.FileChange
+type ShellCommand = dialogpkg.ShellCommand
+type DialogRequest = dialogpkg.Request
+type DialogDecision = dialogpkg.Decision
+type DialogKind = dialogpkg.Kind
+type Pending = dialogpkg.Pending
+type Broker = dialogpkg.Broker
 
-func WithQuestionBroker(ctx context.Context, broker *QuestionBroker) context.Context {
-	return context.WithValue(ctx, questionBrokerKey{}, broker)
+const (
+	DialogQuestion     = dialogpkg.KindQuestion
+	DialogFileChange   = dialogpkg.KindFileChange
+	DialogShellCommand = dialogpkg.KindShellCommand
+)
+
+var (
+	ErrChangeRejected      = dialogpkg.ErrChangeRejected
+	ErrQuestionCancelled   = dialogpkg.ErrQuestionCancelled
+	ErrCommandRejected     = dialogpkg.ErrCommandRejected
+	ErrBrokerUnavailable   = dialogpkg.ErrBrokerUnavailable
+	ErrApprovalUnavailable = dialogpkg.ErrApprovalUnavailable
+)
+
+func NewBroker() *Broker {
+	return dialogpkg.NewBroker()
 }
 
-func GetQuestionBroker(ctx context.Context) *QuestionBroker {
-	if ctx == nil {
-		return nil
-	}
-	if broker, ok := ctx.Value(questionBrokerKey{}).(*QuestionBroker); ok {
-		return broker
-	}
-	return nil
+func WithBroker(ctx context.Context, broker *Broker) context.Context {
+	return dialogpkg.WithBroker(ctx, broker)
 }
 
-type FileChange = approvalpkg.FileChange
-type PendingApproval = approvalpkg.Pending
-type ApprovalBroker = approvalpkg.Broker
-
-var ErrChangeRejected = approvalpkg.ErrChangeRejected
-
-func NewApprovalBroker() *ApprovalBroker {
-	return approvalpkg.NewBroker()
-}
-
-func WithApprovalBroker(ctx context.Context, broker *ApprovalBroker) context.Context {
-	return approvalpkg.WithBroker(ctx, broker)
-}
-
-func GetApprovalBroker(ctx context.Context) *ApprovalBroker {
-	return approvalpkg.GetBroker(ctx)
+func GetBroker(ctx context.Context) *Broker {
+	return dialogpkg.GetBroker(ctx)
 }
