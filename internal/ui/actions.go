@@ -8,6 +8,7 @@ import (
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/app/shell"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/tools"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -118,6 +119,16 @@ func (m *Model) runShell(command string) tea.Cmd {
 	}
 }
 
+func (m *Model) runShellApproval(command, reason string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := m.runtime.BackgroundContext()
+		if err := m.runtime.Broker().RequestShellCommand(ctx, tools.ShellCommand{Command: command, Reason: reason}); err != nil {
+			return ShellApprovalResultMsg{Command: command, Err: err}
+		}
+		return ShellResultMsg{Result: shell.RunCommand(ctx, command)}
+	}
+}
+
 func (m *Model) runTool(name, args string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.runtime.RunTool(m.runtime.BackgroundContext(), name, args)
@@ -147,23 +158,13 @@ func (m *Model) compactSession() tea.Cmd {
 	}
 }
 
-func (m Model) waitQuestion() tea.Cmd {
+func (m Model) waitDialog() tea.Cmd {
 	return func() tea.Msg {
-		pending, err := m.runtime.QuestionBroker().Next(m.runtime.BackgroundContext())
+		pending, err := m.runtime.Broker().Next(m.runtime.BackgroundContext())
 		if err != nil || pending == nil {
 			return nil
 		}
-		return QuestionAskedMsg{Pending: pending}
-	}
-}
-
-func (m Model) waitApproval() tea.Cmd {
-	return func() tea.Msg {
-		pending, err := m.runtime.ApprovalBroker().Next(m.runtime.BackgroundContext())
-		if err != nil || pending == nil {
-			return nil
-		}
-		return ApprovalRequestedMsg{Pending: pending}
+		return DialogRequestedMsg{Pending: pending}
 	}
 }
 

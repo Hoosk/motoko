@@ -104,11 +104,11 @@ func TestSubmitPromptQueuesWhileThinking(t *testing.T) {
 	}
 }
 
-func TestApprovalRequestTakesPriorityOverOtherPopups(t *testing.T) {
+func TestDialogRequestTakesPriorityOverOtherPopups(t *testing.T) {
 	m := Model{settingsPopup: settingsPopupState{active: true}}
-	pending := &tools.PendingApproval{}
+	pending := &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}
 
-	updated, _ := m.Update(ApprovalRequestedMsg{Pending: pending})
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
 	got := updated.(Model)
 	if !got.approvalPopup.active || got.approvalPopup.pending != pending {
 		t.Fatalf("expected approval popup to open, got %#v", got.approvalPopup)
@@ -119,7 +119,7 @@ func TestApprovalPopupTracksTerminalResize(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 100
 	m.height = 30
-	updated, _ := m.Update(ApprovalRequestedMsg{Pending: &tools.PendingApproval{}})
+	updated, _ := m.Update(DialogRequestedMsg{Pending: &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}})
 	m = updated.(Model)
 
 	updated, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
@@ -129,6 +129,49 @@ func TestApprovalPopupTracksTerminalResize(t *testing.T) {
 	}
 	if got.approvalPopup.width != 34 || got.approvalPopup.height != 8 {
 		t.Fatalf("expected approval viewport 34x8, got %dx%d", got.approvalPopup.width, got.approvalPopup.height)
+	}
+}
+
+func TestApprovalPopupRendersShellCommand(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	pending := &tools.Pending{Request: tools.DialogRequest{
+		Kind: tools.DialogShellCommand,
+		ShellCommand: tools.ShellCommand{
+			Command: "git add file.go",
+			Reason:  "The command may modify files or repository state.",
+		},
+	}}
+	m.approvalPopup.Open(pending, 100, 30)
+	view := stripANSI(m.approvalPopup.View())
+	for _, want := range []string{"Approve shell command", "$ git add file.go", "may modify files"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected shell approval view to contain %q, got %q", want, view)
+		}
+	}
+}
+
+func TestShellApprovalRunsOnlyAfterResolution(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	cmd := m.runShellApproval("printf approved", "test command")
+	result := make(chan tea.Msg, 1)
+	go func() { result <- cmd() }()
+
+	pending, err := m.runtime.Broker().Next(m.runtime.BackgroundContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Kind != tools.DialogShellCommand {
+		t.Fatalf("expected shell command dialog, got %s", pending.Kind)
+	}
+	pending.Resolve(tools.DialogDecision{Approved: true})
+
+	msg := <-result
+	shellResult, ok := msg.(ShellResultMsg)
+	if !ok {
+		t.Fatalf("expected shell result after approval, got %#v", msg)
+	}
+	if shellResult.Result.Output != "approved" || shellResult.Result.ExitCode != 0 {
+		t.Fatalf("unexpected approved shell result %#v", shellResult.Result)
 	}
 }
 
@@ -169,12 +212,12 @@ func TestNextPromptAfterAgentCompletesGoalWhenTasksDone(t *testing.T) {
 
 func TestQuestionPopupSwitchesBetweenListAndCustomFocus(t *testing.T) {
 	var popup questionPopupState
-	popup.Open(&tools.PendingQuestion{Question: tools.Question{
+	popup.Open(&tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogQuestion, Question: tools.Question{
 		Header:      "Decision",
 		Question:    "Pick one",
 		AllowCustom: true,
 		Options:     []tools.QuestionOption{{Label: "one"}, {Label: "two"}},
-	}})
+	}}})
 	if popup.focus != questionFocusList {
 		t.Fatalf("expected initial list focus, got %v", popup.focus)
 	}
@@ -192,11 +235,11 @@ func TestQuestionPopupKeepsAgentStreamPollingAlive(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.requestID = 7
 	m.agentStream = make(chan app.AgentStreamEvent, 1)
-	m.questionPopup.Open(&tools.PendingQuestion{Question: tools.Question{
+	m.questionPopup.Open(&tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogQuestion, Question: tools.Question{
 		Header:   "Decision",
 		Question: "Pick one",
 		Options:  []tools.QuestionOption{{Label: "one"}},
-	}})
+	}}})
 
 	updated, cmd := m.Update(AgentStreamBatchMsg{
 		RequestID: 7,
@@ -217,11 +260,11 @@ func TestQuestionPopupKeepsThinkingTickAlive(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.timeline.SetThinking(true)
 	m.footer.SetThinking(true)
-	m.questionPopup.Open(&tools.PendingQuestion{Question: tools.Question{
+	m.questionPopup.Open(&tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogQuestion, Question: tools.Question{
 		Header:   "Decision",
 		Question: "Pick one",
 		Options:  []tools.QuestionOption{{Label: "one"}},
-	}})
+	}}})
 
 	updated, cmd := m.Update(ThinkingTickMsg{})
 	m = updated.(Model)

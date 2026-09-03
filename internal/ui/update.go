@@ -51,11 +51,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	// 5. Sidebar contextual auto-open
-	currentHasPendingApproval := m.runtime.PendingApproval() != ""
+	currentHasPendingDialog := m.runtime.PendingDialogs() > 0
 	currentActiveTasks := m.runtime.ActiveTasks()
 	currentActiveSubagents := len(m.runtime.ActiveSubagents())
 
-	shouldAutoOpen := (currentHasPendingApproval && !m.prevHasPendingApproval) ||
+	shouldAutoOpen := (currentHasPendingDialog && !m.prevHasPendingDialog) ||
 		(currentActiveTasks > 0 && m.prevActiveTasks == 0) ||
 		(currentActiveSubagents > 0 && m.prevActiveSubagents == 0)
 	if shouldAutoOpen && !m.showSidebar && m.sidebarPref != sidebarForceHide {
@@ -64,7 +64,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sidebarPref = sidebarForceShow
 		}
 	}
-	m.prevHasPendingApproval = currentHasPendingApproval
+	m.prevHasPendingDialog = currentHasPendingDialog
 	m.prevActiveTasks = currentActiveTasks
 	m.prevActiveSubagents = currentActiveSubagents
 
@@ -77,11 +77,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updatePopups routes messages to the active modal popup, if any.
 func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
-	if approval, ok := msg.(ApprovalRequestedMsg); ok {
-		m.approvalPopup.Open(approval.Pending, m.width, m.height)
+	if dialog, ok := msg.(DialogRequestedMsg); ok {
+		cmds, _ = m.onDialogRequested(dialog, cmds)
+		m.sidebar.dirty = true
 		return true, tea.Batch(cmds...)
 	}
-	if m.approvalPopup.active {
+	if m.approvalPopup.active || m.questionPopup.active {
 		if size, ok := msg.(tea.WindowSizeMsg); ok {
 			m.width = size.Width
 			m.height = size.Height
@@ -94,12 +95,16 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 		case ThinkingTickMsg:
 			cmds = m.onThinkingTick(msg, cmds)
 			return true, tea.Batch(cmds...)
-		case QuestionAskedMsg:
-			m.questionPopup.Open(msg.Pending)
-			return true, tea.Batch(cmds...)
 		}
-		if done := m.approvalPopup.Update(msg); done {
-			cmds = append(cmds, m.waitApproval())
+		var done bool
+		if m.approvalPopup.active {
+			done = m.approvalPopup.Update(msg)
+		} else {
+			done = m.questionPopup.Update(msg)
+		}
+		if done {
+			m.sidebar.dirty = true
+			cmds = append(cmds, m.waitDialog())
 		}
 		return true, tea.Batch(cmds...)
 	}
@@ -129,20 +134,6 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 	}
 	if m.commandPalette.active {
 		cmds = append(cmds, m.commandPalette.Update(msg))
-		return true, tea.Batch(cmds...)
-	}
-	if m.questionPopup.active {
-		switch msg := msg.(type) {
-		case AgentStreamBatchMsg:
-			cmds = m.onAgentStreamBatch(msg, cmds)
-			return true, tea.Batch(cmds...)
-		case ThinkingTickMsg:
-			cmds = m.onThinkingTick(msg, cmds)
-			return true, tea.Batch(cmds...)
-		}
-		if done := m.questionPopup.Update(msg); done {
-			cmds = append(cmds, m.waitQuestion())
-		}
 		return true, tea.Batch(cmds...)
 	}
 	if m.helpOverlay.active {
@@ -195,10 +186,10 @@ func (m *Model) updateGlobal(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		return m.onModelSelected(msg, cmds)
 	case ThinkingBudgetSelectedMsg:
 		return m.onThinkingBudgetSelected(msg, cmds)
-	case QuestionAskedMsg:
-		return m.onQuestionAsked(msg, cmds)
-	case ApprovalRequestedMsg:
-		return m.onApprovalRequested(msg, cmds)
+	case DialogRequestedMsg:
+		return m.onDialogRequested(msg, cmds)
+	case ShellApprovalResultMsg:
+		return m.onShellApprovalResult(msg, cmds)
 	case ToolResultMsg:
 		return m.onToolResult(msg, cmds)
 	case SessionsMsg:

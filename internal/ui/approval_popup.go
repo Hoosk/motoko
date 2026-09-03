@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/styles"
@@ -12,20 +13,20 @@ import (
 )
 
 type approvalPopupState struct {
-	pending  *tools.PendingApproval
+	pending  *tools.Pending
 	viewport viewport.Model
 	active   bool
 	width    int
 	height   int
 }
 
-func (p *approvalPopupState) Open(pending *tools.PendingApproval, width, height int) {
+func (p *approvalPopupState) Open(pending *tools.Pending, width, height int) {
 	p.pending = pending
 	p.active = pending != nil
 	p.resize(width, height)
 	p.viewport = viewport.New(p.width, p.height)
 	if pending != nil {
-		p.viewport.SetContent(timeline.RenderFullDiffOutput(pending.Change.Diff))
+		p.viewport.SetContent(approvalContent(pending))
 	}
 }
 
@@ -55,11 +56,11 @@ func (p *approvalPopupState) Update(msg tea.Msg) bool {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case keyEnter, "y", "Y":
-			p.pending.Resolve(true)
+			p.pending.Resolve(tools.DialogDecision{Approved: true})
 			p.active = false
 			return true
 		case keyEsc, "n", "N":
-			p.pending.Resolve(false)
+			p.pending.Resolve(tools.DialogDecision{Approved: false})
 			p.active = false
 			return true
 		}
@@ -72,13 +73,18 @@ func (p approvalPopupState) View() string {
 	if !p.active || p.pending == nil {
 		return ""
 	}
-	path := strings.TrimSpace(p.pending.Change.Path)
-	if path == "" {
-		path = "workspace file"
+	title := "Approve file change"
+	label := strings.TrimSpace(p.pending.Change.Path)
+	if p.pending.Kind == tools.DialogShellCommand {
+		title = "Approve shell command"
+		label = "$ " + strings.TrimSpace(p.pending.ShellCommand.Command)
+	}
+	if label == "" {
+		label = "pending dialog"
 	}
 	rows := []string{
-		styles.PopupTitleStyle.Render("Approve file change"),
-		styles.PopupFieldLabelStyle.Render(path),
+		styles.PopupTitleStyle.Render(title),
+		styles.PopupFieldLabelStyle.Render(label),
 		styles.PopupMutedStyle.Render("↑↓ scroll  Enter/y approve  Esc/n reject"),
 		"",
 		p.viewport.View(),
@@ -90,4 +96,14 @@ func (p approvalPopupState) View() string {
 		),
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+func approvalContent(pending *tools.Pending) string {
+	if pending == nil {
+		return ""
+	}
+	if pending.Kind == tools.DialogShellCommand {
+		return strings.TrimSpace(fmt.Sprintf("$ %s\n\n%s", pending.ShellCommand.Command, pending.ShellCommand.Reason))
+	}
+	return timeline.RenderFullDiffOutput(pending.Change.Diff)
 }

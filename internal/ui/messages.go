@@ -104,18 +104,14 @@ type ThinkingBudgetSelectedMsg struct {
 	Budget int
 }
 
-type QuestionAskedMsg struct {
-	Pending *tools.PendingQuestion
-}
-
-type ApprovalRequestedMsg struct {
-	Pending *tools.PendingApproval
+type DialogRequestedMsg struct {
+	Pending *tools.Pending
 }
 
 type ToolResultMsg struct {
+	Err    error
 	Name   string
 	Result tools.Result
-	Err    error
 }
 
 type ScheduleEventMsg struct {
@@ -124,6 +120,11 @@ type ScheduleEventMsg struct {
 
 type ShellResultMsg struct {
 	Result app.ShellResult
+}
+
+type ShellApprovalResultMsg struct {
+	Err     error
+	Command string
 }
 
 type TaskEventMsg struct {

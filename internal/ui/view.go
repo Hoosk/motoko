@@ -111,6 +111,9 @@ func (m Model) View() string {
 	if m.approvalPopup.active {
 		popup := widePopupStyle.Render(m.approvalPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.questionPopup.active {
+		popup := widePopupStyle.Render(m.questionPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.providerForm.active {
 		popup := popupStyle.Render(m.providerForm.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
@@ -137,9 +140,6 @@ func (m Model) View() string {
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.questionPopup.active {
-		popup := widePopupStyle.Render(m.questionPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.settingsPopup.active {
 		popup := widePopupStyle.Render(m.settingsPopup.View(m.runtime))
@@ -226,7 +226,6 @@ func (m Model) paletteContext() paletteContext {
 		Skills:      m.runtime.AvailableSkills(),
 		Tasks:       m.runtime.ListTasks(),
 		Agents:      m.runtime.AvailableAgents(),
-		Pending:     m.runtime.PendingApproval(),
 		Thinking:    m.timeline.model.Thinking,
 		QueueLen:    len(m.promptQueue),
 		ShowSidebar: m.showSidebar,

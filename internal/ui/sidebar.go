@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
-	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/styles"
+	"github.com/Hoosk/motoko/internal/system"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -35,7 +35,7 @@ func (m SidebarModel) Init() tea.Cmd {
 
 func (m SidebarModel) Update(msg tea.Msg) (SidebarModel, tea.Cmd) {
 	switch msg.(type) {
-	case TachikomaStatusMsg, ContextInfoMsg, ContextTokensMsg, ResponseAppliedMsg, AgentResultMsg, AgentStreamBatchMsg, TaskEventMsg, ScheduleEventMsg, SessionLoadedMsg:
+	case TachikomaStatusMsg, ContextInfoMsg, ContextTokensMsg, ResponseAppliedMsg, AgentResultMsg, AgentStreamBatchMsg, TaskEventMsg, ScheduleEventMsg, SessionLoadedMsg, DialogRequestedMsg, ShellApprovalResultMsg:
 		m.dirty = true
 	}
 	return m, nil
@@ -81,7 +81,7 @@ func (m *SidebarModel) View() string {
 	usableWidth := contentWidth - 2 // Usable text width inside padding (1 on each side)
 
 	var content []string
-	content = append(content, m.renderApprovalSection(contentWidth)...)
+	content = append(content, m.renderDialogSection(contentWidth)...)
 	content = append(content, m.renderTaskSection(contentWidth)...)
 	content = append(content, m.renderFilesSection(info, contentWidth, usableWidth)...)
 	content = append(content, m.renderModifiedSection(info, contentWidth, usableWidth)...)
@@ -119,11 +119,11 @@ func (m *SidebarModel) View() string {
 	return m.cached
 }
 
-func (m *SidebarModel) renderApprovalSection(contentWidth int) []string {
-	if pending := strings.TrimSpace(m.runtime.PendingApproval()); pending != "" {
+func (m *SidebarModel) renderDialogSection(contentWidth int) []string {
+	if pending := m.runtime.PendingDialogs(); pending > 0 {
 		return []string{
-			renderHeader("APPROVAL", styles.BoldNeonStyle, contentWidth),
-			styles.ErrorStyle.Render(truncate("  "+pending, contentWidth)),
+			renderHeader("DIALOGS", styles.BoldNeonStyle, contentWidth),
+			styles.ErrorStyle.Render(fmt.Sprintf("  %d dialog(s) pending", pending)),
 			"",
 		}
 	}

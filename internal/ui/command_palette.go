@@ -27,7 +27,6 @@ type PaletteSelectedMsg struct {
 
 type paletteContext struct {
 	Brain             *brain.Brain
-	Pending           string
 	Providers         []config.ProviderConfig
 	Skills            []skills.Skill
 	Sessions          []*session.Session
@@ -131,12 +130,6 @@ func commandPaletteItems(ctx paletteContext) []FilterableItem {
 
 func actionPaletteItems(ctx paletteContext) []FilterableItem {
 	var items []FilterableItem
-	if ctx.Pending != "" {
-		items = append(items,
-			newPaletteItem("Actions", "Approve pending command", ctx.Pending, "/approve", true, "", "approve pending "+ctx.Pending),
-			newPaletteItem("Actions", "Deny pending command", ctx.Pending, "/deny", true, "", "deny pending "+ctx.Pending),
-		)
-	}
 	if ctx.Thinking {
 		items = append(items, newPaletteItem("Actions", "Cancel current request", "Stop the active agent response", "", false, "cancel-request", "cancel stop request thinking"))
 	}
