@@ -41,15 +41,65 @@ func TestDiffOutputHighlighter(t *testing.T) {
 +++ b/main.go
 @@ -1,1 +1,1 @@
 -old
-+new`
++new
+ kept`
 
-	got := timeline.RenderDiffOutput(input)
+	got := timeline.RenderDiffOutput(input, 80)
 
-	if !strings.Contains(got, styles.DiffAddStyle.Render("+new")) {
-		t.Error("expected diff add style")
+	if !strings.Contains(got, styles.DiffAddStyle.Bold(true).Render("+")+styles.DiffAddStyle.Render("new")) {
+		t.Errorf("expected styled add line, got:\n%s", got)
 	}
-	if !strings.Contains(got, styles.DiffRemoveStyle.Render("-old")) {
-		t.Error("expected diff remove style")
+	if !strings.Contains(got, styles.DiffRemoveStyle.Bold(true).Render("-")+styles.DiffRemoveStyle.Render("old")) {
+		t.Errorf("expected styled remove line, got:\n%s", got)
+	}
+	if !strings.Contains(got, styles.DiffContextStyle.Render("kept")) {
+		t.Errorf("expected styled context line, got:\n%s", got)
+	}
+	if strings.Contains(got, "--- a/main.go") || strings.Contains(got, "+++ b/main.go") {
+		t.Errorf("expected headers merged into summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, styles.DiffMetaStyle.Render("main.go")+" "+styles.DiffAddStyle.Render("+1")+" "+styles.DiffRemoveStyle.Render("-1")) {
+		t.Errorf("expected merged summary with counts, got:\n%s", got)
+	}
+}
+
+func TestDiffOutputWrapsLongLines(t *testing.T) {
+	long := "+" + strings.Repeat("a", 60)
+	input := "--- a/big.txt\n+++ b/big.txt\n" + long
+
+	got := timeline.RenderDiffOutput(input, 40)
+	rendered := strings.Split(got, "\n")
+
+	if len(rendered) != 3 {
+		t.Fatalf("expected summary + 2 wrapped lines, got %d lines:\n%s", len(rendered), got)
+	}
+	if !strings.HasPrefix(rendered[1], styles.DiffAddStyle.Bold(true).Render("+")) {
+		t.Errorf("expected add marker on first segment, got:\n%s", rendered[1])
+	}
+	if !strings.HasPrefix(rendered[2], styles.DiffMetaStyle.Render(timeline.DiffWrapMarker+" ")) {
+		t.Errorf("expected wrap marker on continuation, got:\n%s", rendered[2])
+	}
+	if !strings.Contains(rendered[2], styles.DiffAddStyle.Render(strings.Repeat("a", 20))) {
+		t.Errorf("expected continuation content in add style, got:\n%s", rendered[2])
+	}
+}
+
+func TestDiffOutputNoNewlineMarker(t *testing.T) {
+	input := `--- a/n.txt
++++ b/n.txt
+@@ -1 +1 @@
+-old
+\ No newline at end of file
++new
+\ No newline at end of file`
+
+	got := timeline.RenderDiffOutput(input, 80)
+
+	if !strings.Contains(got, styles.DiffMetaStyle.Render("(no newline at end of file)")) {
+		t.Errorf("expected muted no-newline note, got:\n%s", got)
+	}
+	if strings.Contains(got, `\ No newline`) {
+		t.Errorf("expected raw marker replaced, got:\n%s", got)
 	}
 }
 
@@ -61,9 +111,12 @@ func TestDiffOutputCollapsing(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	got := timeline.RenderDiffOutput(input)
+	got := timeline.RenderDiffOutput(input, 80)
 	if !strings.Contains(got, "collapsed") {
 		t.Errorf("expected large diff to be collapsed, got:\n%s", got)
+	}
+	if !strings.Contains(got, "file.go +30 -0") {
+		t.Errorf("expected summary with counts in collapsed output, got:\n%s", got)
 	}
 }
 
@@ -74,7 +127,7 @@ func TestFullDiffOutputKeepsLargeChangesVisible(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("+line %d", i))
 	}
 
-	got := timeline.RenderFullDiffOutput(strings.Join(lines, "\n"))
+	got := timeline.RenderFullDiffOutput(strings.Join(lines, "\n"), 80)
 	if strings.Contains(got, "collapsed") || !strings.Contains(got, "+line 29") {
 		t.Fatalf("expected full diff output, got:\n%s", got)
 	}
