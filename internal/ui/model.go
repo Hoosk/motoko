@@ -36,7 +36,7 @@ type Model struct {
 	modelPicker          modelPickerState
 	promptQueue          []string
 	questionPopup        questionPopupState
-	approvalPopup        approvalPopupState
+	approvalBar          approvalBarState
 	providerForm         providerForm
 	mcpForm              mcpForm
 	modePopup            modePopupState

@@ -49,13 +49,14 @@ func (m *Model) onDialogRequested(msg DialogRequestedMsg, cmds []tea.Cmd) ([]tea
 	if msg.Pending == nil {
 		return cmds, false
 	}
-	m.approvalPopup.active = false
 	m.questionPopup.active = false
+	m.approvalBar.Clear()
 	switch msg.Pending.Kind {
 	case tools.DialogQuestion:
 		m.questionPopup.Open(msg.Pending)
 	case tools.DialogFileChange, tools.DialogShellCommand:
-		m.approvalPopup.Open(msg.Pending, m.width, m.height)
+		m.appendApprovalContent(msg.Pending)
+		m.approvalBar.Open(msg.Pending)
 	default:
 		msg.Pending.Resolve(tools.DialogDecision{})
 		cmds = append(cmds, m.waitDialog())

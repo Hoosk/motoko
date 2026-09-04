@@ -74,8 +74,12 @@ func (m Model) View() string {
 	footerView := m.footer.View()
 
 	var mainView string
+	barView := m.approvalBar.View(mainWidth)
 	if sidebarWidth > 0 {
 		blocks := []string{timelineView, toolbarView}
+		if barView != "" {
+			blocks = append(blocks, barView)
+		}
 		if queueView != "" {
 			blocks = append(blocks, queueView)
 		}
@@ -85,6 +89,9 @@ func (m Model) View() string {
 		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
 	} else {
 		blocks := []string{timelineView, toolbarView}
+		if barView != "" {
+			blocks = append(blocks, barView)
+		}
 		if queueView != "" {
 			blocks = append(blocks, queueView)
 		}
@@ -108,10 +115,7 @@ func (m Model) View() string {
 	}
 	widePopupStyle := styles.PopupStyle.Width(widePopupWidth)
 
-	if m.approvalPopup.active {
-		popup := widePopupStyle.Render(m.approvalPopup.View())
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.questionPopup.active {
+	if m.questionPopup.active {
 		popup := widePopupStyle.Render(m.questionPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.providerForm.active {
@@ -194,12 +198,13 @@ func (m *Model) SyncLayout() {
 	m.footer.width = m.width
 
 	toolbarHeight := 1
+	barHeight := m.approvalBarHeight(mainWidth)
 	queueHeight := m.queuePanelHeight(mainWidth)
 
-	timelineHeight := max(m.height-footerHeight-composerHeight-toolbarHeight-queueHeight, 4)
+	timelineHeight := max(m.height-footerHeight-composerHeight-toolbarHeight-queueHeight-barHeight, 4)
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+composerHeight)
+	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+barHeight+composerHeight)
 }
 
 func timelineOnboarding(runtime *app.Runtime) []string {

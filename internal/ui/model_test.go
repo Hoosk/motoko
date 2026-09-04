@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -104,35 +106,21 @@ func TestSubmitPromptQueuesWhileThinking(t *testing.T) {
 	}
 }
 
-func TestDialogRequestTakesPriorityOverOtherPopups(t *testing.T) {
+func TestDialogRequestActivatesApprovalBar(t *testing.T) {
 	m := Model{settingsPopup: settingsPopupState{active: true}}
 	pending := &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}
 
 	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
 	got := updated.(Model)
-	if !got.approvalPopup.active || got.approvalPopup.pending != pending {
-		t.Fatalf("expected approval popup to open, got %#v", got.approvalPopup)
+	if !got.approvalBar.active || got.approvalBar.pending != pending {
+		t.Fatalf("expected approval bar to open, got %#v", got.approvalBar)
+	}
+	if got.approvalBar.sel != 0 {
+		t.Fatalf("expected approve button selected initially, got %d", got.approvalBar.sel)
 	}
 }
 
-func TestApprovalPopupTracksTerminalResize(t *testing.T) {
-	m := NewModel(app.NewRuntime())
-	m.width = 100
-	m.height = 30
-	updated, _ := m.Update(DialogRequestedMsg{Pending: &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}})
-	m = updated.(Model)
-
-	updated, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
-	got := updated.(Model)
-	if got.width != 50 || got.height != 20 {
-		t.Fatalf("expected model size 50x20, got %dx%d", got.width, got.height)
-	}
-	if got.approvalPopup.width != 34 || got.approvalPopup.height != 8 {
-		t.Fatalf("expected approval viewport 34x8, got %dx%d", got.approvalPopup.width, got.approvalPopup.height)
-	}
-}
-
-func TestApprovalPopupRendersShellCommand(t *testing.T) {
+func TestApprovalBarRendersShellCommand(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	pending := &tools.Pending{Request: tools.DialogRequest{
 		Kind: tools.DialogShellCommand,
@@ -141,12 +129,161 @@ func TestApprovalPopupRendersShellCommand(t *testing.T) {
 			Reason:  "The command may modify files or repository state.",
 		},
 	}}
-	m.approvalPopup.Open(pending, 100, 30)
-	view := stripANSI(m.approvalPopup.View())
-	for _, want := range []string{"Approve shell command", "$ git add file.go", "may modify files"} {
+	m.approvalBar.Open(pending)
+	view := stripANSI(m.approvalBar.View(100))
+	for _, want := range []string{"Approve shell command", "$ git add file.go", "[ approve ]", "[ reject ]", "←/→ select"} {
 		if !strings.Contains(view, want) {
-			t.Fatalf("expected shell approval view to contain %q, got %q", want, view)
+			t.Fatalf("expected shell approval bar to contain %q, got %q", want, view)
 		}
+	}
+}
+
+func TestDialogRequestAppendsContentToTimeline(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	pending := &tools.Pending{Request: tools.DialogRequest{
+		Kind:   tools.DialogFileChange,
+		Change: tools.FileChange{Path: "main.go", Diff: "--- a/main.go\n+++ b/main.go\n@@ -1,1 +1,1 @@\n-old\n+new"},
+	}}
+
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+	got := updated.(Model)
+
+	foundRequest, foundDiff := false, false
+	for _, entry := range got.timeline.model.Entries {
+		if entry.Kind == app.EntrySystem && strings.Contains(entry.Text, "Approval requested: main.go") {
+			foundRequest = true
+		}
+		if entry.Kind == app.EntryOutput && strings.Contains(entry.Text, "+new") {
+			foundDiff = true
+		}
+	}
+	if !foundRequest || !foundDiff {
+		t.Fatalf("expected approval content in timeline, request=%v diff=%v", foundRequest, foundDiff)
+	}
+}
+
+func TestApprovalBarButtonNavigationAndConfirm(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	result := make(chan error, 1)
+	go func() {
+		result <- m.runtime.Broker().RequestShellCommand(context.Background(), tools.ShellCommand{Command: "printf ok", Reason: "test"})
+	}()
+
+	pending, err := m.runtime.Broker().Next(m.runtime.BackgroundContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+	m = updated.(Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(Model)
+	if m.approvalBar.sel != 1 {
+		t.Fatalf("expected selection on reject after right, got %d", m.approvalBar.sel)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.approvalBar.active {
+		t.Fatal("expected bar closed after confirm")
+	}
+
+	if err := <-result; !errors.Is(err, tools.ErrCommandRejected) {
+		t.Fatalf("expected rejection via selected button, got %v", err)
+	}
+	if got := m.runtime.Broker().PendingCount(); got != 0 {
+		t.Fatalf("expected no pending dialogs after confirm, got %d", got)
+	}
+}
+
+func TestApprovalBarQuickKeys(t *testing.T) {
+	t.Run("y approves", func(t *testing.T) {
+		m := NewModel(app.NewRuntime())
+		result := make(chan error, 1)
+		go func() {
+			result <- m.runtime.Broker().RequestShellCommand(context.Background(), tools.ShellCommand{Command: "printf ok", Reason: "test"})
+		}()
+		pending, err := m.runtime.Broker().Next(m.runtime.BackgroundContext())
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+		m = updated.(Model)
+
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		m = updated.(Model)
+		if m.approvalBar.active {
+			t.Fatal("expected bar closed after y")
+		}
+		if err := <-result; err != nil {
+			t.Fatalf("expected approval via y, got %v", err)
+		}
+	})
+
+	t.Run("esc rejects", func(t *testing.T) {
+		m := NewModel(app.NewRuntime())
+		result := make(chan error, 1)
+		go func() {
+			result <- m.runtime.Broker().RequestShellCommand(context.Background(), tools.ShellCommand{Command: "printf ok", Reason: "test"})
+		}()
+		pending, err := m.runtime.Broker().Next(m.runtime.BackgroundContext())
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+		m = updated.(Model)
+
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m = updated.(Model)
+		if m.approvalBar.active {
+			t.Fatal("expected bar closed after esc")
+		}
+		if err := <-result; !errors.Is(err, tools.ErrCommandRejected) {
+			t.Fatalf("expected rejection via esc, got %v", err)
+		}
+	})
+}
+
+func TestApprovalBarKeepsScrollKeysForTimeline(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	pending := &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+	m = updated.(Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if !m.approvalBar.active {
+		t.Fatal("expected bar to stay active while scrolling")
+	}
+	if m.approvalBar.sel != 0 {
+		t.Fatalf("expected selection unchanged by scroll key, got %d", m.approvalBar.sel)
+	}
+}
+
+func TestExpiredDialogClearsApprovalBar(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	pending := &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogFileChange}}
+	pending.Resolve(tools.DialogDecision{})
+
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+	m = updated.(Model)
+	if !m.approvalBar.active {
+		t.Fatal("expected bar open for delivered dialog")
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(Model)
+	if m.approvalBar.active {
+		t.Fatal("expected stale bar to be cleared")
+	}
+	found := false
+	for _, entry := range m.timeline.model.Entries {
+		if strings.Contains(entry.Text, "Approval expired") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected expiry entry in timeline")
 	}
 }
 

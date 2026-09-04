@@ -81,7 +81,8 @@ type Pending struct {
 	decisionCh chan Decision
 	broker     *Broker
 	Request
-	once sync.Once
+	once     sync.Once
+	resolved atomic.Bool
 }
 
 func (p *Pending) Resolve(decision Decision) {
@@ -89,6 +90,7 @@ func (p *Pending) Resolve(decision Decision) {
 		return
 	}
 	p.once.Do(func() {
+		p.resolved.Store(true)
 		if p.broker != nil {
 			p.broker.release()
 		}
@@ -98,6 +100,13 @@ func (p *Pending) Resolve(decision Decision) {
 		p.decisionCh <- decision
 		close(p.decisionCh)
 	})
+}
+
+func (p *Pending) Resolved() bool {
+	if p == nil {
+		return false
+	}
+	return p.resolved.Load()
 }
 
 type Broker struct {

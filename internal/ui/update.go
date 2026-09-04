@@ -25,18 +25,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// 2. Delegate to Active Popups (Modal state)
+	// 2. Reap dialogs the broker already resolved (e.g. by timeout)
+	if cmd := m.clearExpiredDialog(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	// 3. Delegate to Active Popups (Modal state)
 	if handled, cmd := m.updatePopups(msg, cmds); handled {
 		return m, cmd
 	}
 
-	// 3. Global Message Handling
+	// 4. Global Message Handling
 	var done bool
 	if cmds, done = m.updateGlobal(msg, cmds); done {
 		return m, tea.Batch(cmds...)
 	}
 
-	// 4. Delegate to standard components
+	// 5. Delegate to standard components
 	cmds = append(cmds, m.timeline.Update(msg))
 
 	var cmd tea.Cmd
@@ -50,7 +55,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.sidebar, cmd = m.sidebar.Update(msg)
 	cmds = append(cmds, cmd)
 
-	// 5. Sidebar contextual auto-open
+	// 6. Sidebar contextual auto-open
 	currentHasPendingDialog := m.runtime.PendingDialogs() > 0
 	currentActiveTasks := m.runtime.ActiveTasks()
 	currentActiveSubagents := len(m.runtime.ActiveSubagents())
@@ -82,11 +87,12 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 		m.sidebar.dirty = true
 		return true, tea.Batch(cmds...)
 	}
-	if m.approvalPopup.active || m.questionPopup.active {
+	if m.approvalBar.active || m.questionPopup.active {
 		if size, ok := msg.(tea.WindowSizeMsg); ok {
 			m.width = size.Width
 			m.height = size.Height
 			m.SyncLayout()
+			return true, tea.Batch(cmds...)
 		}
 		switch msg := msg.(type) {
 		case AgentStreamBatchMsg:
@@ -96,13 +102,24 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 			cmds = m.onThinkingTick(msg, cmds)
 			return true, tea.Batch(cmds...)
 		}
-		var done bool
-		if m.approvalPopup.active {
-			done = m.approvalPopup.Update(msg)
-		} else {
-			done = m.questionPopup.Update(msg)
+		if m.approvalBar.active {
+			if key, ok := msg.(tea.KeyMsg); ok {
+				switch key.String() {
+				case keyUp, keyDown, "pgup", "pgdown":
+					cmds = append(cmds, m.timeline.Update(msg))
+					return true, tea.Batch(cmds...)
+				}
+			}
+			if mouse, ok := msg.(tea.MouseMsg); ok {
+				cmds = append(cmds, m.timeline.Update(mouse))
+				return true, tea.Batch(cmds...)
+			}
+			if done, approved := m.approvalBar.Update(msg); done {
+				cmds = append(cmds, m.resolveDialog(approved))
+			}
+			return true, tea.Batch(cmds...)
 		}
-		if done {
+		if done := m.questionPopup.Update(msg); done {
 			m.sidebar.dirty = true
 			cmds = append(cmds, m.waitDialog())
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/tools"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -151,12 +152,10 @@ func (m *Model) onShellResult(msg ShellResultMsg, cmds []tea.Cmd) ([]tea.Cmd, bo
 }
 
 func (m *Model) onShellApprovalResult(msg ShellApprovalResultMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
-	if msg.Err != nil {
+	if msg.Err != nil && !errors.Is(msg.Err, tools.ErrCommandRejected) {
 		m.timeline.appendEntry(app.Entry{Kind: app.EntryError, Text: msg.Err.Error()})
-	} else {
-		m.timeline.appendEntry(app.Entry{Kind: app.EntrySystem, Text: "Shell approval received."})
+		m.timeline.renderMessages()
 	}
-	m.timeline.renderMessages()
 	return cmds, false
 }
 
