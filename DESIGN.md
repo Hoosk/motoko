@@ -16,7 +16,7 @@ Motoko is built in Go and operates as a terminal coding agent with a strong loca
 - `Sidebar`: Tachikoma status, semantic summary, and context signals
 - `Composer`: multiline input with command/tool completion. Shows active agent mode and thinking indicator.
 - `Footer`: workspace path, git state, task count, context window usage, and pending user dialogs
-- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector, Settings popup, agent-driven Question popup, and file/shell approval popup
+- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector, Settings popup, and agent-driven Question popup. File and shell approvals use an inline bar above the composer instead of a popup.
 
 ## 2. Session Runtime (`internal/app`)
 The runtime is the operational core that connects the TUI to the agent, tools, and background workers.
@@ -93,8 +93,7 @@ Motoko has a local tool registry used by the runtime, the agent loop, and slash 
 ### User Dialog Broker
 - `internal/tools/dialog` owns the FIFO broker shared by questions, file changes, and shell approval requests.
 - `question` requests use the structured Question popup.
-- File changes use the approval popup with a scrollable unified diff when `edit_approval` is `ask`.
-- Shell commands classified as requiring approval use the same binary approval popup with the command and policy reason.
+- File changes and shell commands render the pending content in the timeline and open an inline approval bar above the composer with selectable `approve` and `reject` buttons (left/right to select, Enter to confirm, `y`/`n` as quick keys).
 - Requests block their originating tool or action until the user approves, rejects, cancels, or reaches the five-minute timeout.
 
 ## 4. Agent Layer (`internal/agent`)

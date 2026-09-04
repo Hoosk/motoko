@@ -76,13 +76,13 @@ In this setup:
 
 ## Approval Dialogs
 
-Motoko uses one user-dialog broker for interactive questions, file changes, and shell commands that need confirmation. Each request is shown one at a time in the TUI so the response is unambiguous.
+Motoko uses one user-dialog broker for interactive questions, file changes, and shell commands that need confirmation. Each request is shown one at a time.
 
-- File changes show a scrollable unified diff when `edit_approval` is `ask`.
-- Explicit shell commands from `!<cmd>`, shell input mode, or `/tool bash` show the command and the reason for approval when the shell policy requires it.
-- Press `Enter` or `y` to approve, and `Esc` or `n` to reject.
+- File changes show a unified diff in the timeline when `edit_approval` is `ask`, then an inline approval bar appears above the input.
+- Explicit shell commands from `!<cmd>`, shell input mode, or `/tool bash` show the command and the reason for approval in the timeline when the shell policy requires it.
+- The approval bar has two selectable buttons: use `left`/`right` (or `Tab`) to move between `approve` and `reject`, and `Enter` to confirm. `y` approves and `n` or `Esc` rejects directly.
 - Unanswered requests expire after five minutes and are rejected.
-- Dangerous shell commands are rejected by policy without an approval dialog.
+- Dangerous shell commands are rejected by policy without an approval bar.
 
 ## Custom Modes (`.agents/modes/*.md`)
 

@@ -110,7 +110,7 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 
 | Command | Action |
 | :--- | :--- |
-| **`!cmd`** | Run a shell command (safe commands execute directly; sensitive commands open an approval dialog) |
+| **`!cmd`** | Run a shell command (safe commands execute directly; sensitive commands show an approval bar above the input) |
 | **`/help`** | Display all available commands and help overlay |
 | **`/clear`** | Reset the visible timeline and active session history |
 | **`/chat`** | Switch input mode to standard chat |
