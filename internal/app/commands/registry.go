@@ -88,8 +88,6 @@ var commandDefinitions = []Definition{
 	{Name: CmdTool, Usage: "/tool <name> [args]", Summary: "Execute a specific runtime tool"},
 	{Name: "mcp", Usage: "/mcp [list|add|remove|tools|info|resources|prompts|read|prompt]", Summary: "Inspect and manage MCP servers, tools, resources, and prompts"},
 	{Name: "task", Usage: "/task [list|terminate <id>]", Summary: "Interact with background tasks"},
-	{Name: CmdApprove, Usage: "/approve", Summary: "Execute the pending tool command"},
-	{Name: "deny", Usage: "/deny", Summary: "Cancel the pending tool command"},
 	{Name: "brain", Usage: "/brain [list|read <file>|plan|tasks|summary|clear]", Summary: "Interact with the session brain"},
 	{Name: "metrics", Usage: "/metrics", Summary: "Show cumulative token usage for this session"},
 	{Name: "debug", Usage: "/debug", Summary: "Toggle agent debug output"},

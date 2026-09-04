@@ -11,6 +11,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 const maxToolOutputBytes = 12_000
@@ -232,7 +233,11 @@ func (r *Registry) Filter(predicate func(Tool) bool) *Registry {
 type configKey struct{}
 
 func WithConfig(ctx context.Context, cfg *config.AppConfig) context.Context {
-	return context.WithValue(ctx, configKey{}, cfg)
+	ctx = context.WithValue(ctx, configKey{}, cfg)
+	if cfg != nil {
+		ctx = dialogpkg.WithMode(ctx, cfg.EditApproval)
+	}
+	return ctx
 }
 
 func GetConfig(ctx context.Context) *config.AppConfig {
@@ -277,18 +282,39 @@ func GetMaxOutputSize(ctx context.Context) int {
 	return maxToolOutputBytes
 }
 
-type questionBrokerKey struct{}
+type QuestionOption = dialogpkg.QuestionOption
+type Question = dialogpkg.Question
+type Answer = dialogpkg.Answer
+type FileChange = dialogpkg.FileChange
+type ShellCommand = dialogpkg.ShellCommand
+type DialogRequest = dialogpkg.Request
+type DialogDecision = dialogpkg.Decision
+type DialogKind = dialogpkg.Kind
+type Pending = dialogpkg.Pending
+type Broker = dialogpkg.Broker
 
-func WithQuestionBroker(ctx context.Context, broker *QuestionBroker) context.Context {
-	return context.WithValue(ctx, questionBrokerKey{}, broker)
+const (
+	DialogQuestion     = dialogpkg.KindQuestion
+	DialogFileChange   = dialogpkg.KindFileChange
+	DialogShellCommand = dialogpkg.KindShellCommand
+)
+
+var (
+	ErrChangeRejected      = dialogpkg.ErrChangeRejected
+	ErrQuestionCancelled   = dialogpkg.ErrQuestionCancelled
+	ErrCommandRejected     = dialogpkg.ErrCommandRejected
+	ErrBrokerUnavailable   = dialogpkg.ErrBrokerUnavailable
+	ErrApprovalUnavailable = dialogpkg.ErrApprovalUnavailable
+)
+
+func NewBroker() *Broker {
+	return dialogpkg.NewBroker()
 }
 
-func GetQuestionBroker(ctx context.Context) *QuestionBroker {
-	if ctx == nil {
-		return nil
-	}
-	if broker, ok := ctx.Value(questionBrokerKey{}).(*QuestionBroker); ok {
-		return broker
-	}
-	return nil
+func WithBroker(ctx context.Context, broker *Broker) context.Context {
+	return dialogpkg.WithBroker(ctx, broker)
+}
+
+func GetBroker(ctx context.Context) *Broker {
+	return dialogpkg.GetBroker(ctx)
 }

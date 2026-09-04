@@ -45,7 +45,7 @@ func (q questionOptionItem) Render(active bool) string {
 }
 
 type questionPopupState struct {
-	pending *tools.PendingQuestion
+	pending *tools.Pending
 	list    *FilterList
 
 	selected    map[int]bool
@@ -56,9 +56,9 @@ type questionPopupState struct {
 	multiple    bool
 }
 
-func (p *questionPopupState) Open(pending *tools.PendingQuestion) {
+func (p *questionPopupState) Open(pending *tools.Pending) {
 	if pending != nil && len(pending.Question.Options) == 0 && !pending.Question.AllowCustom {
-		pending.Resolve(tools.Answer{Cancelled: true})
+		pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Cancelled: true}})
 		p.pending = nil
 		p.active = false
 		return
@@ -90,7 +90,7 @@ func (p *questionPopupState) Update(msg tea.Msg) bool {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case keyEsc:
-			p.pending.Resolve(tools.Answer{Cancelled: true})
+			p.pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Cancelled: true}})
 			p.active = false
 			return true
 		case keyTab:
@@ -144,7 +144,7 @@ func (p *questionPopupState) Update(msg tea.Msg) bool {
 				return true
 			}
 			if selected, ok := p.selectedOption(); ok {
-				p.pending.Resolve(tools.Answer{Selections: []string{selected.label}})
+				p.pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Selections: []string{selected.label}}})
 				p.active = false
 				return true
 			}
@@ -158,7 +158,7 @@ func (p *questionPopupState) Update(msg tea.Msg) bool {
 	if p.list != nil {
 		_, _, cancelled := p.list.Update(msg)
 		if cancelled {
-			p.pending.Resolve(tools.Answer{Cancelled: true})
+			p.pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Cancelled: true}})
 			p.active = false
 			return true
 		}
@@ -173,7 +173,7 @@ func (p *questionPopupState) updateCustom(msg tea.Msg) bool {
 	}
 	switch key.String() {
 	case keyEsc:
-		p.pending.Resolve(tools.Answer{Cancelled: true})
+		p.pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Cancelled: true}})
 		p.active = false
 		return true
 	case keyEnter:
@@ -204,7 +204,7 @@ func (p *questionPopupState) submit() {
 			selections = append(selections, option.Label)
 		}
 	}
-	p.pending.Resolve(tools.Answer{Selections: selections, Custom: strings.TrimSpace(p.custom)})
+	p.pending.Resolve(tools.DialogDecision{Answer: tools.Answer{Selections: selections, Custom: strings.TrimSpace(p.custom)}})
 	p.active = false
 }
 

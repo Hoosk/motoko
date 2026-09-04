@@ -81,8 +81,8 @@ func (m FooterModel) View() string {
 		parts = append(parts, styles.SystemStyle.Render("» "+title))
 	}
 
-	if pending := m.runtime.PendingApproval(); pending != "" {
-		parts = append(parts, styles.ErrorStyle.Render("⚠ "+pending))
+	if pending := m.runtime.PendingDialogs(); pending > 0 {
+		parts = append(parts, styles.ErrorStyle.Render(fmt.Sprintf("⚠ dialogs:%d", pending)))
 	}
 
 	if m.taskCount > 0 {

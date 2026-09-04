@@ -17,7 +17,7 @@ import (
 // returned as the JSON content of an "accept" result. The server name is
 // surfaced in the header so users always know who is asking.
 func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-	if r.questionBroker == nil {
+	if r.broker == nil {
 		return &mcp.ElicitResult{Action: mcp.ElicitActionDecline}, nil
 	}
 
@@ -30,7 +30,7 @@ func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req 
 
 	// No schema: a single free-text question whose answer becomes "value".
 	if len(req.RequestedSchema) == 0 {
-		ans, err := r.questionBroker.Ask(ctx, tools.Question{
+		ans, err := r.broker.Ask(ctx, tools.Question{
 			Header:      header,
 			Question:    question,
 			AllowCustom: true,
@@ -55,7 +55,7 @@ func (r *Runtime) handleElicitation(ctx context.Context, serverName string, req 
 
 	for name, prop := range schema.Properties {
 		q := elicitQuestion(header, question, name, prop.Title, prop.Description, prop.Enum, prop.EnumNames, prop.Default)
-		ans, err := r.questionBroker.Ask(ctx, q)
+		ans, err := r.broker.Ask(ctx, q)
 		if err != nil || ans.Cancelled {
 			return &mcp.ElicitResult{Action: mcp.ElicitActionCancel}, nil
 		}

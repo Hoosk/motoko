@@ -371,11 +371,10 @@ func TestProviderListTextMarksActiveProvider(t *testing.T) {
 	}
 }
 
-func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) {
+func TestHandleInputStatusIncludesModeWorkspaceAndDialogState(t *testing.T) {
 	r := NewRuntime()
 	r.agOrch.SetMode(ModePlan)
 	r.inputMode = InputModeShell
-	r.pending = &pendingShell{Command: "git status"}
 
 	resp := r.HandleInput("/status", system.ContextInfo{Workspace: "motoko"})
 	if len(resp.Entries) != 1 {
@@ -386,7 +385,7 @@ func TestHandleInputStatusIncludesModeWorkspaceAndPendingApproval(t *testing.T) 
 		"mode: plan",
 		"input: shell",
 		"workspace: motoko",
-		"pending approval: git status",
+		"pending approval: none",
 		"agents.md guidelines: not found",
 		"design.md specification: not found",
 	} {

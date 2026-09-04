@@ -5,124 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
-const questionTimeout = 5 * time.Minute
-
-type QuestionOption struct {
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-}
-
-type Question struct {
-	Header      string           `json:"header"`
-	Question    string           `json:"question"`
-	Options     []QuestionOption `json:"options"`
-	Multiple    bool             `json:"multiple,omitempty"`
-	AllowCustom bool             `json:"allow_custom,omitempty"`
-	ID          int64            `json:"id,omitempty"`
-}
-
-type Answer struct {
-	Custom     string   `json:"custom,omitempty"`
-	Selections []string `json:"selections,omitempty"`
-	Cancelled  bool     `json:"cancelled,omitempty"`
-}
-
-type PendingQuestion struct {
-	answerCh chan Answer
-	Question Question
-	once     sync.Once
-}
-
-func (p *PendingQuestion) Resolve(answer Answer) {
-	if p == nil {
-		return
-	}
-	p.once.Do(func() {
-		p.answerCh <- answer
-		close(p.answerCh)
-	})
-}
-
-type QuestionBroker struct {
-	pending chan *PendingQuestion
-	nextID  atomic.Int64
-}
-
-func NewQuestionBroker() *QuestionBroker {
-	return &QuestionBroker{pending: make(chan *PendingQuestion, 1)}
-}
-
-func (b *QuestionBroker) Ask(ctx context.Context, q Question) (Answer, error) {
-	if b == nil {
-		return Answer{}, fmt.Errorf("question broker not initialized")
-	}
-	q.Header = strings.TrimSpace(q.Header)
-	q.Question = strings.TrimSpace(q.Question)
-	if q.Question == "" {
-		return Answer{}, fmt.Errorf("question text cannot be empty")
-	}
-	if len(q.Options) == 0 && !q.AllowCustom {
-		return Answer{}, fmt.Errorf("question requires at least one option or allow_custom=true")
-	}
-	for i := range q.Options {
-		q.Options[i].Label = strings.TrimSpace(q.Options[i].Label)
-		q.Options[i].Description = strings.TrimSpace(q.Options[i].Description)
-		if q.Options[i].Label == "" {
-			return Answer{}, fmt.Errorf("question option %d is missing a label", i+1)
-		}
-	}
-	q.ID = b.nextID.Add(1)
-	pending := &PendingQuestion{
-		Question: q,
-		answerCh: make(chan Answer, 1),
-	}
-
-	deadlineCtx, cancel := context.WithTimeout(ctx, questionTimeout)
-	defer cancel()
-
-	select {
-	case b.pending <- pending:
-	case <-deadlineCtx.Done():
-		return Answer{}, deadlineCtx.Err()
-	}
-
-	select {
-	case answer, ok := <-pending.answerCh:
-		if !ok {
-			return Answer{}, fmt.Errorf("question closed without an answer")
-		}
-		if answer.Cancelled {
-			return answer, fmt.Errorf("user cancelled question")
-		}
-		return answer, nil
-	case <-deadlineCtx.Done():
-		pending.Resolve(Answer{Cancelled: true})
-		return Answer{}, deadlineCtx.Err()
-	}
-}
-
-func (b *QuestionBroker) Next(ctx context.Context) (*PendingQuestion, error) {
-	if b == nil {
-		return nil, fmt.Errorf("question broker not initialized")
-	}
-	select {
-	case pending := <-b.pending:
-		return pending, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 type QuestionTool struct {
-	broker *QuestionBroker
+	broker *Broker
 }
 
-func NewQuestionTool(broker *QuestionBroker) *QuestionTool {
+func NewQuestionTool(broker *Broker) *QuestionTool {
 	return &QuestionTool{broker: broker}
 }
 

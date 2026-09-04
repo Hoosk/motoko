@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/Hoosk/motoko/internal/tools"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -44,9 +45,21 @@ func (m *Model) onThinkingBudgetSelected(msg ThinkingBudgetSelectedMsg, cmds []t
 	return cmds, false
 }
 
-func (m *Model) onQuestionAsked(msg QuestionAskedMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
-	if msg.Pending != nil {
+func (m *Model) onDialogRequested(msg DialogRequestedMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
+	if msg.Pending == nil {
+		return cmds, false
+	}
+	m.questionPopup.active = false
+	m.approvalBar.Clear()
+	switch msg.Pending.Kind {
+	case tools.DialogQuestion:
 		m.questionPopup.Open(msg.Pending)
+	case tools.DialogFileChange, tools.DialogShellCommand:
+		m.appendApprovalContent(msg.Pending)
+		m.approvalBar.Open(msg.Pending)
+	default:
+		msg.Pending.Resolve(tools.DialogDecision{})
+		cmds = append(cmds, m.waitDialog())
 	}
 	return cmds, false
 }

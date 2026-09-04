@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
-	"strings"
+
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 const (
@@ -28,6 +28,7 @@ type request struct {
 	Path    string
 	Search  string
 	Replace string
+	Edits   []jsonPatchEdit
 	AST     []*astPatch
 }
 
@@ -79,16 +80,18 @@ func New() *Tool {
 }
 
 func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
 	request, err := parsePatchRequest(args)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(request.AST) > 0 {
-		return t.runASTPatch(request.AST)
+		return t.runASTPatch(ctx, request.AST)
 	}
 	if request.Unified != nil {
-		return t.runUnifiedPatch(request.Unified)
+		return t.runUnifiedPatch(ctx, request.Unified)
+	}
+	if len(request.Edits) > 0 {
+		return t.runJSONPatch(ctx, request.Path, request.Edits)
 	}
 
 	absPath, relPath, err := resolveWorkspaceWritePath(request.Path)
@@ -101,12 +104,16 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
+	existed := !os.IsNotExist(err)
 	current := string(content)
 	updated := ""
 
 	if os.IsNotExist(err) {
 		if request.Search != "" {
 			return Result{}, fmt.Errorf("file %s does not exist and the SEARCH block is not empty", relPath)
+		}
+		if request.Replace == "" {
+			return Result{}, fmt.Errorf("refusing to create an empty file with patch: %s", relPath)
 		}
 		updated = request.Replace
 	} else {
@@ -116,20 +123,83 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+	diff := UnifiedDiff(relPath, current, updated)
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
 		return Result{}, err
 	}
 
 	return Result{
 		Summary: fmt.Sprintf("Patch applied to %s.", relPath),
-		Output:  diffPreview(request.Search, request.Replace),
+		Output:  diff,
 	}, nil
 }
 
-func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
+func (t *Tool) runJSONPatch(ctx context.Context, path string, edits []jsonPatchEdit) (Result, error) {
+	absPath, relPath, err := resolveWorkspaceWritePath(path)
+	if err != nil {
+		return Result{}, err
+	}
+
+	content, readErr := os.ReadFile(absPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return Result{}, readErr
+	}
+	existed := !os.IsNotExist(readErr)
+	updated := string(content)
+	if !existed {
+		if len(edits) != 1 {
+			return Result{}, fmt.Errorf("new files require exactly one JSON edit")
+		}
+		old, replacement := jsonPatchValues(edits[0])
+		if old != "" {
+			return Result{}, fmt.Errorf("new file JSON edit must have an empty old value")
+		}
+		if replacement == "" {
+			return Result{}, fmt.Errorf("refusing to create an empty file with patch: %s", relPath)
+		}
+		updated = replacement
+	} else {
+		for _, edit := range edits {
+			old, replacement := jsonPatchValues(edit)
+			if old == "" {
+				return Result{}, fmt.Errorf("JSON edit requires a non-empty old value")
+			}
+			updated, err = fuzzyReplace(updated, old, replacement)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+	}
+
+	diff := UnifiedDiff(relPath, string(content), updated)
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+		return Result{}, err
+	}
+	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Summary: fmt.Sprintf("Patch applied to %s.", relPath),
+		Output:  diff,
+	}, nil
+}
+
+func jsonPatchValues(edit jsonPatchEdit) (old, replacement string) {
+	old = edit.Old
+	if old == "" {
+		old = edit.OldString
+	}
+	replacement = edit.New
+	if replacement == "" {
+		replacement = edit.NewString
+	}
+	return old, replacement
+}
+
+func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, error) {
 	if len(requests) == 0 {
 		return Result{}, fmt.Errorf("no AST mutations provided")
 	}
@@ -157,7 +227,11 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 			return Result{}, err
 		}
 	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	diff := UnifiedDiff(relPath, string(content), updated)
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
+		return Result{}, err
+	}
+	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), true, 0o755, 0o644); err != nil {
 		return Result{}, err
 	}
 	rendered := make([]string, 0, len(requests))
@@ -171,10 +245,10 @@ func (t *Tool) runASTPatch(requests []*astPatch) (Result, error) {
 	if len(rendered) == 1 {
 		summary = fmt.Sprintf("AST patch applied to %s.", relPath)
 	}
-	return Result{Summary: summary, Output: strings.Join(rendered, "\n\n")}, nil
+	return Result{Summary: summary, Output: diff}, nil
 }
 
-func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
+func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result, error) {
 	path, err := patch.targetPath()
 	if err != nil {
 		return Result{}, err
@@ -194,14 +268,19 @@ func (t *Tool) runUnifiedPatch(patch *unifiedPatch) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+	existed := !os.IsNotExist(readErr)
+	if !existed && updated == "" {
+		return Result{}, fmt.Errorf("refusing to create an empty file with unified patch: %s", relPath)
+	}
+	diff := UnifiedDiff(relPath, string(content), updated)
+	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), existed, 0o755, 0o644); err != nil {
 		return Result{}, err
 	}
 	return Result{
 		Summary: fmt.Sprintf("Unified diff applied to %s.", relPath),
-		Output:  patch.Render(),
+		Output:  diff,
 	}, nil
 }

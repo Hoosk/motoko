@@ -35,6 +35,11 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      # Theme palettes are declarative data tables; literal repetition is the design.
+      - path: internal/styles/palette.go
+        linters:
+          - dupl
     paths:
       - third_party$
       - builtin$

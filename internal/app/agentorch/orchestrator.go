@@ -412,7 +412,8 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 	}
 
 	subCtx := tools.WithBrain(ctx, subBrain)
-	subCtx = tools.WithQuestionBroker(subCtx, tools.GetQuestionBroker(ctx))
+	subCtx = tools.WithBroker(subCtx, tools.GetBroker(ctx))
+	subCtx = tools.WithConfig(subCtx, o.configFn())
 	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
 	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
@@ -507,7 +508,8 @@ func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.Contex
 	}
 
 	ctx = tools.WithBrain(ctx, o.brainFn())
-	ctx = tools.WithQuestionBroker(ctx, tools.GetQuestionBroker(ctx))
+	ctx = tools.WithBroker(ctx, tools.GetBroker(ctx))
+	ctx = tools.WithConfig(ctx, o.configFn())
 	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	return ctx, info, priorHistory, nil
 }

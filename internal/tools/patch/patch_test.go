@@ -2,10 +2,13 @@ package patch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
 )
 
 func withTempWorkspace(t *testing.T) string {
@@ -121,6 +124,136 @@ func TestPatchToolAppliesSearchReplacePatch(t *testing.T) {
 	text := string(updated)
 	if !strings.Contains(text, "# mi moto alpina derrapante\n## Siguientes Pasos") {
 		t.Fatalf("expected inserted heading, got %q", text)
+	}
+}
+
+func TestPatchToolAcceptsSchemaJSONEdits(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "json.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
+	result := make(chan error, 1)
+	go func() {
+		_, err := New().Run(ctx, `{"path":"json.md","edits":[{"old":"old\n","new":"new\n"}]}`)
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pending.Change.Diff, "-old") || !strings.Contains(pending.Change.Diff, "+new") {
+		t.Fatalf("unexpected JSON patch diff %q", pending.Change.Diff)
+	}
+	pending.Resolve(dialogpkg.Decision{Approved: true})
+	if err := <-result; err != nil {
+		t.Fatalf("JSON patch failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new\n" {
+		t.Fatalf("unexpected JSON patch result %q", data)
+	}
+}
+
+func TestPatchToolRequiresApprovalBeforeWriting(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "test.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
+	result := make(chan error, 1)
+	go func() {
+		_, err := New().Run(ctx, "test.md\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE")
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pending.Change.Diff, "-old") || !strings.Contains(pending.Change.Diff, "+new") {
+		t.Fatalf("unexpected patch diff %q", pending.Change.Diff)
+	}
+	pending.Resolve(dialogpkg.Decision{Approved: false})
+	if err := <-result; !errors.Is(err, dialogpkg.ErrChangeRejected) {
+		t.Fatalf("expected rejected patch, got %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("rejected patch changed file to %q", data)
+	}
+}
+
+func TestPatchToolRejectsStaleApproval(t *testing.T) {
+	root := withTempWorkspace(t)
+	path := filepath.Join(root, "stale.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
+	result := make(chan error, 1)
+	go func() {
+		_, err := New().Run(ctx, "stale.md\n<<<<<<< SEARCH\nold\n=======\nproposed\n>>>>>>> REPLACE")
+		result <- err
+	}()
+	pending, err := broker.Next(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("external\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pending.Resolve(dialogpkg.Decision{Approved: true})
+	if err := <-result; !errors.Is(err, ErrFileChanged) {
+		t.Fatalf("expected stale file error, got %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "external\n" {
+		t.Fatalf("stale approval overwrote external content: %q", data)
+	}
+}
+
+func TestPatchToolRefusesEmptyNewFile(t *testing.T) {
+	root := withTempWorkspace(t)
+	broker := dialogpkg.NewBroker()
+	ctx := dialogpkg.WithBroker(dialogpkg.WithMode(context.Background(), dialogpkg.ModeAsk), broker)
+
+	_, err := New().Run(ctx, "empty.txt\n<<<<<<< SEARCH\n=======\n>>>>>>> REPLACE")
+	if err == nil || !strings.Contains(err.Error(), "empty file") {
+		t.Fatalf("expected empty file error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "empty.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("empty patch created a file, stat error: %v", statErr)
+	}
+}
+
+func TestPatchToolHonorsCancelledContext(t *testing.T) {
+	root := withTempWorkspace(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := New().Run(ctx, "cancelled.txt\n<<<<<<< SEARCH\n=======\ncontent\n>>>>>>> REPLACE")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "cancelled.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("cancelled patch created a file, stat error: %v", statErr)
 	}
 }
 

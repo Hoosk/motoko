@@ -23,41 +23,42 @@ const (
 )
 
 type Model struct {
-	lastCtrlC              time.Time
-	notificationTime       time.Time
-	agentBuffer            *agentStreamBuffer
-	agentStream            chan app.AgentStreamEvent
-	cancelCurrent          context.CancelFunc
-	runtime                *app.Runtime
-	sessionPicker          sessionPickerState
-	commandPalette         commandPaletteState
-	taskStatus             string
-	notificationText       string
-	modelPicker            modelPickerState
-	promptQueue            []string
-	questionPopup          questionPopupState
-	providerForm           providerForm
-	mcpForm                mcpForm
-	modePopup              modePopupState
-	settingsPopup          settingsPopupState
-	sidebar                SidebarModel
-	thinkingPicker         thinkingPickerState
-	composer               ComposerModel
-	timeline               TimelineModel
-	footer                 FooterModel
-	helpOverlay            helpOverlayState
-	sidebarPref            sidebarLayoutState
-	requestID              int
-	height                 int
-	width                  int
-	queueSel               int
-	prevActiveTasks        int
-	prevActiveSubagents    int
-	notificationShow       bool
-	queueFocus             bool
-	showTools              bool
-	showSidebar            bool
-	prevHasPendingApproval bool
+	lastCtrlC            time.Time
+	notificationTime     time.Time
+	agentBuffer          *agentStreamBuffer
+	agentStream          chan app.AgentStreamEvent
+	cancelCurrent        context.CancelFunc
+	runtime              *app.Runtime
+	sessionPicker        sessionPickerState
+	commandPalette       commandPaletteState
+	taskStatus           string
+	notificationText     string
+	modelPicker          modelPickerState
+	promptQueue          []string
+	questionPopup        questionPopupState
+	approvalBar          approvalBarState
+	providerForm         providerForm
+	mcpForm              mcpForm
+	modePopup            modePopupState
+	settingsPopup        settingsPopupState
+	sidebar              SidebarModel
+	thinkingPicker       thinkingPickerState
+	composer             ComposerModel
+	timeline             TimelineModel
+	footer               FooterModel
+	helpOverlay          helpOverlayState
+	sidebarPref          sidebarLayoutState
+	requestID            int
+	height               int
+	width                int
+	queueSel             int
+	prevActiveTasks      int
+	prevActiveSubagents  int
+	notificationShow     bool
+	queueFocus           bool
+	showTools            bool
+	showSidebar          bool
+	prevHasPendingDialog bool
 }
 
 func (m Model) sidebarLayout() (int, bool) {
@@ -103,7 +104,7 @@ func (m Model) Init() tea.Cmd {
 		m.composer.Init(),
 		m.footer.Init(),
 		m.sidebar.Init(),
-		m.waitQuestion(),
+		m.waitDialog(),
 		m.waitScheduleEvent(),
 		m.waitTaskEvent(),
 		m.checkForUpdatesCmd(),

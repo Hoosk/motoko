@@ -66,7 +66,7 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		ToolSpecsFn: func() []tools.Spec { return r.ToolSpecs() },
 		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
-			return r.tools.Run(ctx, name, args)
+			return r.RunTool(ctx, name, args)
 		},
 		MCPServersFn: func() []mcp.ServerStatus {
 			if r.mcpMgr == nil {
@@ -118,18 +118,7 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		ProvMgr: r.provMgr,
 
-		PendingFn: func() string {
-			if r.pending == nil {
-				return ""
-			}
-			return r.pending.Command
-		},
-		SetPendingFn: func(cmd string) { r.pending = &pendingShell{Command: cmd} },
-		ClearPendingFn: func() string {
-			cmd := r.pending.Command
-			r.pending = nil
-			return cmd
-		},
+		PendingDialogsFn: func() int { return r.PendingDialogs() },
 
 		ContextWindowFn: func() int { return r.contextWindow },
 	}

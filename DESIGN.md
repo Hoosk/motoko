@@ -15,8 +15,8 @@ Motoko is built in Go and operates as a terminal coding agent with a strong loca
 - `Timeline`: rendered conversation, system events, command output and tool output. Supports streaming with reasoning visibility toggle.
 - `Sidebar`: Tachikoma status, semantic summary, and context signals
 - `Composer`: multiline input with command/tool completion. Shows active agent mode and thinking indicator.
-- `Footer`: workspace path, git state, task count, context window usage, and pending approvals
-- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector, Settings popup, and agent-driven Question popup
+- `Footer`: workspace path, git state, task count, context window usage, and pending user dialogs
+- `Popups`: Provider configuration form, Model picker, Session picker, Agent/Mode selector, Settings popup, and agent-driven Question popup. File and shell approvals use an inline bar above the composer instead of a popup.
 
 ## 2. Session Runtime (`internal/app`)
 The runtime is the operational core that connects the TUI to the agent, tools, and background workers.
@@ -26,7 +26,7 @@ The runtime is the operational core that connects the TUI to the agent, tools, a
 - Track input mode: `chat` or `shell`
 - Parse slash commands
 - Parse explicit shell execution with `!command`
-- Enforce approval rules for shell execution
+- Enforce shell and file-change approval rules through the user-dialog broker
 - Route `/tool ...` calls to the local tool registry
 - Forward normal chat input to the agent loop when the provider is configured
 - Manage sessions: create, list, load, resume, compact
@@ -52,7 +52,7 @@ The runtime is the operational core that connects the TUI to the agent, tools, a
 - `/settings` — Open runtime settings popup
 - `/shell` — Activate direct shell execution mode
 - `/chat` — Return to normal chat mode
-- `/status` — Summarize mode, provider, workspace, and approval state
+- `/status` — Summarize mode, provider, workspace, and pending dialog state
 - `/debug` — Toggle agent debug output
 - `/trace` — Toggle trace logging (requires build tag)
 - `/context` — Show raw system prompt sent to the agent
@@ -63,8 +63,6 @@ The runtime is the operational core that connects the TUI to the agent, tools, a
 - `/tool <name> <args>` — Execute a specific tool manually
 - `/task` — List or manage background tasks
 - `/brain` — Interact with session brain (list, read, plan, tasks, summary, clear)
-- `/approve` — Execute the pending shell action
-- `/deny` — Cancel the pending shell action
 
 ## 3. Tool Layer (`internal/tools`)
 Motoko has a local tool registry used by the runtime, the agent loop, and slash commands.
@@ -91,6 +89,12 @@ Motoko has a local tool registry used by the runtime, the agent loop, and slash 
 - Tool outputs are truncated to 12 KB to avoid prompt bloat
 - `bash` and `patch` are classified as write tools and are filtered out in plan/search modes
 - `bash` remains subject to runtime permission rules
+
+### User Dialog Broker
+- `internal/tools/dialog` owns the FIFO broker shared by questions, file changes, and shell approval requests.
+- `question` requests use the structured Question popup.
+- File changes and shell commands render the pending content in the timeline and open an inline approval bar above the composer with selectable `approve` and `reject` buttons (left/right to select, Enter to confirm, `y`/`n` as quick keys).
+- Requests block their originating tool or action until the user approves, rejects, cancels, or reaches the five-minute timeout.
 
 ## 4. Agent Layer (`internal/agent`)
 The agent loop handles the full LLM interaction cycle including tool calling.

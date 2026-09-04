@@ -19,6 +19,8 @@ var (
 	SoftBlue           = lipgloss.Color("#A9D8FF")
 	AlertPink          = lipgloss.Color("#FF7BCB")
 	WarmGold           = lipgloss.Color("#F4C96B")
+	DiffAdd            = lipgloss.Color("#71F7A5")
+	DiffRemove         = lipgloss.Color("#FF6B6B")
 	BorderColor        = lipgloss.Color("#22303D")
 	SelectionHighlight = lipgloss.Color("#1E3D58")
 )

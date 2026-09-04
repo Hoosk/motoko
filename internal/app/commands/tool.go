@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/app/types"
+	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/system"
 	"github.com/Hoosk/motoko/internal/tools"
 )
@@ -19,8 +20,18 @@ func (d *Dispatcher) handleToolCommand(inv Invocation) types.Response {
 		return d.handleShell(toolArgs)
 	}
 	runCtx := tools.WithBrain(context.Background(), d.deps.BrainFn())
-	runCtx = tools.WithConfig(runCtx, d.deps.ConfigFn())
+	cfg := d.deps.ConfigFn()
+	runCtx = tools.WithConfig(runCtx, cfg)
 	runCtx = tools.WithMaxOutputSize(runCtx, system.MaxToolOutputBytes(d.deps.ContextWindowFn()))
+	if cfg != nil && tools.IsWriteTool(toolName) && config.NormalizeEditApproval(cfg.EditApproval) == config.EditApprovalAsk {
+		return types.Response{
+			Entries: []types.Entry{
+				{Kind: types.EntryCommand, Text: fmt.Sprintf("tool %s %s", toolName, strings.TrimSpace(toolArgs))},
+				{Kind: types.EntrySystem, Text: "Awaiting file change approval..."},
+			},
+			Action: &types.Action{Type: types.ActionTool, ToolName: toolName, ToolArgs: toolArgs},
+		}
+	}
 	result, err := d.deps.RunToolFn(runCtx, toolName, toolArgs)
 	if err != nil {
 		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: err.Error()}}}

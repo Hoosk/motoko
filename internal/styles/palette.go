@@ -16,6 +16,8 @@ type palette struct {
 	SoftBlue           lipgloss.Color
 	AlertPink          lipgloss.Color
 	WarmGold           lipgloss.Color
+	DiffAdd            lipgloss.Color
+	DiffRemove         lipgloss.Color
 	BorderColor        lipgloss.Color
 	SelectionHighlight lipgloss.Color
 }
@@ -35,6 +37,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#8FBCBB"),
 		AlertPink:          lipgloss.Color("#BF616A"),
 		WarmGold:           lipgloss.Color("#EBCB8B"),
+		DiffAdd:            lipgloss.Color("#A3BE8C"),
+		DiffRemove:         lipgloss.Color("#BF616A"),
 		BorderColor:        lipgloss.Color("#4C566A"),
 		SelectionHighlight: lipgloss.Color("#434C5E"),
 	},
@@ -50,6 +54,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#FF79C6"),
 		AlertPink:          lipgloss.Color("#FF5555"),
 		WarmGold:           lipgloss.Color("#F1FA8C"),
+		DiffAdd:            lipgloss.Color("#50FA7B"),
+		DiffRemove:         lipgloss.Color("#FF5555"),
 		BorderColor:        lipgloss.Color("#44475A"),
 		SelectionHighlight: lipgloss.Color("#44475A"),
 	},
@@ -65,6 +71,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#55FF55"),
 		AlertPink:          lipgloss.Color("#FF3333"),
 		WarmGold:           lipgloss.Color("#A0FFA0"),
+		DiffAdd:            lipgloss.Color("#00FF00"),
+		DiffRemove:         lipgloss.Color("#FF3333"),
 		BorderColor:        lipgloss.Color("#333333"),
 		SelectionHighlight: lipgloss.Color("#222222"),
 	},
@@ -80,6 +88,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#7DC4F0"),
 		AlertPink:          lipgloss.Color("#D4607A"),
 		WarmGold:           lipgloss.Color("#C9A855"),
+		DiffAdd:            lipgloss.Color("#45D19A"),
+		DiffRemove:         lipgloss.Color("#D4607A"),
 		BorderColor:        lipgloss.Color("#142030"),
 		SelectionHighlight: lipgloss.Color("#0F2D40"),
 	},
@@ -95,6 +105,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#80DEEA"),
 		AlertPink:          lipgloss.Color("#FF4081"),
 		WarmGold:           lipgloss.Color("#FFD740"),
+		DiffAdd:            lipgloss.Color("#69F0AE"),
+		DiffRemove:         lipgloss.Color("#FF4081"),
 		BorderColor:        lipgloss.Color("#1E1530"),
 		SelectionHighlight: lipgloss.Color("#1A0F38"),
 	},
@@ -110,6 +122,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#66CCEE"),
 		AlertPink:          lipgloss.Color("#FF4455"),
 		WarmGold:           lipgloss.Color("#88CCDD"),
+		DiffAdd:            lipgloss.Color("#6AEC8F"),
+		DiffRemove:         lipgloss.Color("#FF4455"),
 		BorderColor:        lipgloss.Color("#0D2030"),
 		SelectionHighlight: lipgloss.Color("#0A2535"),
 	},
@@ -125,6 +139,8 @@ var palettes = map[string]palette{
 		SoftBlue:           lipgloss.Color("#9DD8FF"),
 		AlertPink:          lipgloss.Color("#FF79C6"),
 		WarmGold:           lipgloss.Color("#E8C56A"),
+		DiffAdd:            lipgloss.Color("#63F5B0"),
+		DiffRemove:         lipgloss.Color("#FF5C57"),
 		BorderColor:        lipgloss.Color("#1B3444"),
 		SelectionHighlight: lipgloss.Color("#16354D"),
 	},
@@ -143,6 +159,8 @@ func applyPalette(p palette) {
 	SoftBlue = p.SoftBlue
 	AlertPink = p.AlertPink
 	WarmGold = p.WarmGold
+	DiffAdd = p.DiffAdd
+	DiffRemove = p.DiffRemove
 	BorderColor = p.BorderColor
 	SelectionHighlight = p.SelectionHighlight
 }
@@ -266,20 +284,20 @@ func reinitPopupStyles() {
 
 func reinitContextStyles() {
 	DiffAddStyle = lipgloss.NewStyle().
-		Foreground(AccentBlue)
+		Foreground(DiffAdd)
 
 	DiffRemoveStyle = lipgloss.NewStyle().
-		Foreground(AlertPink)
+		Foreground(DiffRemove)
 
 	DiffMetaStyle = lipgloss.NewStyle().
-		Foreground(Gray)
+		Foreground(Gray).
+		Faint(true)
 
 	DiffContextStyle = lipgloss.NewStyle().
-		Foreground(SoftBlue)
+		Foreground(Gray)
 
 	DiffHeaderStyle = lipgloss.NewStyle().
-		Foreground(AccentViolet).
-		Bold(true)
+		Foreground(AccentViolet)
 
 	GrayStyle = lipgloss.NewStyle().Foreground(Gray)
 	BlueStyle = lipgloss.NewStyle().Foreground(AccentBlue)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -310,6 +311,153 @@ func TestOpenAIClientUseChatCompletions(t *testing.T) {
 	})
 	if clientLM.(*openAIClient).useChatCompletions {
 		t.Fatal("expected useChatCompletions false for LMStudio preset")
+	}
+}
+
+func TestToSDKChatMessagesNeverMarshalNullContent(t *testing.T) {
+	poisonedRaw := json.RawMessage(`{"function":{"arguments":"{\"path\": \"notas.md\", \"content\": \"x\"}","name":null},"id":null,"type":"function"}`)
+	items := []provider.ConversationItem{
+		provider.UserText("resume work"),
+		{
+			Role:             provider.RoleAssistant,
+			Content:          "",
+			ReasoningContent: "thinking",
+			ToolCalls: []provider.ToolInvocation{
+				{
+					Kind:   provider.InvokeCustomTool,
+					Name:   "read",
+					CallID: "call_1",
+					Raw:    json.RawMessage(`{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"input\":\"index.html\"}"}}`),
+				},
+				{Kind: provider.InvokeCustomTool, Name: "glob", CallID: "call_2"},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Content: strings.Repeat("x", 11000)},
+		{Role: provider.RoleTool, ToolCallID: "call_2", Content: "2 matches"},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "",
+			ToolCalls: []provider.ToolInvocation{
+				{Kind: provider.InvokeCustomTool, Name: "write", CallID: "call_3", Input: `{"path": "notas.md"}`, Raw: poisonedRaw},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "call_3", Content: "tool error: change rejected by user: notas.md"},
+		{Role: provider.RoleAssistant, ReasoningContent: "reasoning only"},
+		provider.AssistantText("done"),
+	}
+
+	for _, builder := range []func([]provider.ConversationItem) []map[string]any{toChatMessages} {
+		mapped := builder(items)
+		raw, err := json.Marshal(mapped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rejectNullValues(raw); err != nil {
+			t.Fatalf("toChatMessages emitted null: %v", err)
+		}
+	}
+
+	sdkMessages := append([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage("system prompt")}, toSDKChatMessages(items)...)
+	raw, err := json.Marshal(openai.ChatCompletionNewParams{
+		Model:    "deepseek-v4-flash",
+		Messages: sdkMessages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectNullValues(raw); err != nil {
+		t.Fatalf("toSDKChatMessages emitted null: %v", err)
+	}
+}
+
+func rejectNullValues(raw []byte) error {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	var firstNull string
+	var walk func(any, string)
+	walk = func(v any, path string) {
+		if firstNull != "" {
+			return
+		}
+		switch typed := v.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for k := range typed {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				walk(typed[k], path+"."+k)
+			}
+		case []any:
+			for i, item := range typed {
+				walk(item, fmt.Sprintf("%s[%d]", path, i))
+			}
+		case nil:
+			firstNull = path
+		}
+	}
+	walk(value, "$")
+	if firstNull != "" {
+		return fmt.Errorf("null at %s", firstNull)
+	}
+	return nil
+}
+
+func TestMergeChatToolCallDeltasIgnoresNulls(t *testing.T) {
+	acc := make(map[int]*chatCompletionToolCall)
+	mapped := make(map[int]int)
+	mergeChatToolCallDeltas(acc, []chatCompletionToolCallDelta{
+		{Index: 0, ID: "call_x", Type: "function", Function: chatCompletionToolFunction{Name: "write"}, Raw: json.RawMessage(`{"index":0,"id":"call_x","type":"function","function":{"name":"write","arguments":""}}`)},
+		{Index: 0, Function: chatCompletionToolFunction{Arguments: `{"a":1}`}, Raw: json.RawMessage(`{"index":0,"id":null,"function":{"name":null,"arguments":"{\"a\":1}"}}`)},
+	}, mapped)
+
+	call := acc[0]
+	if call == nil {
+		t.Fatal("expected accumulated tool call")
+	}
+	if call.ID != "call_x" || call.Function.Name != "write" || call.Function.Arguments != `{"a":1}` {
+		t.Fatalf("unexpected accumulated call %#v", call)
+	}
+	rawID := call.RawMap["id"]
+	rawName := call.RawMap["function"].(map[string]any)["name"]
+	if rawID != "call_x" || rawName != "write" {
+		t.Fatalf("expected null deltas to be ignored, got id=%v name=%v", rawID, rawName)
+	}
+}
+
+func TestToChatMessagesSanitizesPoisonedRawToolCall(t *testing.T) {
+	item := provider.ConversationItem{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolInvocation{{
+			Kind:   provider.InvokeCustomTool,
+			Name:   "write",
+			CallID: "call_a42",
+			Input:  `{"path": "notas.md"}`,
+			Raw:    json.RawMessage(`{"function":{"arguments":"{\"path\": \"notas.md\"}","name":null},"id":null,"type":"function"}`),
+		}},
+	}
+	messages := toChatMessages([]provider.ConversationItem{item})
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectNullValues(raw); err != nil {
+		t.Fatalf("expected sanitized tool call, %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	call := decoded[0]["tool_calls"].([]any)[0].(map[string]any)
+	if call["id"] != "call_a42" {
+		t.Fatalf("expected id repaired from call id, got %v", call["id"])
+	}
+	fn := call["function"].(map[string]any)
+	if fn["name"] != "write" {
+		t.Fatalf("expected name repaired from call name, got %v", fn["name"])
 	}
 }
 

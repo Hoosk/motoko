@@ -74,8 +74,12 @@ func (m Model) View() string {
 	footerView := m.footer.View()
 
 	var mainView string
+	barView := m.approvalBar.View(mainWidth)
 	if sidebarWidth > 0 {
 		blocks := []string{timelineView, toolbarView}
+		if barView != "" {
+			blocks = append(blocks, barView)
+		}
 		if queueView != "" {
 			blocks = append(blocks, queueView)
 		}
@@ -85,6 +89,9 @@ func (m Model) View() string {
 		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebarView)
 	} else {
 		blocks := []string{timelineView, toolbarView}
+		if barView != "" {
+			blocks = append(blocks, barView)
+		}
 		if queueView != "" {
 			blocks = append(blocks, queueView)
 		}
@@ -108,7 +115,10 @@ func (m Model) View() string {
 	}
 	widePopupStyle := styles.PopupStyle.Width(widePopupWidth)
 
-	if m.providerForm.active {
+	if m.questionPopup.active {
+		popup := widePopupStyle.Render(m.questionPopup.View())
+		base = overlayCenter(base, popup, m.width, m.height)
+	} else if m.providerForm.active {
 		popup := popupStyle.Render(m.providerForm.View(m.runtime))
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.mcpForm.active {
@@ -134,9 +144,6 @@ func (m Model) View() string {
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.helpOverlay.active {
 		popup := widePopupStyle.Render(m.helpOverlay.View(m.runtime))
-		base = overlayCenter(base, popup, m.width, m.height)
-	} else if m.questionPopup.active {
-		popup := widePopupStyle.Render(m.questionPopup.View())
 		base = overlayCenter(base, popup, m.width, m.height)
 	} else if m.settingsPopup.active {
 		popup := widePopupStyle.Render(m.settingsPopup.View(m.runtime))
@@ -191,12 +198,13 @@ func (m *Model) SyncLayout() {
 	m.footer.width = m.width
 
 	toolbarHeight := 1
+	barHeight := m.approvalBarHeight(mainWidth)
 	queueHeight := m.queuePanelHeight(mainWidth)
 
-	timelineHeight := max(m.height-footerHeight-composerHeight-toolbarHeight-queueHeight, 4)
+	timelineHeight := max(m.height-footerHeight-composerHeight-toolbarHeight-queueHeight-barHeight, 4)
 
 	m.timeline.SyncLayout(mainWidth, timelineHeight)
-	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+composerHeight)
+	m.sidebar.SetDimensions(sidebarWidth, timelineHeight+toolbarHeight+queueHeight+barHeight+composerHeight)
 }
 
 func timelineOnboarding(runtime *app.Runtime) []string {
@@ -223,7 +231,6 @@ func (m Model) paletteContext() paletteContext {
 		Skills:      m.runtime.AvailableSkills(),
 		Tasks:       m.runtime.ListTasks(),
 		Agents:      m.runtime.AvailableAgents(),
-		Pending:     m.runtime.PendingApproval(),
 		Thinking:    m.timeline.model.Thinking,
 		QueueLen:    len(m.promptQueue),
 		ShowSidebar: m.showSidebar,
