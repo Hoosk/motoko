@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,9 +28,10 @@ func NewReadTool() *ReadTool {
 
 func (t *ReadTool) Spec() Spec {
 	return Spec{
-		Name:    "read",
-		Summary: "Reads a file or lists a directory in the workspace.",
-		Usage:   "read <path> [offset] [limit]",
+		Name:        "read",
+		Summary:     "Reads a file or lists a directory in the workspace.",
+		Usage:       "read <path> [offset] [limit]",
+		InputSchema: schemaRead,
 	}
 }
 
@@ -98,7 +98,7 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
-	injected := t.getInjectedInstructions(absPath, resolved.External)
+	injected := t.getInjectedInstructions(absPath, resolved.External, info.IsDir())
 
 	if info.IsDir() {
 		entries, readErr := file.ReadDir(-1)
@@ -152,7 +152,7 @@ func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	}, nil
 }
 
-func (t *ReadTool) getInjectedInstructions(absPath string, external bool) string {
+func (t *ReadTool) getInjectedInstructions(absPath string, external, isDir bool) string {
 	if external {
 		return ""
 	}
@@ -166,8 +166,7 @@ func (t *ReadTool) getInjectedInstructions(absPath string, external bool) string
 
 	var injected strings.Builder
 	dir := absPath
-	info, err := os.Stat(absPath)
-	if err == nil && !info.IsDir() {
+	if !isDir {
 		dir = filepath.Dir(absPath)
 	}
 
@@ -177,7 +176,13 @@ func (t *ReadTool) getInjectedInstructions(absPath string, external bool) string
 			if t.injectedInstructions[agentFile] {
 				continue
 			}
-			resolved, err := pathpolicy.Resolve(agentFile)
+			// agentFile and workspaceRoot are canonical; Resolve expects a
+			// path relative to the lexical workspace when PWD is a symlink.
+			rel, err := filepath.Rel(workspaceRoot, agentFile)
+			if err != nil {
+				continue
+			}
+			resolved, err := pathpolicy.Resolve(rel)
 			if err != nil || resolved.External {
 				continue
 			}

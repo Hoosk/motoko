@@ -287,6 +287,17 @@ func ResolveAPIStyle(baseURL, modelID string) (string, bool) {
 	defer catalogMu.RUnlock()
 
 	norm := normalizeAPIURL(baseURL)
+
+	// An empty base URL matches every catalog provider that also has an empty
+	// api field (25+ entries including openai, anthropic, google, cohere…).
+	// Because Go map iteration is random this would produce a non-deterministic
+	// API style, silently hijacking providers like Gemini or Anthropic that
+	// intentionally have no base URL (they use SDK-native defaults). Skip the
+	// catalog lookup entirely when there is no URL to match against.
+	if norm == "" {
+		return "", false
+	}
+
 	modelLower := strings.ToLower(strings.TrimSpace(modelID))
 
 	for provID, p := range providersCache {

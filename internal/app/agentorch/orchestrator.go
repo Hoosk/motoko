@@ -237,53 +237,71 @@ func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.Agen
 	}
 
 	toolsRegistry := o.toolsFn().Filter(func(t tools.Tool) bool {
-		name := t.Spec().Name
-		if len(allowedTools) > 0 {
-			allowed := false
-			for _, allowedName := range allowedTools {
-				if strings.EqualFold(name, allowedName) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return false
-			}
-		}
-		if len(deniedTools) > 0 {
-			for _, deniedName := range deniedTools {
-				if strings.EqualFold(name, deniedName) {
-					return false
-				}
-			}
-		}
-		if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
-			return false
-		}
-		if name == "delegate" && !aDef.Permissions.AllowDelegate {
-			return false
-		}
-		if name == "question" && !aDef.Permissions.AllowQuestion {
-			return false
-		}
-		if name == "task" && !aDef.Permissions.AllowTask {
-			return false
-		}
-		if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
-			if name == "brain_write" {
-				return false
-			}
-		}
-		if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
-			return false
-		}
-		return true
+		return toolAllowedForAgent(t, aDef, allowedTools, deniedTools)
 	})
 
 	newAgent := agent.New(client, toolsRegistry)
 	newAgent.SetDebug(o.debug)
 	newAgent.SetAgentOverride(sysPrompt)
 	return newAgent
+}
+
+// toolAllowedForAgent applies the permission model for a single tool:
+// explicit allow/deny lists, write-tool gating, MCP readOnlyHint gating in
+// read-only agents, and the per-feature capability flags. The allow/deny
+// slices may come from agent overrides, which is why they are passed
+// separately from aDef.Permissions.
+func toolAllowedForAgent(t tools.Tool, aDef agent.AgentDef, allowedTools, deniedTools []string) bool {
+	name := t.Spec().Name
+	if len(allowedTools) > 0 {
+		allowed := false
+		for _, allowedName := range allowedTools {
+			if strings.EqualFold(name, allowedName) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
+	if len(deniedTools) > 0 {
+		for _, deniedName := range deniedTools {
+			if strings.EqualFold(name, deniedName) {
+				return false
+			}
+		}
+	}
+	if tools.IsWriteTool(name) && !aDef.Permissions.AllowWrite {
+		return false
+	}
+	// MCP tools advertise a readOnlyHint. In read-only agents, exclude any
+	// tool that is NOT explicitly annotated read-only: an absent hint means
+	// the tool may mutate state. The hint comes from an untrusted server, so
+	// the conservative default is the safe one.
+	if !aDef.Permissions.AllowWrite {
+		if ro, ok := t.(interface{ IsReadOnly() bool }); ok && !ro.IsReadOnly() {
+			return false
+		}
+	}
+	if name == "delegate" && !aDef.Permissions.AllowDelegate {
+		return false
+	}
+	if name == "question" && !aDef.Permissions.AllowQuestion {
+		return false
+	}
+	if name == "task" && !aDef.Permissions.AllowTask {
+		return false
+	}
+	if strings.HasPrefix(name, "brain_") && !aDef.Permissions.AllowBrainWrite {
+		if name == "brain_write" {
+			return false
+		}
+	}
+	if (name == "web_search" || name == "web_fetch") && !aDef.Permissions.AllowWebAccess {
+		return false
+	}
+	return true
 }
 
 func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
@@ -394,7 +412,8 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 	}
 
 	subCtx := tools.WithBrain(ctx, subBrain)
-	subCtx = tools.WithQuestionBroker(subCtx, tools.GetQuestionBroker(ctx))
+	subCtx = tools.WithBroker(subCtx, tools.GetBroker(ctx))
+	subCtx = tools.WithConfig(subCtx, o.configFn())
 	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
 	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
@@ -467,6 +486,13 @@ func (o *Orchestrator) RunAgentStream(ctx context.Context, info system.ContextIn
 
 func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.ContextInfo, input string) (context.Context, system.ContextInfo, []provider.ConversationItem, error) {
 	if o.agent == nil || !o.agent.Configured() {
+		// Try to produce a more actionable error message when the active
+		// provider simply has no model selected yet.
+		if cfg := o.configFn(); cfg != nil {
+			if active, ok := cfg.Active(); ok && strings.TrimSpace(active.Model) == "" {
+				return ctx, system.ContextInfo{}, nil, fmt.Errorf("provider %q has no model selected — use /models to pick one", active.Name)
+			}
+		}
 		return ctx, system.ContextInfo{}, nil, fmt.Errorf("agent not configured")
 	}
 	if info.Path == "" {
@@ -482,7 +508,8 @@ func (o *Orchestrator) prepareRunContext(ctx context.Context, info system.Contex
 	}
 
 	ctx = tools.WithBrain(ctx, o.brainFn())
-	ctx = tools.WithQuestionBroker(ctx, tools.GetQuestionBroker(ctx))
+	ctx = tools.WithBroker(ctx, tools.GetBroker(ctx))
+	ctx = tools.WithConfig(ctx, o.configFn())
 	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	return ctx, info, priorHistory, nil
 }
@@ -508,29 +535,42 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 		ctx = tools.WithConfig(ctx, cfg)
 	}
 
+	o.enrichBrainSummary(ctx, &info)
+	o.enrichAgentCatalog(&info)
+	o.enrichSemantic(ctx, input, &info)
+	o.enrichGuidelines(&info)
+
+	return info
+}
+
+// enrichBrainSummary builds the session-brain context block.
+func (o *Orchestrator) enrichBrainSummary(ctx context.Context, info *system.ContextInfo) {
 	br := tools.GetBrain(ctx)
 	if br == nil {
 		br = o.brainFn()
 	}
-
-	if br != nil {
-		var sb strings.Builder
-		sb.WriteString(br.Summary())
-		if br.Exists("plan") {
-			if plan := br.PlanSummary(); plan != "" {
-				sb.WriteString("\n\n[plan.md]:\n")
-				sb.WriteString(plan)
-			}
-		}
-		if br.Exists("tasks") {
-			if tasks := br.TasksSummary(); tasks != "" {
-				sb.WriteString("\n\n[tasks.md]:\n")
-				sb.WriteString(tasks)
-			}
-		}
-		info.BrainSummary = sb.String()
+	if br == nil {
+		return
 	}
+	var sb strings.Builder
+	sb.WriteString(br.Summary())
+	if br.Exists("plan") {
+		if plan := br.PlanSummary(); plan != "" {
+			sb.WriteString("\n\n[plan.md]:\n")
+			sb.WriteString(plan)
+		}
+	}
+	if br.Exists("tasks") {
+		if tasks := br.TasksSummary(); tasks != "" {
+			sb.WriteString("\n\n[tasks.md]:\n")
+			sb.WriteString(tasks)
+		}
+	}
+	info.BrainSummary = sb.String()
+}
 
+// enrichAgentCatalog exposes the available skills and agents to the context.
+func (o *Orchestrator) enrichAgentCatalog(info *system.ContextInfo) {
 	skillList := o.AvailableSkills()
 	if len(skillList) > 0 {
 		info.AvailableSkills = make([]system.SkillDef, len(skillList))
@@ -549,15 +589,18 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 			info.AvailableAgents[i] = a.Name
 		}
 	}
+}
 
+// enrichSemantic fills the relevant-files/snippets context from the semantic
+// index, preferring the existing summary when one is already present.
+func (o *Orchestrator) enrichSemantic(ctx context.Context, input string, info *system.ContextInfo) {
 	sem := o.semanticFn()
 	if sem == nil {
-		return info
+		return
 	}
 
 	var snapshot *semantic.Snapshot
 	var err error
-
 	if info.SemanticSummary == "" {
 		snapshot, err = sem.Ensure(ctx)
 		if err != nil {
@@ -565,15 +608,14 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 				info.Signals = make(map[string]string)
 			}
 			info.Signals["semantic_error"] = err.Error()
-			return info
+			return
 		}
 		info.SemanticSummary = snapshot.Summary()
 	} else {
 		snapshot = sem.LatestSnapshot()
 	}
-
 	if snapshot == nil {
-		return info
+		return
 	}
 
 	limits := system.GetSemanticLimits(o.contextWindowFn())
@@ -610,19 +652,21 @@ func (o *Orchestrator) EnrichContext(ctx context.Context, info system.ContextInf
 		}
 	}
 	tracelog.Logf("runtime context semantic=%q relevant_files=%d relevant_snippets=%d on_demand=%d", info.SemanticSummary, len(info.RelevantFiles), len(info.RelevantSnippets), len(info.OnDemandSignals))
+}
 
-	if info.Path != "" {
-		agentsPath := filepath.Join(info.Path, "AGENTS.md")
-		if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
-			info.Guidelines = string(data)
-		}
-
-		designPath := filepath.Join(info.Path, "DESIGN.md")
-		if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
-			info.DesignSpec = string(data)
-		}
-		info.ActiveMode = o.currentAgentName
+// enrichGuidelines loads the workspace AGENTS.md and DESIGN.md content.
+func (o *Orchestrator) enrichGuidelines(info *system.ContextInfo) {
+	if info.Path == "" {
+		return
+	}
+	agentsPath := filepath.Join(info.Path, "AGENTS.md")
+	if data, err := os.ReadFile(agentsPath); err == nil && len(data) > 0 {
+		info.Guidelines = string(data)
 	}
 
-	return info
+	designPath := filepath.Join(info.Path, "DESIGN.md")
+	if data, err := os.ReadFile(designPath); err == nil && len(data) > 0 {
+		info.DesignSpec = string(data)
+	}
+	info.ActiveMode = o.currentAgentName
 }

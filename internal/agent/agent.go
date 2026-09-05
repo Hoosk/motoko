@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 const (
 	defaultMaxToolIterations = 250
 	inputBloatThresholdPct   = 15.0
+	stepErrorKind            = "error"
 )
 
 type Result struct {
@@ -110,207 +112,309 @@ func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInpu
 	return a.run(ctx, info, userInput, priorHistory, onEvent)
 }
 
-func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, onEvent func(StreamEvent) error) (Result, error) {
-	if !a.Configured() {
-		return Result{}, fmt.Errorf("agent not configured")
-	}
-	startedAt := time.Now()
+// runState carries the mutable per-run bookkeeping across agent iterations.
+type runState struct {
+	startedAt      time.Time
+	seenToolCalls  map[string]struct{}
+	context        ContextSnapshot
+	history        []provider.ConversationItem
+	steps          []Step
+	iterations     []provider.Usage
+	availableTools []string
+	specs          []tools.Spec
+	totalUsage     provider.Usage
+}
 
+func (a *Agent) newRunState(info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, maxIterations int) runState {
 	history := append([]provider.ConversationItem{}, priorHistory...)
 	history = append(history, provider.UserText(userInput))
-	steps := []Step{{Kind: "user", Title: "prompt", Content: userInput}}
-	iterations := make([]provider.Usage, 0, max(1, maxToolIterations(ctx)))
-	totalUsage := provider.Usage{}
-	seenToolCalls := make(map[string]struct{})
-	contextSnapshot := ContextSnapshot{
-		Signals:          info.SignalSummary(),
-		Semantic:         info.SemanticSummary,
-		RelevantFiles:    info.RelevantFilesSummary(),
-		RelevantSnippets: info.RelevantSnippetsSummary(),
-	}
 	tCtx := buildToolContext(info)
 	specs := a.tools.Specs(tCtx)
 	availableTools := make([]string, 0, len(specs))
 	for _, s := range specs {
 		availableTools = append(availableTools, s.Name)
 	}
+	return runState{
+		history:        history,
+		steps:          []Step{{Kind: "user", Title: "prompt", Content: userInput}},
+		iterations:     make([]provider.Usage, 0, max(1, maxIterations)),
+		seenToolCalls:  make(map[string]struct{}),
+		availableTools: availableTools,
+		specs:          specs,
+		context: ContextSnapshot{
+			Signals:          info.SignalSummary(),
+			Semantic:         info.SemanticSummary,
+			RelevantFiles:    info.RelevantFilesSummary(),
+			RelevantSnippets: info.RelevantSnippetsSummary(),
+		},
+		startedAt: time.Now(),
+	}
+}
 
+func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, onEvent func(StreamEvent) error) (Result, error) {
+	if !a.Configured() {
+		return Result{}, fmt.Errorf("agent not configured")
+	}
 	maxIterations := maxToolIterations(ctx)
+	state := a.newRunState(info, userInput, priorHistory, maxIterations)
+
 	for i := range maxIterations {
-		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(history), a.provider.Summary())
-
-		currentHistory := make([]provider.ConversationItem, len(history))
-		copy(currentHistory, history)
-
-		if i >= maxIterations-2 {
-			frag := system.LoadFragment("max_steps")
-			if frag != "" {
-				currentHistory = append(currentHistory, provider.AssistantText(frag))
-			}
-		}
-
-		resp, err := a.complete(ctx, info, currentHistory, onEvent, specs)
+		tracelog.Logf("agent iteration=%d messages=%d provider=%s", i+1, len(state.history), a.provider.Summary())
+		result, done, err := a.runIteration(ctx, info, i, maxIterations, &state, onEvent)
 		if err != nil {
-			tracelog.Logf("agent completion error=%v", err)
 			return Result{}, err
 		}
-		iterations = append(iterations, resp.Usage)
-		tracelog.Logf(
-			"agent completion iteration=%d tool=%t usage_in=%d usage_out=%d usage_total=%d reasoning=%d cache_read=%d cache_write=%d",
-			i+1,
-			len(resp.PendingCalls) > 0,
-			resp.Usage.InputTokens,
-			resp.Usage.OutputTokens,
-			resp.Usage.TotalTokens,
-			resp.Usage.ReasoningTokens,
-			resp.Usage.CacheReadInputTokens,
-			resp.Usage.CacheWriteInputTokens,
-		)
-		if len(iterations) > 1 {
-			prevInput := iterations[len(iterations)-2].InputTokens
-			inputDelta := resp.Usage.InputTokens - prevInput
-			pct := percentDelta(inputDelta, prevInput)
-			tracelog.Logf(
-				"agent iteration=%d input_delta=%+d input_delta_pct=%.1f input_bloat=%t",
-				i+1,
-				inputDelta,
-				pct,
-				inputDelta > 0 && pct >= inputBloatThresholdPct,
-			)
-		}
-		totalUsage.InputTokens += resp.Usage.InputTokens
-		totalUsage.OutputTokens += resp.Usage.OutputTokens
-		totalUsage.TotalTokens += resp.Usage.TotalTokens
-		totalUsage.ReasoningTokens += resp.Usage.ReasoningTokens
-		totalUsage.CacheReadInputTokens += resp.Usage.CacheReadInputTokens
-		totalUsage.CacheWriteInputTokens += resp.Usage.CacheWriteInputTokens
-		totalUsage.SystemStaticChars += resp.Usage.SystemStaticChars
-		totalUsage.SystemDynamicChars += resp.Usage.SystemDynamicChars
-		totalUsage.ToolsChars += resp.Usage.ToolsChars
-		totalUsage.HistoryChars += resp.Usage.HistoryChars
-		if a.debug {
-			steps = append(steps, Step{Kind: "debug", Title: "provider", Content: fmt.Sprintf("completion %d tokens in:%d out:%d total:%d", i+1, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)})
-		}
-
-		pending := resp.PendingCalls
-		if len(pending) == 0 {
-			message := strings.TrimSpace(resp.FinalText)
-			if message == "" {
-				message = "No useful response yet."
-			}
-			logIterationBloatSummary(iterations)
-			if len(resp.OutputItems) > 0 {
-				history = append(history, resp.OutputItems...)
-			} else {
-				history = append(history, provider.AssistantText(message))
-			}
-			steps = append(steps, Step{Kind: "assistant", Title: "answer", Content: message})
-			return Result{Assistant: message, Steps: steps, Iterations: iterations, Usage: totalUsage, AgentLabel: a.provider.Summary(), Duration: time.Since(startedAt), Context: contextSnapshot, History: history}, nil
-		}
-
-		if len(resp.OutputItems) > 0 {
-			history = append(history, resp.OutputItems...)
-		}
-
-		type toolResult struct {
-			historyItem provider.ConversationItem
-			steps       []Step
-			idx         int
-		}
-		ch := make(chan toolResult, len(pending))
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-
-		for idx, call := range pending {
-			toolName := strings.TrimSpace(call.Name)
-
-			if repairedName := tools.RepairToolName(toolName, availableTools); repairedName != "" {
-				if repairedName != toolName {
-					tracelog.Logf("agent tool repair from=%s to=%s", toolName, repairedName)
-					toolName = repairedName
-				}
-			}
-
-			toolInput := strings.TrimSpace(call.Input)
-			if toolInput == "" && len(call.Arguments) > 0 {
-				toolInput = strings.TrimSpace(string(call.Arguments))
-			}
-			toolKey := toolName + "\x00" + toolInput + "\x00" + strings.TrimSpace(call.CallID)
-
-			mu.Lock()
-			if _, seen := seenToolCalls[toolKey]; seen {
-				mu.Unlock()
-				return Result{}, fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
-			}
-			seenToolCalls[toolKey] = struct{}{}
-			mu.Unlock()
-
-			wg.Add(1)
-			go func(idx int, call provider.ToolInvocation, toolName, toolInput string) {
-				defer wg.Done()
-
-				var subSteps []Step
-				subSteps = append(subSteps, Step{Kind: "tool", Title: toolName, Content: toolInput})
-
-				mu.Lock()
-				if onEvent != nil {
-					_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
-				}
-				mu.Unlock()
-
-				result, err := a.tools.Run(ctx, toolName, toolInput)
-				if err != nil {
-					tracelog.Logf("agent tool error name=%s err=%v", toolName, err)
-					errText := fmt.Sprintf("tool error: %v", err)
-					subSteps = append(subSteps, Step{Kind: "error", Title: toolName, Content: errText})
-
-					mu.Lock()
-					if onEvent != nil {
-						_ = onEvent(StreamEvent{Kind: "error", Title: toolName, Content: errText})
-					}
-					mu.Unlock()
-
-					ch <- toolResult{
-						idx:         idx,
-						steps:       subSteps,
-						historyItem: provider.ToolResultForInvocation(call, errText),
-					}
-					return
-				}
-
-				toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
-				tracelog.Logf("agent tool result name=%s summary=%q output_bytes=%d", toolName, result.Summary, len(result.Output))
-				subSteps = append(subSteps, Step{Kind: "output", Title: toolName, Content: toolOutput})
-
-				mu.Lock()
-				if onEvent != nil {
-					_ = onEvent(StreamEvent{Kind: "output", Title: toolName, Content: toolOutput})
-				}
-				mu.Unlock()
-
-				ch <- toolResult{
-					idx:         idx,
-					steps:       subSteps,
-					historyItem: provider.ToolResultForInvocation(call, toolOutput),
-				}
-			}(idx, call, toolName, toolInput)
-		}
-
-		wg.Wait()
-		close(ch)
-
-		orderedResults := make([]toolResult, len(pending))
-		for res := range ch {
-			orderedResults[res.idx] = res
-		}
-
-		for _, res := range orderedResults {
-			steps = append(steps, res.steps...)
-			history = append(history, res.historyItem)
+		if done {
+			return result, nil
 		}
 	}
 
 	return Result{}, fmt.Errorf("maximum tool iterations reached")
+}
+
+// runIteration performs a single completion + tool-execution step of the
+// agent loop. It returns (result, true, nil) when the agent produced a final
+// answer, and (zero, false, nil) when another iteration is required.
+func (a *Agent) runIteration(ctx context.Context, info system.ContextInfo, i, maxIterations int, state *runState, onEvent func(StreamEvent) error) (Result, bool, error) {
+	currentHistory := make([]provider.ConversationItem, len(state.history))
+	copy(currentHistory, state.history)
+
+	if i >= maxIterations-2 {
+		if frag := system.LoadFragment("max_steps"); frag != "" {
+			currentHistory = append(currentHistory, provider.AssistantText(frag))
+		}
+	}
+
+	resp, err := a.complete(ctx, info, currentHistory, onEvent, state.specs)
+	if err != nil {
+		tracelog.Logf("agent completion error=%v", err)
+		return Result{}, false, err
+	}
+	state.iterations = append(state.iterations, resp.Usage)
+	logIterationUsage(i, resp, state.iterations)
+	accumulateUsage(&state.totalUsage, resp.Usage)
+	if a.debug {
+		state.steps = append(state.steps, Step{Kind: "debug", Title: "provider", Content: fmt.Sprintf("completion %d tokens in:%d out:%d total:%d", i+1, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.TotalTokens)})
+	}
+
+	if len(resp.PendingCalls) == 0 {
+		message := strings.TrimSpace(resp.FinalText)
+		if message == "" {
+			message = "No useful response yet."
+		}
+		logIterationBloatSummary(state.iterations)
+		if len(resp.OutputItems) > 0 {
+			state.history = append(state.history, resp.OutputItems...)
+		} else {
+			state.history = append(state.history, provider.AssistantText(message))
+		}
+		state.steps = append(state.steps, Step{Kind: "assistant", Title: "answer", Content: message})
+		return Result{
+			Assistant:  message,
+			Steps:      state.steps,
+			Iterations: state.iterations,
+			Usage:      state.totalUsage,
+			AgentLabel: a.provider.Summary(),
+			Duration:   time.Since(state.startedAt),
+			Context:    state.context,
+			History:    state.history,
+		}, true, nil
+	}
+
+	if len(resp.OutputItems) > 0 {
+		state.history = append(state.history, resp.OutputItems...)
+	}
+
+	toolSteps, toolHistory, rejected, rejection, err := a.executeTools(ctx, resp.PendingCalls, state.availableTools, onEvent, state.seenToolCalls)
+	if err != nil {
+		return Result{}, false, err
+	}
+	state.steps = append(state.steps, toolSteps...)
+	state.history = append(state.history, toolHistory...)
+	if rejected {
+		message := "Execution cancelled: a file change was rejected."
+		if strings.TrimSpace(rejection) != "" {
+			message = "Execution cancelled: " + rejection
+		}
+		state.steps = append(state.steps, Step{Kind: stepErrorKind, Title: "approval", Content: message})
+		state.history = append(state.history, provider.AssistantText(message))
+		return Result{
+			Assistant:  message,
+			Steps:      state.steps,
+			Iterations: state.iterations,
+			Usage:      state.totalUsage,
+			AgentLabel: a.provider.Summary(),
+			Duration:   time.Since(state.startedAt),
+			Context:    state.context,
+			History:    state.history,
+		}, true, nil
+	}
+	return Result{}, false, nil
+}
+
+// logIterationUsage writes completion diagnostics for a single iteration,
+// including the input growth between consecutive iterations.
+func logIterationUsage(i int, resp provider.Response, iterations []provider.Usage) {
+	tracelog.Logf(
+		"agent completion iteration=%d tool=%t usage_in=%d usage_out=%d usage_total=%d reasoning=%d cache_read=%d cache_write=%d",
+		i+1,
+		len(resp.PendingCalls) > 0,
+		resp.Usage.InputTokens,
+		resp.Usage.OutputTokens,
+		resp.Usage.TotalTokens,
+		resp.Usage.ReasoningTokens,
+		resp.Usage.CacheReadInputTokens,
+		resp.Usage.CacheWriteInputTokens,
+	)
+	if len(iterations) > 1 {
+		prevInput := iterations[len(iterations)-2].InputTokens
+		inputDelta := resp.Usage.InputTokens - prevInput
+		pct := percentDelta(inputDelta, prevInput)
+		tracelog.Logf(
+			"agent iteration=%d input_delta=%+d input_delta_pct=%.1f input_bloat=%t",
+			i+1,
+			inputDelta,
+			pct,
+			inputDelta > 0 && pct >= inputBloatThresholdPct,
+		)
+	}
+}
+
+// accumulateUsage folds a single iteration's usage into the running total.
+func accumulateUsage(total *provider.Usage, u provider.Usage) {
+	total.InputTokens += u.InputTokens
+	total.OutputTokens += u.OutputTokens
+	total.TotalTokens += u.TotalTokens
+	total.ReasoningTokens += u.ReasoningTokens
+	total.CacheReadInputTokens += u.CacheReadInputTokens
+	total.CacheWriteInputTokens += u.CacheWriteInputTokens
+	total.SystemStaticChars += u.SystemStaticChars
+	total.SystemDynamicChars += u.SystemDynamicChars
+	total.ToolsChars += u.ToolsChars
+	total.HistoryChars += u.HistoryChars
+}
+
+type toolResult struct {
+	rejection   string
+	historyItem provider.ConversationItem
+	steps       []Step
+	idx         int
+	rejected    bool
+}
+
+// executeTools runs a batch of tool invocations in parallel and returns the
+// accumulated steps and history items in the original call order.
+func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocation, availableTools []string, onEvent func(StreamEvent) error, seenToolCalls map[string]struct{}) ([]Step, []provider.ConversationItem, bool, string, error) {
+	ch := make(chan toolResult, len(pending))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for idx, call := range pending {
+		toolName := strings.TrimSpace(call.Name)
+		if repairedName := tools.RepairToolName(toolName, availableTools); repairedName != "" {
+			if repairedName != toolName {
+				tracelog.Logf("agent tool repair from=%s to=%s", toolName, repairedName)
+				toolName = repairedName
+			}
+		}
+		toolInput := strings.TrimSpace(call.Input)
+		if toolInput == "" && len(call.Arguments) > 0 {
+			toolInput = strings.TrimSpace(string(call.Arguments))
+		}
+		toolKey := toolName + "\x00" + toolInput + "\x00" + strings.TrimSpace(call.CallID)
+
+		mu.Lock()
+		if _, seen := seenToolCalls[toolKey]; seen {
+			mu.Unlock()
+			return nil, nil, false, "", fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
+		}
+		seenToolCalls[toolKey] = struct{}{}
+		mu.Unlock()
+
+		wg.Add(1)
+		go func(idx int, call provider.ToolInvocation, toolName, toolInput string) {
+			defer wg.Done()
+			res := a.runTool(execCtx, idx, call, toolName, toolInput, onEvent, &mu)
+			if res.rejected {
+				cancel()
+			}
+			ch <- res
+		}(idx, call, toolName, toolInput)
+	}
+
+	wg.Wait()
+	close(ch)
+
+	orderedResults := make([]toolResult, len(pending))
+	for res := range ch {
+		orderedResults[res.idx] = res
+	}
+
+	var toolSteps []Step
+	var toolHistory []provider.ConversationItem
+	rejected := false
+	rejection := ""
+	for _, res := range orderedResults {
+		toolSteps = append(toolSteps, res.steps...)
+		toolHistory = append(toolHistory, res.historyItem)
+		if res.rejected && !rejected {
+			rejected = true
+			rejection = res.rejection
+		}
+	}
+	return toolSteps, toolHistory, rejected, rejection, nil
+}
+
+// runTool executes a single tool invocation in a worker goroutine and
+// produces the ordered result and history item for it.
+func (a *Agent) runTool(ctx context.Context, idx int, call provider.ToolInvocation, toolName, toolInput string, onEvent func(StreamEvent) error, mu *sync.Mutex) toolResult {
+	var subSteps []Step
+	subSteps = append(subSteps, Step{Kind: "tool", Title: toolName, Content: toolInput})
+
+	mu.Lock()
+	if onEvent != nil {
+		_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
+	}
+	mu.Unlock()
+
+	result, err := a.tools.Run(ctx, toolName, toolInput)
+	if err != nil {
+		tracelog.Logf("agent tool error name=%s err=%v", toolName, err)
+		errText := fmt.Sprintf("tool error: %v", err)
+		subSteps = append(subSteps, Step{Kind: stepErrorKind, Title: toolName, Content: errText})
+
+		mu.Lock()
+		if onEvent != nil {
+			_ = onEvent(StreamEvent{Kind: stepErrorKind, Title: toolName, Content: errText})
+		}
+		mu.Unlock()
+
+		return toolResult{
+			idx:         idx,
+			steps:       subSteps,
+			rejection:   err.Error(),
+			rejected:    errors.Is(err, tools.ErrChangeRejected),
+			historyItem: provider.ToolResultForInvocation(call, errText),
+		}
+	}
+
+	toolOutput := strings.TrimSpace(strings.Join([]string{result.Summary, result.Output}, "\n\n"))
+	tracelog.Logf("agent tool result name=%s summary=%q output_bytes=%d", toolName, result.Summary, len(result.Output))
+	subSteps = append(subSteps, Step{Kind: "output", Title: toolName, Content: toolOutput})
+
+	mu.Lock()
+	if onEvent != nil {
+		_ = onEvent(StreamEvent{Kind: "output", Title: toolName, Content: toolOutput})
+	}
+	mu.Unlock()
+
+	return toolResult{
+		idx:         idx,
+		steps:       subSteps,
+		historyItem: provider.ToolResultForInvocation(call, toolOutput),
+	}
 }
 
 func maxToolIterations(ctx context.Context) int {
@@ -388,6 +492,7 @@ func toolSet(specs []tools.Spec) provider.ToolSet {
 			Description: spec.Summary,
 			InputType:   provider.ToolInputText,
 			InputHint:   spec.Usage,
+			Schema:      spec.InputSchema,
 		})
 	}
 	return provider.ToolSet{Local: result}

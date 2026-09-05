@@ -119,3 +119,32 @@ func TestRunExecutesMultipleToolCallsInSingleIteration(t *testing.T) {
 		t.Fatalf("expected cumulative reasoning tokens, got %#v", result.Usage)
 	}
 }
+
+type rejectedLoopTool struct{}
+
+func (r *rejectedLoopTool) Spec() tools.Spec {
+	return tools.Spec{Name: "rejecttool", Summary: "reject tool", Usage: "rejecttool"}
+}
+
+func (r *rejectedLoopTool) Run(context.Context, string) (tools.Result, error) {
+	return tools.Result{}, tools.ErrChangeRejected
+}
+
+func TestRunStopsAfterRejectedChange(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(&rejectedLoopTool{})
+	a := New(&fakeProviderClient{summary: "fake:reject", models: []provider.ModelInfo{{ID: "reject"}}, completeFn: func(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error) {
+		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "rejecttool", CallID: "1", Input: ""}}}, nil
+	}}, registry)
+
+	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Assistant, "Execution cancelled") {
+		t.Fatalf("expected cancellation assistant message, got %q", result.Assistant)
+	}
+	if len(result.History) < 3 {
+		t.Fatalf("expected tool call, tool result, and cancellation in history, got %#v", result.History)
+	}
+}

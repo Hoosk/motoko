@@ -10,7 +10,7 @@ import (
 
 func externalApprovalContext(t *testing.T, allow bool) context.Context {
 	t.Helper()
-	broker := NewQuestionBroker()
+	broker := NewBroker()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
@@ -19,12 +19,12 @@ func externalApprovalContext(t *testing.T, allow bool) context.Context {
 			return
 		}
 		if allow {
-			pending.Resolve(Answer{Selections: []string{approveExternalOption}})
+			pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{approveExternalOption}}})
 			return
 		}
-		pending.Resolve(Answer{Selections: []string{"Deny"}})
+		pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{"Deny"}}})
 	}()
-	return WithQuestionBroker(ctx, broker)
+	return WithBroker(ctx, broker)
 }
 
 func TestReadToolRequiresApprovalForExternalSymlink(t *testing.T) {
@@ -105,8 +105,8 @@ func TestWriteToolUsesApprovedDestinationIfSymlinkChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := NewQuestionBroker()
-	ctx := WithQuestionBroker(context.Background(), broker)
+	broker := NewBroker()
+	ctx := WithBroker(context.Background(), broker)
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := NewWriteTool().Run(ctx, "external-link\napproved")
@@ -122,7 +122,7 @@ func TestWriteToolUsesApprovedDestinationIfSymlinkChanges(t *testing.T) {
 	if err := os.Symlink(second, link); err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(Answer{Selections: []string{approveExternalOption}})
+	pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{approveExternalOption}}})
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +156,8 @@ func TestWriteToolRejectsCanonicalTargetReplacementAfterApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := NewQuestionBroker()
-	ctx := WithQuestionBroker(context.Background(), broker)
+	broker := NewBroker()
+	ctx := WithBroker(context.Background(), broker)
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := NewWriteTool().Run(ctx, "external-link\nchanged")
@@ -173,7 +173,7 @@ func TestWriteToolRejectsCanonicalTargetReplacementAfterApproval(t *testing.T) {
 	if err := os.Symlink(other, target); err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(Answer{Selections: []string{approveExternalOption}})
+	pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{approveExternalOption}}})
 	if err := <-errCh; err == nil {
 		t.Fatal("expected changed canonical target to be rejected")
 	}
@@ -201,8 +201,8 @@ func TestExternalApprovalFailsClosedForMixedSelections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := NewQuestionBroker()
-	ctx := WithQuestionBroker(context.Background(), broker)
+	broker := NewBroker()
+	ctx := WithBroker(context.Background(), broker)
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := NewReadTool().Run(ctx, "external-link")
@@ -212,7 +212,7 @@ func TestExternalApprovalFailsClosedForMixedSelections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(Answer{Selections: []string{approveExternalOption, "Deny"}})
+	pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{approveExternalOption, "Deny"}}})
 	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("expected mixed answer to fail closed, got %v", err)
 	}
@@ -230,8 +230,8 @@ func TestWriteToolRejectsParentReplacementForNewExternalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broker := NewQuestionBroker()
-	ctx := WithQuestionBroker(context.Background(), broker)
+	broker := NewBroker()
+	ctx := WithBroker(context.Background(), broker)
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := NewWriteTool().Run(ctx, "external-dir/new/file.txt\nchanged")
@@ -247,7 +247,7 @@ func TestWriteToolRejectsParentReplacementForNewExternalFile(t *testing.T) {
 	if err := os.Mkdir(targetDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pending.Resolve(Answer{Selections: []string{approveExternalOption}})
+	pending.Resolve(DialogDecision{Answer: Answer{Selections: []string{approveExternalOption}}})
 	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "parent path changed") {
 		t.Fatalf("expected replaced parent to be rejected, got %v", err)
 	}

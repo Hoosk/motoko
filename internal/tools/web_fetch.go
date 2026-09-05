@@ -24,9 +24,10 @@ func NewWebFetchTool() *WebFetchTool {
 
 func (t *WebFetchTool) Spec() Spec {
 	return Spec{
-		Name:    "web_fetch",
-		Summary: "Downloads the content of a URL and extracts clean readable text without HTML tags.",
-		Usage:   "web_fetch <url>",
+		Name:        "web_fetch",
+		Summary:     "Downloads the content of a URL and extracts clean readable text without HTML tags.",
+		Usage:       "web_fetch <url>",
+		InputSchema: schemaWebFetch,
 	}
 }
 

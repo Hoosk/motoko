@@ -23,6 +23,26 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandCreatesApprovalAction(t *testing.T) {
+	resp := PrepareCommand(types.ModePlan, "pwd")
+	if resp.Action == nil || resp.Action.Type != types.ActionShellApproval {
+		t.Fatalf("expected shell approval action, got %#v", resp.Action)
+	}
+	if resp.Action.ShellCommand != "pwd" || resp.Action.ShellReason == "" {
+		t.Fatalf("unexpected approval action %#v", resp.Action)
+	}
+	if len(resp.Entries) != 2 || !strings.Contains(resp.Entries[1].Text, "Awaiting shell approval") {
+		t.Fatalf("unexpected approval response %#v", resp)
+	}
+}
+
+func TestPrepareCommandCreatesImmediateAction(t *testing.T) {
+	resp := PrepareCommand(types.ModeBuild, "pwd")
+	if resp.Action == nil || resp.Action.Type != types.ActionShell {
+		t.Fatalf("expected immediate shell action, got %#v", resp.Action)
+	}
+}
+
 func TestRunCommandAndTrimOutput(t *testing.T) {
 	result := RunCommand(context.Background(), "printf hola")
 	if result.ExitCode != 0 || result.Output != "hola" {

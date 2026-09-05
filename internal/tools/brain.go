@@ -24,9 +24,10 @@ func NewBrainWriteTool(p BrainProvider) *BrainWriteTool {
 
 func (t *BrainWriteTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_write",
-		Summary: "Write or update a file in the session brain",
-		Usage:   "brain_write <filename> <content>",
+		Name:        "brain_write",
+		Summary:     "Write or update a file in the session brain",
+		Usage:       "brain_write <filename> <content>",
+		InputSchema: schemaBrainWrite,
 	}
 }
 
@@ -114,77 +115,81 @@ func NewBrainReadTool(p BrainProvider) *BrainReadTool {
 
 func (t *BrainReadTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_read",
-		Summary: "Read a file from the session brain, optionally with pagination",
-		Usage:   "brain_read <filename> [offset] [limit]",
+		Name:        "brain_read",
+		Summary:     "Read a file from the session brain, optionally with pagination",
+		Usage:       "brain_read <filename> [offset] [limit]",
+		InputSchema: schemaBrainRead,
 	}
 }
 
 func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
 	if parsed := parseJSONArgs(args); parsed != nil {
-		filename := jsonStr(parsed, "filename", "file", "name")
-		if filename == "" {
-			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
-		}
+		return t.runJSON(ctx, parsed)
+	}
+	return t.runPlain(ctx, args)
+}
 
-		br := GetBrain(ctx)
-		if br == nil {
-			br = t.provider.GetBrain()
-		}
-		if br == nil {
-			return Result{}, fmt.Errorf("session brain not initialized")
-		}
+// readBrain resolves the session brain from the tool context, falling back
+// to the provider when the context carries no brain.
+func (t *BrainReadTool) readBrain(ctx context.Context) (*brain.Brain, error) {
+	br := GetBrain(ctx)
+	if br == nil {
+		br = t.provider.GetBrain()
+	}
+	if br == nil {
+		return nil, fmt.Errorf("session brain not initialized")
+	}
+	return br, nil
+}
 
-		content, err := br.Read(filename)
-		if err != nil {
-			return Result{}, err
-		}
-
-		offset := 1
-		limit := 200
-		if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
-			if value < 1 {
-				return Result{}, fmt.Errorf("invalid offset: %d", value)
-			}
-			offset = value
-		}
-		if value, ok := jsonInt(parsed, "limit", "lines", "count"); ok {
-			if value < 1 {
-				return Result{}, fmt.Errorf("invalid limit: %d", value)
-			}
-			limit = value
-		}
-
-		if offset == 1 && limit == 200 && !jsonHas(parsed, "offset", "line", "start") && !jsonHas(parsed, "limit", "lines", "count") {
-			return Result{
-				Spec:    t.Spec(),
-				Summary: fmt.Sprintf("Successfully read brain file %s", filename),
-				Output:  content,
-			}, nil
-		}
-
-		lines := strings.Split(content, "\n")
-		var paginatedLines []string
-		for i := offset - 1; i < len(lines) && len(paginatedLines) < limit; i++ {
-			paginatedLines = append(paginatedLines, fmt.Sprintf("%d: %s", i+1, lines[i]))
-		}
-
-		if len(paginatedLines) == 0 {
-			return Result{
-				Spec:    t.Spec(),
-				Summary: fmt.Sprintf("No visible content in %s from line %d.", filename, offset),
-				Output:  "",
-			}, nil
-		}
-
-		return Result{
-			Spec:    t.Spec(),
-			Summary: fmt.Sprintf("Successfully read brain file %s from line %d", filename, offset),
-			Output:  strings.Join(paginatedLines, "\n"),
-		}, nil
+func (t *BrainReadTool) runJSON(ctx context.Context, parsed map[string]any) (Result, error) {
+	filename := jsonStr(parsed, "filename", "file", "name")
+	if filename == "" {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
+	br, err := t.readBrain(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	content, err := br.Read(filename)
+	if err != nil {
+		return Result{}, err
+	}
+
+	offset, limit, err := readRangeFrom(parsed)
+	if err != nil {
+		return Result{}, err
+	}
+	if offset == 1 && limit == 200 && !jsonHas(parsed, "offset", "line", "start") && !jsonHas(parsed, "limit", "lines", "count") {
+		return Result{
+			Spec:    t.Spec(),
+			Summary: fmt.Sprintf("Successfully read brain file %s", filename),
+			Output:  content,
+		}, nil
+	}
+	return paginatedResult(t.Spec(), filename, content, offset, limit, "Successfully read brain file %s from line %d")
+}
+
+// readRangeFrom extracts and validates the offset/limit pair from JSON args.
+func readRangeFrom(parsed map[string]any) (offset, limit int, err error) {
+	offset, limit = 1, 200
+	if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
+		if value < 1 {
+			return 0, 0, fmt.Errorf("invalid offset: %d", value)
+		}
+		offset = value
+	}
+	if value, ok := jsonInt(parsed, "limit", "lines", "count"); ok {
+		if value < 1 {
+			return 0, 0, fmt.Errorf("invalid limit: %d", value)
+		}
+		limit = value
+	}
+	return offset, limit, nil
+}
+
+func (t *BrainReadTool) runPlain(ctx context.Context, args string) (Result, error) {
 	parts := strings.Fields(args)
 	if len(parts) == 0 {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
@@ -198,14 +203,10 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 		filename = parts[0]
 	}
 
-	br := GetBrain(ctx)
-	if br == nil {
-		br = t.provider.GetBrain()
+	br, err := t.readBrain(ctx)
+	if err != nil {
+		return Result{}, err
 	}
-	if br == nil {
-		return Result{}, fmt.Errorf("session brain not initialized")
-	}
-
 	content, err := br.Read(filename)
 	if err != nil {
 		return Result{}, err
@@ -219,23 +220,38 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 		}, nil
 	}
 
-	offset := 1
-	limit := 200
+	offset, limit, err := readRangeFromParts(parts)
+	if err != nil {
+		return Result{}, err
+	}
+	return paginatedResult(t.Spec(), filename, content, offset, limit, "Brain file %s read from line %d (%d lines)")
+}
+
+// readRangeFromParts extracts and validates the offset/limit pair from the
+// positional form `filename [offset] [limit]`.
+func readRangeFromParts(parts []string) (offset, limit int, err error) {
+	offset, limit = 1, 200
 	if len(parts) >= 2 {
-		value, err := strconv.Atoi(parts[1])
-		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
+		value, parseErr := strconv.Atoi(parts[1])
+		if parseErr != nil || value < 1 {
+			return 0, 0, fmt.Errorf("invalid offset: %s", parts[1])
 		}
 		offset = value
 	}
 	if len(parts) >= 3 {
-		value, err := strconv.Atoi(parts[2])
-		if err != nil || value < 1 {
-			return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
+		value, parseErr := strconv.Atoi(parts[2])
+		if parseErr != nil || value < 1 {
+			return 0, 0, fmt.Errorf("invalid limit: %s", parts[2])
 		}
 		limit = value
 	}
+	return offset, limit, nil
+}
 
+// paginatedResult renders the line-numbered slice of content. format is a
+// printf template receiving the filename, offset and (where included) the
+// line count.
+func paginatedResult(spec Spec, filename, content string, offset, limit int, format string) (Result, error) {
 	lines := strings.Split(content, "\n")
 	var paginatedLines []string
 	for i := offset - 1; i < len(lines) && len(paginatedLines) < limit; i++ {
@@ -244,15 +260,14 @@ func (t *BrainReadTool) Run(ctx context.Context, args string) (Result, error) {
 
 	if len(paginatedLines) == 0 {
 		return Result{
-			Spec:    t.Spec(),
+			Spec:    spec,
 			Summary: fmt.Sprintf("No visible content in %s from line %d.", filename, offset),
 			Output:  "",
 		}, nil
 	}
-
 	return Result{
-		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Brain file %s read from line %d (%d lines).", filename, offset, len(paginatedLines)),
+		Spec:    spec,
+		Summary: fmt.Sprintf(format, filename, offset, len(paginatedLines)),
 		Output:  strings.Join(paginatedLines, "\n"),
 	}, nil
 }
@@ -268,9 +283,10 @@ func NewBrainListTool(p BrainProvider) *BrainListTool {
 
 func (t *BrainListTool) Spec() Spec {
 	return Spec{
-		Name:    "brain_list",
-		Summary: "List all files in the session brain",
-		Usage:   "brain_list",
+		Name:        "brain_list",
+		Summary:     "List all files in the session brain",
+		Usage:       "brain_list",
+		InputSchema: schemaBrainList,
 	}
 }
 

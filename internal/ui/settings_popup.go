@@ -16,16 +16,20 @@ const (
 	settingsModeList = iota
 	settingsModeEditIterations
 	settingsModePickVerbosity
+	settingsModePickApproval
 )
 
 var thinkingVerbosityOptions = []string{"normal", "concise", "caveman"}
+var editApprovalOptions = []string{config.EditApprovalAuto, config.EditApprovalAsk}
 
 type settingsPopupState struct {
 	stagedVerbosity string
+	stagedApproval  string
 	status          string
 	buffer          string
 	index           int
 	verbosityIndex  int
+	approvalIndex   int
 	mode            int
 	active          bool
 }
@@ -36,6 +40,7 @@ func (p *settingsPopupState) Open() {
 	p.buffer = ""
 	p.status = ""
 	p.stagedVerbosity = ""
+	p.stagedApproval = ""
 	p.active = true
 }
 
@@ -50,6 +55,9 @@ func (p *settingsPopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 	if p.stagedVerbosity == "" {
 		p.stagedVerbosity = firstNonEmpty(cfg.ThinkingVerbosity, "normal")
 	}
+	if p.stagedApproval == "" {
+		p.stagedApproval = config.NormalizeEditApproval(cfg.EditApproval)
+	}
 	rows := p.rows(cfg)
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch p.mode {
@@ -57,6 +65,8 @@ func (p *settingsPopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 			return p.updateIterations(key)
 		case settingsModePickVerbosity:
 			return p.updateVerbosityPicker(key)
+		case settingsModePickApproval:
+			return p.updateApprovalPicker(key)
 		}
 
 		switch key.String() {
@@ -85,8 +95,14 @@ func (p *settingsPopupState) Update(msg tea.Msg, runtime *app.Runtime) tea.Cmd {
 				p.buffer = strconv.Itoa(max(1, currentMaxIterations(cfg, p.buffer)))
 				p.status = ""
 				return nil
+			case "edit_approval":
+				p.mode = settingsModePickApproval
+				p.approvalIndex = optionIndex(editApprovalOptions, p.stagedApproval)
+				p.status = ""
+				return nil
 			case "save":
 				cfg.ThinkingVerbosity = p.stagedVerbosity
+				cfg.EditApproval = config.NormalizeEditApproval(p.stagedApproval)
 				if value, err := strconv.Atoi(strings.TrimSpace(p.buffer)); err == nil && value > 0 {
 					cfg.MaxIterations = value
 				} else if cfg.MaxIterations <= 0 {
@@ -142,21 +158,33 @@ func (p *settingsPopupState) updateIterations(key tea.KeyMsg) tea.Cmd {
 }
 
 func (p *settingsPopupState) updateVerbosityPicker(key tea.KeyMsg) tea.Cmd {
+	return p.updateOptionPicker(key, &p.verbosityIndex, thinkingVerbosityOptions, func(value string) {
+		p.stagedVerbosity = value
+	})
+}
+
+func (p *settingsPopupState) updateApprovalPicker(key tea.KeyMsg) tea.Cmd {
+	return p.updateOptionPicker(key, &p.approvalIndex, editApprovalOptions, func(value string) {
+		p.stagedApproval = value
+	})
+}
+
+func (p *settingsPopupState) updateOptionPicker(key tea.KeyMsg, index *int, options []string, selectOption func(string)) tea.Cmd {
 	switch key.String() {
 	case keyEsc:
 		p.mode = settingsModeList
 		return nil
 	case keyUp, keyCtrlP:
-		p.verbosityIndex--
-		if p.verbosityIndex < 0 {
-			p.verbosityIndex = len(thinkingVerbosityOptions) - 1
+		*index--
+		if *index < 0 {
+			*index = len(options) - 1
 		}
 		return nil
 	case keyDown, keyCtrlN, keyTab:
-		p.verbosityIndex = (p.verbosityIndex + 1) % len(thinkingVerbosityOptions)
+		*index = (*index + 1) % len(options)
 		return nil
 	case keyEnter:
-		p.stagedVerbosity = thinkingVerbosityOptions[p.verbosityIndex]
+		selectOption(options[*index])
 		p.mode = settingsModeList
 		return nil
 	default:
@@ -196,6 +224,19 @@ func (p settingsPopupState) View(runtime *app.Runtime) string {
 			"",
 			renderProviderField(0, 0, "Max tool iterations", p.buffer),
 		)
+	case settingsModePickApproval:
+		lines = append(lines,
+			styles.PopupMutedStyle.Render("↑↓ navigate  Enter select  Esc cancel"),
+			"",
+		)
+		for i, option := range editApprovalOptions {
+			line := option + questionDescriptionSuffix(approvalDescription(option))
+			if i == p.approvalIndex {
+				lines = append(lines, styles.PopupSelectionStyle.Render(line))
+			} else {
+				lines = append(lines, styles.PopupFieldValueStyle.Render(line))
+			}
+		}
 	default:
 		lines = append(lines,
 			styles.PopupMutedStyle.Render("↑↓ navigate  Enter edit/select  Esc cancel"),
@@ -224,9 +265,11 @@ type settingsRow struct {
 
 func (p settingsPopupState) rows(cfg *config.AppConfig) []settingsRow {
 	verbosity := firstNonEmpty(p.stagedVerbosity, cfg.ThinkingVerbosity, "normal")
+	approval := config.NormalizeEditApproval(firstNonEmpty(p.stagedApproval, cfg.EditApproval))
 	iterations := strconv.Itoa(max(1, currentMaxIterations(cfg, p.buffer)))
 	return []settingsRow{
 		{key: "thinking_verbosity", label: "Thinking verbosity", value: verbosity},
+		{key: "edit_approval", label: "File edit approval", value: approval},
 		{key: "max_iterations", label: "Max tool iterations", value: iterations},
 		{key: "save", label: "Save", value: "Persist changes"},
 		{key: "cancel", label: "Cancel", value: "Discard changes"},
@@ -261,6 +304,22 @@ func verbosityDescription(option string) string {
 	default:
 		return "default reasoning behavior"
 	}
+}
+
+func approvalDescription(option string) string {
+	if option == config.EditApprovalAsk {
+		return "review each file diff before writing"
+	}
+	return "apply file edits automatically"
+}
+
+func optionIndex(options []string, current string) int {
+	for i, option := range options {
+		if strings.EqualFold(option, current) {
+			return i
+		}
+	}
+	return 0
 }
 
 func saveRuntimeConfig(runtime *app.Runtime, message string) tea.Cmd {

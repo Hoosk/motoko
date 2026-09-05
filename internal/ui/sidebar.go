@@ -8,6 +8,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/styles"
+	"github.com/Hoosk/motoko/internal/system"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -34,7 +35,7 @@ func (m SidebarModel) Init() tea.Cmd {
 
 func (m SidebarModel) Update(msg tea.Msg) (SidebarModel, tea.Cmd) {
 	switch msg.(type) {
-	case TachikomaStatusMsg, ContextInfoMsg, ContextTokensMsg, ResponseAppliedMsg, AgentResultMsg, AgentStreamBatchMsg, TaskEventMsg, ScheduleEventMsg, SessionLoadedMsg:
+	case TachikomaStatusMsg, ContextInfoMsg, ContextTokensMsg, ResponseAppliedMsg, AgentResultMsg, AgentStreamBatchMsg, TaskEventMsg, ScheduleEventMsg, SessionLoadedMsg, DialogRequestedMsg, ShellApprovalResultMsg:
 		m.dirty = true
 	}
 	return m, nil
@@ -80,142 +81,13 @@ func (m *SidebarModel) View() string {
 	usableWidth := contentWidth - 2 // Usable text width inside padding (1 on each side)
 
 	var content []string
-	if pending := strings.TrimSpace(m.runtime.PendingApproval()); pending != "" {
-		content = append(content,
-			renderHeader("APPROVAL", styles.BoldNeonStyle, contentWidth),
-			styles.ErrorStyle.Render(truncate("  "+pending, contentWidth)),
-			"",
-		)
-	}
-	if tasks := m.runtime.ActiveTasks(); tasks > 0 {
-		content = append(content,
-			renderHeader("TASKS", styles.BoldBlueStyle, contentWidth),
-			styles.WhiteStyle.Render(fmt.Sprintf("%d active", tasks)),
-			"",
-		)
-	}
-
-	if len(info.RelevantFiles) > 0 {
-		fileLines := []string{renderHeader("FILES", styles.BoldBlueStyle, contentWidth)}
-		limit := 50
-		for i, file := range info.RelevantFiles {
-			if i >= limit {
-				remaining := len(info.RelevantFiles) - limit
-				fileLines = append(fileLines, styles.GrayStyle.Render(fmt.Sprintf("  … and %d more", remaining)))
-				break
-			}
-			parts := strings.Split(file, " | ")
-			name := parts[0]
-			maxNameLen := usableWidth - 3 // "▫  " is 3 chars
-			if maxNameLen > 0 {
-				name = contractPath(name, maxNameLen)
-			}
-			fileLines = append(fileLines, styles.WhiteStyle.Render("▫  ")+name)
-		}
-		content = append(content, fileLines...)
-	}
-
-	if len(info.ModifiedFiles) > 0 {
-		modLines := []string{"", renderHeader("MODIFIED", styles.BoldVioletStyle, contentWidth)}
-		limit := 50
-		for i, file := range info.ModifiedFiles {
-			if i >= limit {
-				remaining := len(info.ModifiedFiles) - limit
-				modLines = append(modLines, styles.GrayStyle.Render(fmt.Sprintf("  … and %d more", remaining)))
-				break
-			}
-			maxNameLen := usableWidth - 3 // "✎  " is 3 chars
-			name := file
-			if maxNameLen > 0 {
-				name = contractPath(name, maxNameLen)
-			}
-			modLines = append(modLines, styles.PinkStyle.Render("✎  ")+name)
-		}
-		content = append(content, modLines...)
-	}
-
-	if info.HasGit {
-		gitLines := []string{"", renderHeader("GIT", styles.BoldVioletStyle, contentWidth)}
-		gitLines = append(gitLines, fmt.Sprintf("⎇  %s", styles.VioletStyle.Render(info.GitBranch)))
-		if info.GitDirty {
-			var statusParts []string
-			if info.Staged > 0 {
-				statusParts = append(statusParts, styles.DiffAddStyle.Render(fmt.Sprintf("+%d staged", info.Staged)))
-			}
-			if info.Unstaged > 0 {
-				statusParts = append(statusParts, styles.DiffRemoveStyle.Render(fmt.Sprintf("-%d unstaged", info.Unstaged)))
-			}
-			if info.Untracked > 0 {
-				statusParts = append(statusParts, styles.GrayStyle.Render(fmt.Sprintf("?%d untracked", info.Untracked)))
-			}
-			if len(statusParts) > 0 {
-				gitLines = append(gitLines, "  "+strings.Join(statusParts, "  "))
-			}
-		} else {
-			gitLines = append(gitLines, "  "+styles.GrayStyle.Render("✔ clean"))
-		}
-		content = append(content, gitLines...)
-	}
-
-	activeSubagents := m.runtime.ActiveSubagents()
-	if len(activeSubagents) > 0 {
-		subagentLines := []string{"", renderHeader("SUBAGENTS", styles.BoldBlueStyle, contentWidth)}
-		for _, name := range activeSubagents {
-			subagentLines = append(subagentLines, fmt.Sprintf("%s %s", styles.BlueStyle.Render("✦"), styles.WhiteStyle.Render(name)))
-		}
-		content = append(content, subagentLines...)
-	}
-
-	var hasTachikomas bool
-	var tachikomaLines []string
-	var names []string
-	if info.Signals != nil {
-		for name := range info.Signals {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		if len(names) > 0 {
-			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
-		}
-		for _, name := range names {
-			status := info.Signals[name]
-			maxStatusLen := contentWidth - 17
-			if maxStatusLen > 0 {
-				status = truncate(status, maxStatusLen)
-			} else {
-				status = ""
-			}
-			statusStyle := styles.GrayStyle
-			lowerStatus := strings.ToLower(status)
-			if strings.Contains(lowerStatus, "run") || strings.Contains(lowerStatus, "ok") || strings.Contains(lowerStatus, "activ") {
-				statusStyle = styles.NeonStyle
-			} else if strings.Contains(lowerStatus, "fail") || strings.Contains(lowerStatus, "err") {
-				statusStyle = styles.PinkStyle
-			}
-			tachikomaLines = append(tachikomaLines, fmt.Sprintf("%s %-12s %s", styles.NeonStyle.Render("⬢"), name, statusStyle.Render(status)))
-			hasTachikomas = true
-		}
-	}
-
-	var onDemandNames []string
-	if info.OnDemandSignals != nil {
-		for name := range info.OnDemandSignals {
-			onDemandNames = append(onDemandNames, name)
-		}
-		sort.Strings(onDemandNames)
-		if len(onDemandNames) > 0 && len(tachikomaLines) == 0 {
-			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
-		}
-		for _, name := range onDemandNames {
-			status := truncate("on-demand", contentWidth-17)
-			tachikomaLines = append(tachikomaLines, fmt.Sprintf("%s %-12s %s", styles.BlueStyle.Render("⬡"), name, styles.GrayStyle.Render(status)))
-			hasTachikomas = true
-		}
-	}
-
-	if hasTachikomas {
-		content = append(content, tachikomaLines...)
-	}
+	content = append(content, m.renderDialogSection(contentWidth)...)
+	content = append(content, m.renderTaskSection(contentWidth)...)
+	content = append(content, m.renderFilesSection(info, contentWidth, usableWidth)...)
+	content = append(content, m.renderModifiedSection(info, contentWidth, usableWidth)...)
+	content = append(content, m.renderGitSection(info, contentWidth)...)
+	content = append(content, m.renderSubagentSection(contentWidth)...)
+	content = append(content, m.renderTachikomaSection(info, contentWidth)...)
 
 	if len(content) == 0 {
 		content = append(content,
@@ -245,6 +117,160 @@ func (m *SidebarModel) View() string {
 	m.cached = style.Render(strings.Join(content, "\n"))
 	m.dirty = false
 	return m.cached
+}
+
+func (m *SidebarModel) renderDialogSection(contentWidth int) []string {
+	if pending := m.runtime.PendingDialogs(); pending > 0 {
+		return []string{
+			renderHeader("DIALOGS", styles.BoldNeonStyle, contentWidth),
+			styles.ErrorStyle.Render(fmt.Sprintf("  %d dialog(s) pending", pending)),
+			"",
+		}
+	}
+	return nil
+}
+
+func (m *SidebarModel) renderTaskSection(contentWidth int) []string {
+	if tasks := m.runtime.ActiveTasks(); tasks > 0 {
+		return []string{
+			renderHeader("TASKS", styles.BoldBlueStyle, contentWidth),
+			styles.WhiteStyle.Render(fmt.Sprintf("%d active", tasks)),
+			"",
+		}
+	}
+	return nil
+}
+
+func (m *SidebarModel) renderFilesSection(info system.ContextInfo, contentWidth, usableWidth int) []string {
+	if len(info.RelevantFiles) == 0 {
+		return nil
+	}
+	fileLines := []string{renderHeader("FILES", styles.BoldBlueStyle, contentWidth)}
+	limit := 50
+	for i, file := range info.RelevantFiles {
+		if i >= limit {
+			remaining := len(info.RelevantFiles) - limit
+			fileLines = append(fileLines, styles.GrayStyle.Render(fmt.Sprintf("  … and %d more", remaining)))
+			break
+		}
+		parts := strings.Split(file, " | ")
+		name := parts[0]
+		maxNameLen := usableWidth - 3 // "▫  " is 3 chars
+		if maxNameLen > 0 {
+			name = contractPath(name, maxNameLen)
+		}
+		fileLines = append(fileLines, styles.WhiteStyle.Render("▫  ")+name)
+	}
+	return fileLines
+}
+
+func (m *SidebarModel) renderModifiedSection(info system.ContextInfo, contentWidth, usableWidth int) []string {
+	if len(info.ModifiedFiles) == 0 {
+		return nil
+	}
+	modLines := []string{"", renderHeader("MODIFIED", styles.BoldVioletStyle, contentWidth)}
+	limit := 50
+	for i, file := range info.ModifiedFiles {
+		if i >= limit {
+			remaining := len(info.ModifiedFiles) - limit
+			modLines = append(modLines, styles.GrayStyle.Render(fmt.Sprintf("  … and %d more", remaining)))
+			break
+		}
+		maxNameLen := usableWidth - 3 // "✎  " is 3 chars
+		name := file
+		if maxNameLen > 0 {
+			name = contractPath(name, maxNameLen)
+		}
+		modLines = append(modLines, styles.PinkStyle.Render("✎  ")+name)
+	}
+	return modLines
+}
+
+func (m *SidebarModel) renderGitSection(info system.ContextInfo, contentWidth int) []string {
+	if !info.HasGit {
+		return nil
+	}
+	gitLines := []string{"", renderHeader("GIT", styles.BoldVioletStyle, contentWidth)}
+	gitLines = append(gitLines, fmt.Sprintf("⎇  %s", styles.VioletStyle.Render(info.GitBranch)))
+	if info.GitDirty {
+		var statusParts []string
+		if info.Staged > 0 {
+			statusParts = append(statusParts, styles.DiffAddStyle.Render(fmt.Sprintf("+%d staged", info.Staged)))
+		}
+		if info.Unstaged > 0 {
+			statusParts = append(statusParts, styles.DiffRemoveStyle.Render(fmt.Sprintf("-%d unstaged", info.Unstaged)))
+		}
+		if info.Untracked > 0 {
+			statusParts = append(statusParts, styles.GrayStyle.Render(fmt.Sprintf("?%d untracked", info.Untracked)))
+		}
+		if len(statusParts) > 0 {
+			gitLines = append(gitLines, "  "+strings.Join(statusParts, "  "))
+		}
+	} else {
+		gitLines = append(gitLines, "  "+styles.GrayStyle.Render("✔ clean"))
+	}
+	return gitLines
+}
+
+func (m *SidebarModel) renderSubagentSection(contentWidth int) []string {
+	activeSubagents := m.runtime.ActiveSubagents()
+	if len(activeSubagents) == 0 {
+		return nil
+	}
+	subagentLines := []string{"", renderHeader("SUBAGENTS", styles.BoldBlueStyle, contentWidth)}
+	for _, name := range activeSubagents {
+		subagentLines = append(subagentLines, fmt.Sprintf("%s %s", styles.BlueStyle.Render("✦"), styles.WhiteStyle.Render(name)))
+	}
+	return subagentLines
+}
+
+func (m *SidebarModel) renderTachikomaSection(info system.ContextInfo, contentWidth int) []string {
+	var tachikomaLines []string
+
+	var names []string
+	if info.Signals != nil {
+		for name := range info.Signals {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if len(names) > 0 {
+			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
+		}
+		for _, name := range names {
+			status := info.Signals[name]
+			maxStatusLen := contentWidth - 17
+			if maxStatusLen > 0 {
+				status = truncate(status, maxStatusLen)
+			} else {
+				status = ""
+			}
+			statusStyle := styles.GrayStyle
+			lowerStatus := strings.ToLower(status)
+			if strings.Contains(lowerStatus, "run") || strings.Contains(lowerStatus, "ok") || strings.Contains(lowerStatus, "activ") {
+				statusStyle = styles.NeonStyle
+			} else if strings.Contains(lowerStatus, "fail") || strings.Contains(lowerStatus, "err") {
+				statusStyle = styles.PinkStyle
+			}
+			tachikomaLines = append(tachikomaLines, fmt.Sprintf("%s %-12s %s", styles.NeonStyle.Render("⬢"), name, statusStyle.Render(status)))
+		}
+	}
+
+	if info.OnDemandSignals != nil {
+		var onDemandNames []string
+		for name := range info.OnDemandSignals {
+			onDemandNames = append(onDemandNames, name)
+		}
+		sort.Strings(onDemandNames)
+		if len(onDemandNames) > 0 && len(tachikomaLines) == 0 {
+			tachikomaLines = append(tachikomaLines, "", renderHeader("TACHIKOMAS", styles.BoldNeonStyle, contentWidth))
+		}
+		for _, name := range onDemandNames {
+			status := truncate("on-demand", contentWidth-17)
+			tachikomaLines = append(tachikomaLines, fmt.Sprintf("%s %-12s %s", styles.BlueStyle.Render("⬡"), name, styles.GrayStyle.Render(status)))
+		}
+	}
+
+	return tachikomaLines
 }
 
 func contractPath(path string, maxLength int) string {

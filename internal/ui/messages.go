@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/app"
 	"github.com/Hoosk/motoko/internal/app/scheduleman"
 	"github.com/Hoosk/motoko/internal/provider"
@@ -103,10 +104,39 @@ type ThinkingBudgetSelectedMsg struct {
 	Budget int
 }
 
-type QuestionAskedMsg struct {
-	Pending *tools.PendingQuestion
+type DialogRequestedMsg struct {
+	Pending *tools.Pending
+}
+
+type ToolResultMsg struct {
+	Err    error
+	Name   string
+	Result tools.Result
 }
 
 type ScheduleEventMsg struct {
 	Event scheduleman.Event
 }
+
+type ShellResultMsg struct {
+	Result app.ShellResult
+}
+
+type ShellApprovalResultMsg struct {
+	Err     error
+	Command string
+}
+
+type TaskEventMsg struct {
+	Event app.TaskEvent
+}
+
+type AgentResultMsg struct {
+	Err       error
+	Prompt    string
+	Assistant string
+	Result    agent.Result
+	RequestID int
+}
+
+type hideNotificationMsg struct{}

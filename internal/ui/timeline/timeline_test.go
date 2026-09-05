@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/app"
@@ -74,6 +75,34 @@ func TestWrapText(t *testing.T) {
 				t.Errorf("WrapText(%q, %d) =\n%q\nwant:\n%q", tt.text, tt.width, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRenderAssistantMarkdownAlwaysInterpretsCommonSyntax(t *testing.T) {
+	input := "# Title\n\n**important**\n\n```go\nfmt.Println(\"hi\")\n```"
+	got := StripANSI(renderAssistantMarkdown(input, 60))
+
+	for _, want := range []string{"Title", "important", "fmt.Println(\"hi\")"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered markdown %q does not contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "**important**") || strings.Contains(got, "```go") {
+		t.Fatalf("markdown markers were not interpreted: %q", got)
+	}
+}
+
+func TestAppendRenderedBlockPreservesEmptySelectableContent(t *testing.T) {
+	m := New(80, 10)
+	m.AppendRenderedBlock("\x1b[1m▎ \x1b[0m", []RenderLine{{
+		Plain:      "▎ ",
+		Content:    "",
+		ContentX:   AssistantContentX,
+		Selectable: true,
+	}}, false)
+
+	if got := m.RenderLines[0].Content; got != "" {
+		t.Fatalf("expected empty content for visual rail line, got %q", got)
 	}
 }
 

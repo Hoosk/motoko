@@ -14,7 +14,6 @@ import (
 	openai "github.com/openai/openai-go/v3"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/Hoosk/motoko/internal/provider"
 )
@@ -33,63 +32,68 @@ func (c *openAIClient) StreamComplete(ctx context.Context, systemPrompt string, 
 		return c.streamChat(ctx, systemPrompt, messages, tools, onDelta)
 	}
 
+	// /responses path: use our own SSE parser instead of the SDK streamer.
+	// The openai-go SDK streamer cannot handle SSE keep-alive comment lines
+	// (": keep-alive") emitted by providers like OpenCode Zen, which creates
+	// an event with an empty data field that json.Unmarshal rejects with
+	// "unexpected end of JSON input".
+	return c.streamResponses(ctx, systemPrompt, messages, tools, onDelta)
+}
+
+// streamResponses streams the OpenAI /responses endpoint using a raw HTTP SSE
+// parser, bypassing the SDK streamer so that keep-alive comment lines emitted
+// by gateway providers (": keep-alive\n\n") are silently ignored.
+func (c *openAIClient) streamResponses(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {
 	sessionID, requestID := provider.GetTelemetry(ctx)
 	params := buildResponseParams(c.Model(), systemPrompt, messages, tools, c.thinkingBudget, sessionID)
-	reqOpts := make([]openaioption.RequestOption, 0)
+
+	// Marshal the SDK params to a plain map and add stream:true.
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	var body map[string]any
+	if unmarshalErr := json.Unmarshal(paramsBytes, &body); unmarshalErr != nil {
+		return provider.Response{}, unmarshalErr
+	}
+	body["stream"] = true
+
+	headers := provider.BuildAuthHeaders(c.BaseURL(), c.APIKey())
 	telemetryHeaders := map[string]string{}
 	provider.ApplyTelemetryHeaders(c.ProviderKind(), telemetryHeaders, sessionID, requestID)
 	for k, v := range telemetryHeaders {
-		reqOpts = append(reqOpts, openaioption.WithHeader(k, v))
+		headers[k] = v
 	}
-	stream := c.sdkClient.Responses.NewStreaming(ctx, params, reqOpts...)
-	defer func() { _ = stream.Close() }()
 
-	var completed *responses.Response
-	for stream.Next() {
-		event := stream.Current()
-		switch event.Type {
-		case "response.reasoning_summary_text.delta":
-			delta := event.AsResponseReasoningSummaryTextDelta().Delta
-			if delta == "" {
-				continue
-			}
-			if onDelta != nil {
-				if err := onDelta(provider.Delta{ReasoningContent: delta}); err != nil {
-					return provider.Response{}, err
-				}
-			}
-		case "response.reasoning_text.delta":
-			delta := event.AsResponseReasoningTextDelta().Delta
-			if delta == "" {
-				continue
-			}
-			if onDelta != nil {
-				if err := onDelta(provider.Delta{ReasoningContent: delta}); err != nil {
-					return provider.Response{}, err
-				}
-			}
+	var completed *rawSSECompletedResponse
+
+	err = postJSONStream(ctx, c.HTTPClient(), c.BaseURL()+"/responses", body, headers, func(data string) error {
+		var ev struct {
+			Response *rawSSECompletedResponse `json:"response"`
+			Type     string                   `json:"type"`
+			Delta    string                   `json:"delta"`
+		}
+		if jsonErr := json.Unmarshal([]byte(data), &ev); jsonErr != nil {
+			return nil // skip malformed / non-JSON events
+		}
+		switch ev.Type {
 		case "response.output_text.delta":
-			delta := event.Delta
-			if delta == "" {
-				continue
+			if ev.Delta != "" && onDelta != nil {
+				return onDelta(provider.Delta{Content: ev.Delta})
 			}
-			if onDelta != nil {
-				if err := onDelta(provider.Delta{Content: delta}); err != nil {
-					return provider.Response{}, err
-				}
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			if ev.Delta != "" && onDelta != nil {
+				return onDelta(provider.Delta{ReasoningContent: ev.Delta})
 			}
 		case "response.completed":
-			resp := event.AsResponseCompleted().Response
-			completed = &resp
+			completed = ev.Response
 		}
-	}
-	if err := stream.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return provider.Response{}, err
 	}
-	if completed != nil {
-		return responseFromOpenAI(completed), nil
-	}
-	return provider.Response{}, nil
+	return responseFromRawSSE(completed), nil
 }
 
 func (c *openAIClient) streamChat(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet, onDelta func(provider.Delta) error) (provider.Response, error) {

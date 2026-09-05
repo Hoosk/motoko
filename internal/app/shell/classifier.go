@@ -60,3 +60,37 @@ func Classify(mode types.Mode, command string) types.ShellDecision {
 
 	return types.ShellDecision{}
 }
+
+// PrepareCommand turns a user shell request into either an immediate action,
+// a dialog-backed approval action, or a policy error.
+func PrepareCommand(mode types.Mode, command string) types.Response {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: "Missing command after !"}}}
+	}
+
+	decision := Classify(mode, command)
+	if decision.Deny {
+		return types.Response{Entries: []types.Entry{{Kind: types.EntryError, Text: decision.Reason}}}
+	}
+
+	actionType := types.ActionShell
+	status := "Executing command..."
+	if decision.RequiresApproval {
+		actionType = types.ActionShellApproval
+		status = "Awaiting shell approval..."
+	}
+
+	action := &types.Action{
+		Type:         actionType,
+		ShellCommand: command,
+		ShellReason:  decision.Reason,
+	}
+	return types.Response{
+		Entries: []types.Entry{
+			{Kind: types.EntryCommand, Text: "$ " + command},
+			{Kind: types.EntrySystem, Text: status},
+		},
+		Action: action,
+	}
+}

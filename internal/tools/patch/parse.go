@@ -1,16 +1,39 @@
 package patch
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+type jsonPatchEdit struct {
+	Old       string `json:"old"`
+	OldString string `json:"old_string"`
+	New       string `json:"new"`
+	NewString string `json:"new_string"`
+}
+
+type jsonPatchRequest struct {
+	Path  string          `json:"path"`
+	Edits []jsonPatchEdit `json:"edits"`
+}
 
 func parsePatchRequest(input string) (request, error) {
 	input = strings.ReplaceAll(input, "\r\n", "\n")
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
 		return request{}, fmt.Errorf("usage: first line with the path followed by the SEARCH/REPLACE block or a unified diff")
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var payload jsonPatchRequest
+		if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+			return request{}, fmt.Errorf("invalid JSON patch request: %w", err)
+		}
+		if strings.TrimSpace(payload.Path) == "" || len(payload.Edits) == 0 {
+			return request{}, fmt.Errorf("invalid JSON patch request: path and edits are required")
+		}
+		return request{Path: payload.Path, Edits: payload.Edits}, nil
 	}
 	if strings.HasPrefix(trimmed, "--- ") || strings.HasPrefix(trimmed, "diff --git ") {
 		patch, err := parseUnifiedPatch(trimmed)

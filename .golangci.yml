@@ -4,20 +4,30 @@ linters:
   enable:
     - dupl
     - errcheck
+    - funlen
     - goconst
+    - gocyclo
     - gosec
     - govet
     - ineffassign
+    - maintidx
     - staticcheck
   settings:
     dupl:
       threshold: 100
+    funlen:
+      lines: 120
+      statements: 100
+    gocyclo:
+      min-complexity: 30
     gosec:
       severity: low
     govet:
       enable-all: true
     goconst:
       ignore-tests: true
+    maintidx:
+      threshold: 25
   exclusions:
     generated: lax
     presets:
@@ -25,10 +35,16 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      # Theme palettes are declarative data tables; literal repetition is the design.
+      - path: internal/styles/palette.go
+        linters:
+          - dupl
     paths:
       - third_party$
       - builtin$
       - examples$
+      - _test\.go$
 formatters:
   exclusions:
     generated: lax
@@ -36,3 +52,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - _test\.go$

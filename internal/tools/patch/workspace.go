@@ -7,6 +7,9 @@ import (
 	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
+// ErrFileChanged reports a stale diff whose preimage no longer matches.
+var ErrFileChanged = pathpolicy.ErrFileChanged
+
 type ExternalApprover func(context.Context, pathpolicy.Resolution) error
 
 func resolveWorkspacePath(target string) (string, string, error) {

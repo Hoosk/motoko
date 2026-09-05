@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
 	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
@@ -16,14 +17,20 @@ func NewWriteTool() *WriteTool {
 
 func (t *WriteTool) Spec() Spec {
 	return Spec{
-		Name:    "write",
-		Summary: "Create or fully overwrite a file in the workspace with the given content.",
-		Usage:   "write <path>\\n<content>   (or write {\"path\": \"...\", \"content\": \"...\"})",
+		Name:        "write",
+		Summary:     "Create or fully overwrite a file in the workspace with the given content.",
+		Usage:       "write <path>\\n<content>   (or write {\"path\": \"...\", \"content\": \"...\"})",
+		InputSchema: schemaWrite,
 	}
 }
 
 func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	path, content, err := parseWriteArgs(args)
 	if err != nil {
 		return Result{}, err
@@ -46,10 +53,28 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 	absPath, relPath := resolved.Path, resolved.Relative
-
 	existed := resolved.Existing()
-	if err := pathpolicy.WriteFile(resolved, []byte(content), 0o600, 0o700); err != nil {
+	var previous string
+	if existed {
+		data, readErr := pathpolicy.ReadFile(resolved)
+		if readErr != nil {
+			return Result{}, fmt.Errorf("failed to read existing file: %w", readErr)
+		}
+		previous = string(data)
+	}
+	diff := patchtool.UnifiedDiff(relPath, previous, content)
+	if err := requestFileChange(ctx, relPath, diff); err != nil {
+		return Result{}, err
+	}
+
+	if err := pathpolicy.WriteFile(ctx, resolved, []byte(previous), []byte(content), 0o600, 0o700); err != nil {
 		return Result{}, fmt.Errorf("failed to write file: %w", err)
+	}
+	output := diff
+	if strings.TrimSpace(output) == "" {
+		output = fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verbForWrite(existed), relPath, absPath, len(content))
+	} else {
+		output += fmt.Sprintf("\n\n%s file: %s\nabsolute: %s\nbytes: %d", verbForWrite(existed), relPath, absPath, len(content))
 	}
 
 	verb := "created"
@@ -60,8 +85,15 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 	return Result{
 		Spec:    t.Spec(),
 		Summary: fmt.Sprintf("Successfully %s %s (%d bytes)", verb, relPath, len(content)),
-		Output:  fmt.Sprintf("%s file: %s\nabsolute: %s\nbytes: %d", verb, relPath, absPath, len(content)),
+		Output:  output,
 	}, nil
+}
+
+func verbForWrite(existed bool) string {
+	if existed {
+		return "overwrote"
+	}
+	return "created"
 }
 
 func parseWriteArgs(args string) (string, string, error) {

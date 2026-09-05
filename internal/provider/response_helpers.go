@@ -5,6 +5,39 @@ import (
 	"strings"
 )
 
+// InputSchema returns the JSON Schema (as a generic map) for a tool's
+// arguments. When the tool defines an explicit schema it is used verbatim;
+// otherwise a synthetic {"input": string} schema is produced from the
+// description/hint, preserving the legacy behaviour for local tools.
+//
+// Defensive sanitisation: if the verbatim schema contains "properties":null
+// (emitted by some MCP servers for tools without parameters) the key is
+// removed so that strict provider validators do not reject the schema with
+// "null is not of type 'object'".
+func InputSchema(t LocalToolDefinition) map[string]any {
+	if len(t.Schema) > 0 {
+		var out map[string]any
+		if err := json.Unmarshal(t.Schema, &out); err == nil && out != nil {
+			// Remove "properties": null — some providers reject null here.
+			if v, ok := out["properties"]; ok && v == nil {
+				delete(out, "properties")
+			}
+			return out
+		}
+	}
+	return map[string]any{
+		"type":        "object",
+		"properties": map[string]any{
+			"input": map[string]any{
+				"type":        "string",
+				"description": ToolInputDescription(t),
+			},
+		},
+		"required":             []string{"input"},
+		"additionalProperties": false,
+	}
+}
+
 func ResponseFromText(content string, usage Usage) Response {
 	message := strings.TrimSpace(content)
 	resp := Response{FinalText: message, Usage: usage}

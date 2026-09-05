@@ -55,21 +55,23 @@ func Resolve(target string) (Resolution, error) {
 	if err != nil {
 		return Resolution{}, fmt.Errorf("resolve path %s: %w", target, err)
 	}
-	realRel, err := filepath.Rel(realWorkspace, realPath)
-	if err != nil {
-		return Resolution{}, err
-	}
 
 	return Resolution{
 		Path:       realPath,
 		Requested:  requested,
 		Relative:   filepath.ToSlash(rel),
-		External:   isOutside(realRel),
+		External:   isExternalPath(realWorkspace, realPath),
 		existing:   existing,
 		info:       info,
 		anchor:     anchor,
 		anchorInfo: anchorInfo,
 	}, nil
+}
+
+func isExternalPath(workspace, path string) bool {
+	rel, err := filepath.Rel(workspace, path)
+	// Paths on different Windows volumes have no relative representation.
+	return err != nil || isOutside(rel)
 }
 
 func resolveExistingAncestor(path string) (string, os.FileInfo, bool, string, os.FileInfo, error) {

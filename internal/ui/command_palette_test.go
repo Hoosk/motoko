@@ -32,7 +32,6 @@ func TestCommandPaletteItemsIncludeContextualActions(t *testing.T) {
 		Tasks:          []*taskman.TaskState{{ID: "task-1", Command: "go test", Running: true}},
 		Agents:         []agent.AgentDef{{Name: "build"}},
 		ActiveProvider: config.ProviderConfig{Name: "openai", Preset: config.ProviderPresetOpenAI, Models: []string{"gpt-4.1"}},
-		Pending:        "git status",
 		Thinking:       true,
 		QueueLen:       2,
 		Brain:          b,
@@ -40,7 +39,7 @@ func TestCommandPaletteItemsIncludeContextualActions(t *testing.T) {
 
 	items := commandPaletteItems(ctx)
 	joined := renderPaletteItems(items)
-	for _, want := range []string{"Approve pending command", "Deny pending command", "Cancel current request", "Manage queue (2 prompts)", "Model: gpt-4.1", "Skill: golang-patterns", "Brain: plan.md", "Terminate task: task-1", "Mention file: @README.md"} {
+	for _, want := range []string{"Cancel current request", "Manage queue (2 prompts)", "Model: gpt-4.1", "Skill: golang-patterns", "Brain: plan.md", "Terminate task: task-1", "Mention file: @README.md"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected palette items to include %q, got:\n%s", want, joined)
 		}

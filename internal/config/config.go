@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
 type ProviderKind string
 type ProviderPreset string
+
+const (
+	EditApprovalAuto = "auto"
+	EditApprovalAsk  = "ask"
+)
 
 const (
 	ProviderKindOpenAICompatible ProviderKind = "openai-compatible"
@@ -65,13 +69,28 @@ type AgentOverride struct {
 
 type AppConfig struct {
 	Agents            map[string]AgentOverride `json:"agents,omitempty"`
+	Providers         []ProviderConfig         `json:"providers"`
+	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
 	ActiveProvider    string                   `json:"active_provider"`
+	EditApproval      string                   `json:"edit_approval,omitempty"`
 	Theme             string                   `json:"theme,omitempty"`
 	Density           string                   `json:"density,omitempty"`
 	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
-	Providers         []ProviderConfig         `json:"providers"`
 	Search            SearchConfig             `json:"search"`
 	MaxIterations     int                      `json:"max_iterations,omitempty"`
+}
+
+// MCPServerConfig describes a single MCP server. Both stdio and HTTP
+// transports are accepted.
+type MCPServerConfig struct {
+	Env       map[string]string `json:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Name      string            `json:"name"`
+	Transport string            `json:"transport,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	URL       string            `json:"url,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Disabled  bool              `json:"disabled,omitempty"`
 }
 
 func (c *AppConfig) Merge(other *AppConfig) {
@@ -80,6 +99,9 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if other.ActiveProvider != "" {
 		c.ActiveProvider = other.ActiveProvider
+	}
+	if other.EditApproval != "" {
+		c.EditApproval = NormalizeEditApproval(other.EditApproval)
 	}
 	if other.Theme != "" {
 		c.Theme = other.Theme
@@ -118,6 +140,9 @@ func (c *AppConfig) Merge(other *AppConfig) {
 	}
 	if c.Agents == nil {
 		c.Agents = make(map[string]AgentOverride)
+	}
+	if len(other.MCPServers) > 0 {
+		c.MCPServers = mergeMCPServers(c.MCPServers, other.MCPServers)
 	}
 	for name, override := range other.Agents {
 		existing := c.Agents[name]
@@ -184,6 +209,7 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 	if len(cfg.Search.ExcludePatterns) == 0 {
 		cfg.Search.ExcludePatterns = []string{".git", "node_modules", "vendor", "dist", "tmp"}
 	}
+	cfg.EditApproval = NormalizeEditApproval(cfg.EditApproval)
 
 	// Load project-scoped config if exists
 	if len(workspacePath) > 0 && workspacePath[0] != "" {
@@ -193,6 +219,12 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 			if err := json.Unmarshal(localData, &localCfg); err == nil {
 				cfg.Merge(&localCfg)
 			}
+		}
+
+		// Dedicated MCP file (`.agents/mcp.json`) merged on top.
+		mcpPath := filepath.Join(workspacePath[0], ".agents", "mcp.json")
+		if extra, err := LoadMCPFile(mcpPath); err == nil && len(extra) > 0 {
+			cfg.MCPServers = mergeMCPServers(cfg.MCPServers, extra)
 		}
 	}
 
@@ -220,12 +252,14 @@ func (c *AppConfig) Save() error {
 	// Create a copy of config with encrypted API keys
 	var encryptedCfg AppConfig
 	encryptedCfg.ActiveProvider = c.ActiveProvider
+	encryptedCfg.EditApproval = NormalizeEditApproval(c.EditApproval)
 	encryptedCfg.Search = c.Search
 	encryptedCfg.Agents = c.Agents
 	encryptedCfg.Theme = c.Theme
 	encryptedCfg.Density = c.Density
 	encryptedCfg.ThinkingVerbosity = c.ThinkingVerbosity
 	encryptedCfg.MaxIterations = c.MaxIterations
+	encryptedCfg.MCPServers = c.MCPServers
 	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
 	for i, p := range c.Providers {
 		encryptedCfg.Providers[i] = p
@@ -245,233 +279,9 @@ func (c *AppConfig) Save() error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-func (c *AppConfig) UpsertProvider(provider ProviderConfig) {
-	provider = NormalizeProvider(provider)
-
-	for i, existing := range c.Providers {
-		if strings.EqualFold(existing.Name, provider.Name) {
-			c.Providers[i] = provider
-			c.sortProviders()
-			return
-		}
+func NormalizeEditApproval(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), EditApprovalAsk) {
+		return EditApprovalAsk
 	}
-
-	c.Providers = append(c.Providers, provider)
-	c.sortProviders()
-}
-
-func (c *AppConfig) RemoveProvider(name string) bool {
-	for i, provider := range c.Providers {
-		if strings.EqualFold(provider.Name, name) {
-			c.Providers = append(c.Providers[:i], c.Providers[i+1:]...)
-			if strings.EqualFold(c.ActiveProvider, name) {
-				c.ActiveProvider = ""
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func (c *AppConfig) Provider(name string) (ProviderConfig, bool) {
-	for _, provider := range c.Providers {
-		if strings.EqualFold(provider.Name, name) {
-			return provider, true
-		}
-	}
-	return ProviderConfig{}, false
-}
-
-func (c *AppConfig) Active() (ProviderConfig, bool) {
-	if strings.TrimSpace(c.ActiveProvider) == "" {
-		return ProviderConfig{}, false
-	}
-	return c.Provider(c.ActiveProvider)
-}
-
-func (c *AppConfig) SetActive(name string) error {
-	provider, ok := c.Provider(name)
-	if !ok {
-		return fmt.Errorf("provider no encontrado: %s", name)
-	}
-	c.ActiveProvider = provider.Name
-	return nil
-}
-
-func NormalizeProvider(provider ProviderConfig) ProviderConfig {
-	provider.Name = strings.TrimSpace(provider.Name)
-	provider.Preset = normalizePreset(provider.Preset, provider.Kind)
-	provider.Kind = normalizeKind(provider.Kind, provider.Preset)
-	provider.BaseURL = strings.TrimSpace(provider.BaseURL)
-	provider.APIKey = strings.TrimSpace(provider.APIKey)
-	provider.Model = strings.TrimSpace(provider.Model)
-	provider.Models = uniqueSorted(provider.Models)
-
-	// If the preset or base URL targets Google's Gemini API endpoints, we force it to the native Gemini provider preset and kind.
-	// Gemini is officially supported by Google GenAI Go SDK and should always run natively.
-	isGemini := provider.Preset == ProviderPresetGemini ||
-		strings.Contains(strings.ToLower(provider.BaseURL), "generativelanguage.googleapis.com") ||
-		strings.Contains(strings.ToLower(provider.BaseURL), "googleapis.com")
-
-	if isGemini {
-		provider.Preset = ProviderPresetGemini
-		provider.Kind = ProviderKindGemini
-	}
-
-	isLMStudio := provider.Preset == ProviderPresetLMStudio ||
-		provider.Kind == ProviderKindLMStudio ||
-		strings.Contains(provider.BaseURL, ":1234")
-
-	if isLMStudio {
-		provider.Preset = ProviderPresetLMStudio
-		provider.Kind = ProviderKindLMStudio
-	}
-
-	if provider.ContextWindow <= 0 {
-		if provider.Preset == ProviderPresetLMStudio || provider.Preset == ProviderPresetOpenAICompatible {
-			provider.ContextWindow = 8192
-		}
-	}
-
-	if provider.APIKey == "" && (provider.Preset == ProviderPresetOpenAICompatible || provider.Preset == ProviderPresetLMStudio) {
-		provider.APIKey = "lm-studio"
-	}
-
-	if provider.Name == "" {
-		provider.Name = DefaultProviderName(provider.Preset)
-		if provider.Name == "" {
-			provider.Name = "provider"
-		}
-	}
-	if provider.BaseURL == "" {
-		provider.BaseURL = DefaultBaseURL(provider.Preset, provider.Kind)
-	}
-
-	if (provider.Preset == ProviderPresetOpenAICompatible || provider.Preset == ProviderPresetLMStudio) && provider.BaseURL != "" {
-		trimmedURL := strings.TrimRight(provider.BaseURL, "/")
-		if !strings.HasSuffix(trimmedURL, "/v1") {
-			provider.BaseURL = trimmedURL + "/v1"
-		}
-	}
-	return provider
-}
-
-func DefaultBaseURL(preset ProviderPreset, kind ProviderKind) string {
-	switch preset {
-	case ProviderPresetOpenAI:
-		return "https://api.openai.com/v1"
-	case ProviderPresetOpenRouter:
-		return "https://openrouter.ai/api/v1"
-	case ProviderPresetAnthropic:
-		return "https://api.anthropic.com"
-	case ProviderPresetGemini:
-		return ""
-	case ProviderPresetOpenAICompatible:
-		return "http://localhost:11434/v1"
-	case ProviderPresetLMStudio:
-		return "http://127.0.0.1:1234/v1"
-	default:
-		return ""
-	}
-}
-
-func uniqueSorted(items []string) []string {
-	seen := make(map[string]struct{})
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		result = append(result, item)
-	}
-	sort.Strings(result)
-	return result
-}
-
-func UniqueSortedKeep(items []string, extra ...string) []string {
-	all := append(append([]string{}, items...), extra...)
-	return uniqueSorted(all)
-}
-
-func ValidProviderPresets() []ProviderPreset {
-	return []ProviderPreset{ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible, ProviderPresetLMStudio}
-}
-
-func DefaultProviderName(preset ProviderPreset) string {
-	return string(preset)
-}
-
-func normalizePreset(preset ProviderPreset, kind ProviderKind) ProviderPreset {
-	p := ProviderPreset(strings.ToLower(strings.TrimSpace(string(preset))))
-	k := ProviderKind(strings.ToLower(strings.TrimSpace(string(kind))))
-
-	// 1. Exact preset match
-	switch p {
-	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetAnthropic, ProviderPresetGemini, ProviderPresetOpenAICompatible, ProviderPresetLMStudio:
-		return p
-	}
-
-	// 2. Preset from kind
-	switch k {
-	case "openai", ProviderKindOpenAICompatible:
-		return ProviderPresetOpenAI
-	case ProviderKindAnthropic:
-		return ProviderPresetAnthropic
-	case ProviderKindGemini:
-		return ProviderPresetGemini
-	case ProviderKindLMStudio:
-		return ProviderPresetLMStudio
-	}
-
-	if p != "" {
-		return p
-	}
-
-	return ""
-}
-
-func normalizeKind(kind ProviderKind, preset ProviderPreset) ProviderKind {
-	k := ProviderKind(strings.ToLower(strings.TrimSpace(string(kind))))
-
-	// 1. Exact kind match
-	switch k {
-	case ProviderKindOpenAICompatible, "openai":
-		return ProviderKindOpenAICompatible
-	case ProviderKindAnthropic:
-		return ProviderKindAnthropic
-	case ProviderKindGemini:
-		return ProviderKindGemini
-	case ProviderKindLMStudio:
-		return ProviderKindLMStudio
-	}
-
-	// 2. Kind from normalized preset
-	normalizedPreset := normalizePreset(preset, kind)
-	switch normalizedPreset {
-	case ProviderPresetOpenAI, ProviderPresetOpenRouter, ProviderPresetOpenAICompatible:
-		return ProviderKindOpenAICompatible
-	case ProviderPresetAnthropic:
-		return ProviderKindAnthropic
-	case ProviderPresetGemini:
-		return ProviderKindGemini
-	case ProviderPresetLMStudio:
-		return ProviderKindLMStudio
-	}
-
-	if normalizedPreset != "" {
-		return ProviderKindOpenAICompatible
-	}
-
-	return ""
-}
-
-func (c *AppConfig) sortProviders() {
-	sort.Slice(c.Providers, func(i, j int) bool {
-		return strings.ToLower(c.Providers[i].Name) < strings.ToLower(c.Providers[j].Name)
-	})
+	return EditApprovalAuto
 }

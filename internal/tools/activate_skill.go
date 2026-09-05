@@ -19,9 +19,10 @@ func NewActivateSkillTool(available []skills.Skill) *ActivateSkillTool {
 
 func (t *ActivateSkillTool) Spec() Spec {
 	return Spec{
-		Name:    "activate_skill",
-		Summary: "Activates and loads detailed instructions of a skill from the catalog.",
-		Usage:   "activate_skill <name>",
+		Name:        "activate_skill",
+		Summary:     "Activates and loads detailed instructions of a skill from the catalog.",
+		Usage:       "activate_skill <name>",
+		InputSchema: schemaActivateSkill,
 	}
 }
 

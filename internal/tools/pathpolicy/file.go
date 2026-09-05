@@ -1,12 +1,20 @@
 package pathpolicy
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+var ErrFileChanged = errors.New("file changed while awaiting approval")
+
+var workspaceWriteMu sync.Mutex
 
 func OpenRead(resolved Resolution) (*os.File, error) {
 	if !resolved.existing {
@@ -24,7 +32,17 @@ func ReadFile(resolved Resolution) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
-func WriteFile(resolved Resolution, data []byte, mode, dirMode fs.FileMode) error {
+// WriteFile checks the approved preimage and writes through the same verified
+// descriptor. Opening the path again after approval would reintroduce races.
+func WriteFile(ctx context.Context, resolved Resolution, expected, data []byte, mode, dirMode fs.FileMode) (returnErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workspaceWriteMu.Lock()
+	defer workspaceWriteMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if resolved.existing && resolved.info.IsDir() {
 		return fmt.Errorf("path is a directory: %s", resolved.Relative)
 	}
@@ -32,8 +50,22 @@ func WriteFile(resolved Resolution, data []byte, mode, dirMode fs.FileMode) erro
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); returnErr == nil {
+			returnErr = err
+		}
+	}()
 	if resolved.existing {
+		current, err := io.ReadAll(file)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(current, expected) {
+			return fmt.Errorf("%w: %s", ErrFileChanged, resolved.Relative)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := file.Truncate(0); err != nil {
 			return err
 		}
@@ -41,8 +73,10 @@ func WriteFile(resolved Resolution, data []byte, mode, dirMode fs.FileMode) erro
 			return err
 		}
 	}
-	_, err = file.Write(data)
-	return err
+	if _, err := file.Write(data); err != nil {
+		return err
+	}
+	return nil
 }
 
 func verifyIdentity(resolved Resolution, file *os.File) error {

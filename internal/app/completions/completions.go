@@ -61,123 +61,136 @@ func Completions(d Deps, input string) []string {
 		return commandCompletions(parts[0])
 	}
 
-	if strings.EqualFold(parts[0], commands.CmdTool) {
-		prefix := ""
-		if len(parts) > 1 {
-			prefix = parts[1]
-		}
-		matches := d.ToolSuggestionsFn(prefix)
-		result := make([]string, 0, len(matches))
-		for _, spec := range matches {
-			result = append(result, "/tool "+spec.Usage)
-		}
-		return result
+	switch {
+	case strings.EqualFold(parts[0], commands.CmdTool):
+		return toolCompletions(d, parts)
+	case strings.EqualFold(parts[0], "agent"):
+		return agentCompletions(d, parts)
+	case strings.EqualFold(parts[0], "models"):
+		return modelsCompletions(d, parts, hasTrailingSpace)
+	case strings.EqualFold(parts[0], "provider"):
+		return providerCompletions(d, parts, hasTrailingSpace)
+	case strings.EqualFold(parts[0], "themes"):
+		return themesCompletions(parts)
 	}
 
-	if strings.EqualFold(parts[0], "agent") {
-		prefix := ""
-		if len(parts) > 1 {
-			prefix = parts[1]
-		}
-		var result []string
-		for _, name := range d.AgentNamesFn() {
-			if prefix == "" || strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
-				result = append(result, "/agent "+name)
-			}
-		}
-		return result
+	return nil
+}
+
+func toolCompletions(d Deps, parts []string) []string {
+	prefix := ""
+	if len(parts) > 1 {
+		prefix = parts[1]
 	}
+	matches := d.ToolSuggestionsFn(prefix)
+	result := make([]string, 0, len(matches))
+	for _, spec := range matches {
+		result = append(result, "/tool "+spec.Usage)
+	}
+	return result
+}
 
-	if strings.EqualFold(parts[0], "models") {
-		active, ok := d.ActiveConfigFn()
-		if !ok || len(active.Models) == 0 {
-			if len(parts) == 1 {
-				return []string{modelsListCmd, "/models use "}
-			}
-			return []string{modelsListCmd}
+func agentCompletions(d Deps, parts []string) []string {
+	prefix := ""
+	if len(parts) > 1 {
+		prefix = parts[1]
+	}
+	var result []string
+	for _, name := range d.AgentNamesFn() {
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
+			result = append(result, "/agent "+name)
 		}
+	}
+	return result
+}
 
+func modelsCompletions(d Deps, parts []string, hasTrailingSpace bool) []string {
+	active, ok := d.ActiveConfigFn()
+	if !ok || len(active.Models) == 0 {
 		if len(parts) == 1 {
-			return []string{modelsListCmd, "/models use ", "/models info "}
+			return []string{modelsListCmd, "/models use "}
 		}
+		return []string{modelsListCmd}
+	}
 
-		subcommand := strings.ToLower(parts[1])
-		if len(parts) == 2 && !hasTrailingSpace {
-			options := []string{"list", subCmdUse, "info"}
-			var result []string
-			for _, option := range options {
-				if strings.HasPrefix(option, subcommand) {
-					result = append(result, "/models "+option)
-				}
-			}
-			if len(result) > 0 {
-				return result
-			}
+	if len(parts) == 1 {
+		return []string{modelsListCmd, "/models use ", "/models info "}
+	}
+
+	subcommand := strings.ToLower(parts[1])
+	if len(parts) == 2 && !hasTrailingSpace {
+		if result, matched := subcommandOptions([]string{"list", subCmdUse, "info"}, subcommand, "/models "); matched {
+			return result
 		}
+	}
 
-		if subcommand != subCmdUse && subcommand != "info" {
-			prefix := strings.Join(parts[1:], " ")
-			return modelCompletions(active.Models, prefix, "/models ")
+	if subcommand != subCmdUse && subcommand != "info" {
+		prefix := strings.Join(parts[1:], " ")
+		return modelCompletions(active.Models, prefix, "/models ")
+	}
+
+	prefix := ""
+	if len(parts) > 2 {
+		prefix = strings.Join(parts[2:], " ")
+	}
+	return modelCompletions(active.Models, prefix, "/models "+subcommand+" ")
+}
+
+func providerCompletions(d Deps, parts []string, hasTrailingSpace bool) []string {
+	if len(parts) == 1 {
+		return []string{"/provider list", "/provider add", "/provider use ", "/provider remove "}
+	}
+	subcommand := strings.ToLower(parts[1])
+	if len(parts) == 2 && !hasTrailingSpace {
+		if result, matched := subcommandOptions([]string{"list", "add", "use", "remove"}, subcommand, "/provider "); matched {
+			return result
 		}
-
+	}
+	if subcommand == "use" || subcommand == "remove" {
 		prefix := ""
 		if len(parts) > 2 {
 			prefix = strings.Join(parts[2:], " ")
 		}
-		return modelCompletions(active.Models, prefix, "/models "+subcommand+" ")
-	}
-
-	if strings.EqualFold(parts[0], "provider") {
-		providers := d.ConfiguredProvidersFn()
-		if len(parts) == 1 {
-			return []string{"/provider list", "/provider add", "/provider use ", "/provider remove "}
-		}
-		subcommand := strings.ToLower(parts[1])
-		if len(parts) == 2 && !hasTrailingSpace {
-			options := []string{"list", "add", "use", "remove"}
-			var result []string
-			for _, option := range options {
-				if strings.HasPrefix(option, subcommand) {
-					result = append(result, "/provider "+option)
-				}
-			}
-			if len(result) > 0 {
-				return result
-			}
-		}
-		if subcommand == "use" || subcommand == "remove" {
-			prefix := ""
-			if len(parts) > 2 {
-				prefix = strings.Join(parts[2:], " ")
-			}
-			var result []string
-			for _, p := range providers {
-				if prefix == "" || strings.HasPrefix(strings.ToLower(p.Name), strings.ToLower(prefix)) {
-					result = append(result, "/provider "+subcommand+" "+p.Name)
-				}
-			}
-			return result
-		}
-	}
-
-	if strings.EqualFold(parts[0], "themes") {
-		prefix := ""
-		if len(parts) > 1 {
-			prefix = strings.ToLower(parts[1])
-		}
-		allThemes := []string{commands.ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
 		var result []string
-		for _, t := range allThemes {
-			if prefix == "" || strings.HasPrefix(t, prefix) {
-				result = append(result, "/themes "+t)
+		for _, p := range d.ConfiguredProvidersFn() {
+			if prefix == "" || strings.HasPrefix(strings.ToLower(p.Name), strings.ToLower(prefix)) {
+				result = append(result, "/provider "+subcommand+" "+p.Name)
 			}
 		}
-		if len(result) > 0 {
-			return result
+		return result
+	}
+	return nil
+}
+
+func themesCompletions(parts []string) []string {
+	prefix := ""
+	if len(parts) > 1 {
+		prefix = strings.ToLower(parts[1])
+	}
+	allThemes := []string{commands.ThemeCyberpunk, "ghost-cyber", "neon-shadow", "black-ice", "nord", "dracula", "monochrome"}
+	var result []string
+	for _, t := range allThemes {
+		if prefix == "" || strings.HasPrefix(t, prefix) {
+			result = append(result, "/themes "+t)
 		}
 	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
 
-	return nil
+// subcommandOptions filters the available subcommands by the typed prefix.
+// It reports whether any option matched so callers can fall through to
+// value-based completion when nothing did.
+func subcommandOptions(options []string, subcommand, commandPrefix string) ([]string, bool) {
+	var result []string
+	for _, option := range options {
+		if strings.HasPrefix(option, subcommand) {
+			result = append(result, commandPrefix+option)
+		}
+	}
+	return result, len(result) > 0
 }
 
 func MentionSuggestions(d Deps, input string) []string {

@@ -30,7 +30,7 @@ func openFileSecure(resolved Resolution, write bool, mode, dirMode fs.FileMode) 
 	}
 	flags := os.O_RDONLY
 	if write {
-		flags = os.O_WRONLY
+		flags = os.O_RDWR
 		if !resolved.existing {
 			flags |= os.O_CREATE | os.O_EXCL
 		}

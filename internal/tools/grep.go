@@ -3,7 +3,9 @@ package tools
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"regexp"
@@ -24,9 +26,10 @@ func NewGrepTool() *GrepTool {
 
 func (t *GrepTool) Spec() Spec {
 	return Spec{
-		Name:    "grep",
-		Summary: "Search text by regex inside workspace files.",
-		Usage:   "grep <regex> [include-glob]",
+		Name:        "grep",
+		Summary:     "Search text by regex inside workspace files.",
+		Usage:       "grep <regex> [include-glob]",
+		InputSchema: schemaGrep,
 	}
 }
 
@@ -88,6 +91,9 @@ func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
 		}
 		resolved, resolveErr := pathpolicy.Resolve(relPath)
 		if resolveErr != nil {
+			if errors.Is(resolveErr, os.ErrNotExist) {
+				return nil // A dangling symlink has no content to search.
+			}
 			return resolveErr
 		}
 		if approveErr := approveExternalAccess(ctx, "read", resolved); approveErr != nil {
@@ -127,7 +133,7 @@ var errStopWalk = fmt.Errorf("stop walk")
 func isTextOpenFile(file *os.File) bool {
 	buffer := make([]byte, 8192)
 	n, err := file.Read(buffer)
-	if err != nil && err.Error() != "EOF" {
+	if err != nil && err != io.EOF {
 		return false
 	}
 	if _, err := file.Seek(0, 0); err != nil {

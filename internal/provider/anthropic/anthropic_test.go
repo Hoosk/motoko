@@ -232,6 +232,51 @@ func TestToSDKTools(t *testing.T) {
 	}
 }
 
+func TestToSDKToolsUsesRawSchema(t *testing.T) {
+	raw := []byte(`{
+		"type": "object",
+		"properties": {
+			"path": {"type": "string", "description": "file to read"},
+			"limit": {"type": "integer"}
+		},
+		"required": ["path"]
+	}`)
+	tools := provider.ToolSet{
+		Local: []provider.LocalToolDefinition{
+			{Name: "read", Description: "read a file", Schema: raw},
+		},
+	}
+	serialized := toSDKTools(tools)
+	if len(serialized) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(serialized))
+	}
+	tool := serialized[0].OfTool
+	if tool == nil {
+		t.Fatal("expected OfTool")
+	}
+	if got := tool.InputSchema.Required; len(got) != 1 || got[0] != "path" {
+		t.Errorf("expected required [path], got %v", got)
+	}
+	props, ok := tool.InputSchema.Properties.(map[string]any)
+	if !ok {
+		t.Fatalf("expected properties map, got %T", tool.InputSchema.Properties)
+	}
+	if _, ok := props["limit"]; !ok {
+		t.Errorf("expected limit property to survive, got %v", props)
+	}
+	if _, ok := props["path"]; !ok {
+		t.Errorf("expected path property to survive, got %v", props)
+	}
+	// additionalProperties-style extras must survive via ExtraFields.
+	body, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"required":["path"]`) && !strings.Contains(string(body), `"required": ["path"]`) {
+		t.Errorf("expected required path in serialized schema, got %s", string(body))
+	}
+}
+
 func TestAnthropicClientCheckAdaptiveThinking(t *testing.T) {
 	var callCount int
 	httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

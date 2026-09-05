@@ -42,11 +42,52 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 
 	// --- STATIC PART ---
 
-	header := system.LoadProviderHeader(providerKind)
-	lines = append(lines, header)
-	lines = append(lines, "")
+	lines = append(lines, system.LoadProviderHeader(providerKind), "")
+	lines = append(lines, systemInstructionsBlock()...)
+	lines = append(lines, protocolBlocks(availableTools)...)
 
-	lines = append(lines,
+	if agentSystem != "" {
+		lines = append(lines, agentSystem, "")
+	}
+
+	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
+		lines = append(lines, "<operational_mode>", modeFragment, "</operational_mode>", "")
+	}
+
+	if verbosityFragment := thinkingVerbosityFragment(info.ThinkingVerbosity); verbosityFragment != "" {
+		lines = append(lines, "<reasoning_style>", verbosityFragment, "</reasoning_style>", "")
+	}
+
+	if len(info.AvailableSkills) > 0 {
+		lines = append(lines, skillCatalogBlock(info.AvailableSkills)...)
+	}
+
+	if info.Guidelines != "" {
+		lines = append(lines,
+			"<agents_guidelines>",
+			info.Guidelines,
+			"</agents_guidelines>",
+			"",
+		)
+	}
+
+	if info.DesignSpec != "" {
+		lines = append(lines,
+			"<design_specification>",
+			info.DesignSpec,
+			"</design_specification>",
+			"",
+		)
+	}
+
+	lines = append(lines, availableToolsBlock(specs)...)
+
+	return strings.Join(lines, "\n")
+}
+
+// systemInstructionsBlock returns the static operational guidance block.
+func systemInstructionsBlock() []string {
+	return []string{
 		"<system_instructions>",
 		"  <general>",
 		"    When answering the user, write plain text directly so it can stream cleanly to the terminal.",
@@ -76,8 +117,13 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		"  </operating_rules>",
 		"</system_instructions>",
 		"",
-	)
+	}
+}
 
+// protocolBlocks returns the delegation and brain protocol sections that are
+// only included when the matching tools are available.
+func protocolBlocks(availableTools map[string]bool) []string {
+	var lines []string
 	if availableTools["delegate"] {
 		lines = append(lines,
 			"<delegation_protocol>",
@@ -123,79 +169,32 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 			"",
 		)
 	}
+	return lines
+}
 
-	if agentSystem != "" {
-		lines = append(lines, agentSystem, "")
-	}
-
-	if modeFragment := activeModeFragment(info.ActiveMode); modeFragment != "" {
-		lines = append(lines, "<operational_mode>", modeFragment, "</operational_mode>", "")
-	}
-
-	if verbosityFragment := thinkingVerbosityFragment(info.ThinkingVerbosity); verbosityFragment != "" {
-		lines = append(lines, "<reasoning_style>", verbosityFragment, "</reasoning_style>", "")
-	}
-
-	if len(info.AvailableSkills) > 0 {
+// skillCatalogBlock renders the available skills section.
+func skillCatalogBlock(skills []system.SkillDef) []string {
+	lines := []string{"<available_skills>"}
+	for _, s := range skills {
 		lines = append(lines,
-			"<available_skills>",
-		)
-		for _, s := range info.AvailableSkills {
-			lines = append(lines,
-				"  <skill>",
-				fmt.Sprintf("    <name>%s</name>", s.Name),
-				fmt.Sprintf("    <description>%s</description>", s.Description),
-				"  </skill>",
-			)
-		}
-		lines = append(lines,
-			"</available_skills>",
-			"",
+			"  <skill>",
+			fmt.Sprintf("    <name>%s</name>", s.Name),
+			fmt.Sprintf("    <description>%s</description>", s.Description),
+			"  </skill>",
 		)
 	}
+	lines = append(lines, "</available_skills>", "")
+	return lines
+}
 
-	if info.Guidelines != "" {
-		lines = append(lines,
-			"<agents_guidelines>",
-			info.Guidelines,
-			"</agents_guidelines>",
-			"",
-		)
-	}
-
-	if info.DesignSpec != "" {
-		lines = append(lines,
-			"<design_specification>",
-			info.DesignSpec,
-			"</design_specification>",
-			"",
-		)
-	}
-
-	lines = append(lines,
-		"<available_tools>",
-	)
+// availableToolsBlock renders the tool catalog with usage notes for the
+// task/patch/inspect tools.
+func availableToolsBlock(specs []tools.Spec) []string {
+	lines := []string{"<available_tools>"}
 	for _, spec := range specs {
 		lines = append(lines, fmt.Sprintf("  - %s: %s | usage: %s", spec.Name, spec.Summary, spec.Usage))
 	}
-	hasTask := false
-	hasBash := false
-	hasPatch := false
-	hasInspect := false
-	for _, spec := range specs {
-		if spec.Name == "task" {
-			hasTask = true
-		}
-		if spec.Name == "bash" {
-			hasBash = true
-		}
-		if spec.Name == "patch" {
-			hasPatch = true
-		}
-		if spec.Name == "inspect" {
-			hasInspect = true
-		}
-	}
+	hasTask, hasBash, hasPatch, hasInspect := toolPresence(specs)
 
 	if hasTask {
 		note := "  - task: asynchronous execution for long-running commands (installs, tests, builds). It returns immediately with a task ID; DO NOT use task for quick commands (like git status, git tag, cat) where you need to read the output immediately to make your next step."
@@ -219,12 +218,25 @@ func buildSystemPrompt(providerKind string, info system.ContextInfo, specs []too
 		note += "    Usage: 'inspect GitTachikoma' for branch/commit info, 'inspect CodeTachikoma' for semantic index, 'inspect DiffTachikoma' for recent change symbols, 'inspect SearchTachikoma' for code snippets."
 		lines = append(lines, note)
 	}
-	lines = append(lines,
-		"</available_tools>",
-		"",
-	)
+	lines = append(lines, "</available_tools>", "")
+	return lines
+}
 
-	return strings.Join(lines, "\n")
+// toolPresence reports which annotated tools are present in the catalog.
+func toolPresence(specs []tools.Spec) (hasTask, hasBash, hasPatch, hasInspect bool) {
+	for _, spec := range specs {
+		switch spec.Name {
+		case "task":
+			hasTask = true
+		case "bash":
+			hasBash = true
+		case "patch":
+			hasPatch = true
+		case "inspect":
+			hasInspect = true
+		}
+	}
+	return hasTask, hasBash, hasPatch, hasInspect
 }
 
 // buildDynamicPrompt assembles the per-turn dynamic context that should live in

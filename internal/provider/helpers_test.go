@@ -74,3 +74,45 @@ func TestApplyTelemetryHeadersFallback(t *testing.T) {
 		t.Fatalf("did not expect opencode headers for generic provider, got %#v", headers)
 	}
 }
+
+func TestInputSchemaSanitizesNullProperties(t *testing.T) {
+	// A tool whose Schema explicitly contains "properties":null (e.g. from an
+	// MCP server advertising a no-arg tool) must not surface null to providers.
+	// DeepSeek and others reject "null is not of type 'object'" for properties.
+	tool := LocalToolDefinition{
+		Name:        "noop",
+		Description: "A tool with no parameters",
+		Schema:      []byte(`{"type":"object","properties":null,"additionalProperties":false}`),
+	}
+	got := InputSchema(tool)
+	if v, ok := got["properties"]; ok && v == nil {
+		t.Error("InputSchema must strip properties:null from verbatim schemas")
+	}
+	if got["type"] != "object" {
+		t.Errorf("expected type=object, got %v", got["type"])
+	}
+}
+
+func TestInputSchemaKeepsValidProperties(t *testing.T) {
+	tool := LocalToolDefinition{
+		Name:   "greet",
+		Schema: []byte(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`),
+	}
+	got := InputSchema(tool)
+	props, ok := got["properties"].(map[string]any)
+	if !ok || props["name"] == nil {
+		t.Errorf("InputSchema must preserve valid properties, got %v", got["properties"])
+	}
+}
+
+func TestInputSchemaFallsBackToSyntheticWhenSchemaEmpty(t *testing.T) {
+	tool := LocalToolDefinition{Name: "legacy", Description: "old tool", InputHint: "legacy <arg>"}
+	got := InputSchema(tool)
+	props, ok := got["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected synthetic properties map, got %T", got["properties"])
+	}
+	if _, hasInput := props["input"]; !hasInput {
+		t.Error("synthetic schema must have an 'input' property")
+	}
+}

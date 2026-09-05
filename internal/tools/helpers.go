@@ -97,10 +97,15 @@ func resolveWorkspacePath(target string) (string, string, error) {
 const approveExternalOption = "Allow once"
 
 func approveExternalAccess(ctx context.Context, operation string, resolved pathpolicy.Resolution) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	if !resolved.External {
 		return nil
 	}
-	broker := GetQuestionBroker(ctx)
+	broker := GetBroker(ctx)
 	if broker == nil {
 		return fmt.Errorf("%s requires approval: symlink resolves outside workspace to %s", operation, resolved.Path)
 	}
@@ -116,8 +121,11 @@ func approveExternalAccess(ctx context.Context, operation string, resolved pathp
 	if err != nil {
 		return fmt.Errorf("external path approval failed: %w", err)
 	}
-	if len(answer.Selections) != 1 || !slices.Contains(answer.Selections, approveExternalOption) {
+	if len(answer.Selections) != 1 || !slices.Contains(answer.Selections, approveExternalOption) || strings.TrimSpace(answer.Custom) != "" {
 		return fmt.Errorf("user denied access to external path: %s", resolved.Path)
+	}
+	if ctx != nil {
+		return ctx.Err()
 	}
 	return nil
 }

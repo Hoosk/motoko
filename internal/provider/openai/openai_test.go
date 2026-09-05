@@ -1,7 +1,12 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -309,6 +314,153 @@ func TestOpenAIClientUseChatCompletions(t *testing.T) {
 	}
 }
 
+func TestToSDKChatMessagesNeverMarshalNullContent(t *testing.T) {
+	poisonedRaw := json.RawMessage(`{"function":{"arguments":"{\"path\": \"notas.md\", \"content\": \"x\"}","name":null},"id":null,"type":"function"}`)
+	items := []provider.ConversationItem{
+		provider.UserText("resume work"),
+		{
+			Role:             provider.RoleAssistant,
+			Content:          "",
+			ReasoningContent: "thinking",
+			ToolCalls: []provider.ToolInvocation{
+				{
+					Kind:   provider.InvokeCustomTool,
+					Name:   "read",
+					CallID: "call_1",
+					Raw:    json.RawMessage(`{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"input\":\"index.html\"}"}}`),
+				},
+				{Kind: provider.InvokeCustomTool, Name: "glob", CallID: "call_2"},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Content: strings.Repeat("x", 11000)},
+		{Role: provider.RoleTool, ToolCallID: "call_2", Content: "2 matches"},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "",
+			ToolCalls: []provider.ToolInvocation{
+				{Kind: provider.InvokeCustomTool, Name: "write", CallID: "call_3", Input: `{"path": "notas.md"}`, Raw: poisonedRaw},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "call_3", Content: "tool error: change rejected by user: notas.md"},
+		{Role: provider.RoleAssistant, ReasoningContent: "reasoning only"},
+		provider.AssistantText("done"),
+	}
+
+	for _, builder := range []func([]provider.ConversationItem) []map[string]any{toChatMessages} {
+		mapped := builder(items)
+		raw, err := json.Marshal(mapped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rejectNullValues(raw); err != nil {
+			t.Fatalf("toChatMessages emitted null: %v", err)
+		}
+	}
+
+	sdkMessages := append([]openai.ChatCompletionMessageParamUnion{openai.SystemMessage("system prompt")}, toSDKChatMessages(items)...)
+	raw, err := json.Marshal(openai.ChatCompletionNewParams{
+		Model:    "deepseek-v4-flash",
+		Messages: sdkMessages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectNullValues(raw); err != nil {
+		t.Fatalf("toSDKChatMessages emitted null: %v", err)
+	}
+}
+
+func rejectNullValues(raw []byte) error {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	var firstNull string
+	var walk func(any, string)
+	walk = func(v any, path string) {
+		if firstNull != "" {
+			return
+		}
+		switch typed := v.(type) {
+		case map[string]any:
+			keys := make([]string, 0, len(typed))
+			for k := range typed {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				walk(typed[k], path+"."+k)
+			}
+		case []any:
+			for i, item := range typed {
+				walk(item, fmt.Sprintf("%s[%d]", path, i))
+			}
+		case nil:
+			firstNull = path
+		}
+	}
+	walk(value, "$")
+	if firstNull != "" {
+		return fmt.Errorf("null at %s", firstNull)
+	}
+	return nil
+}
+
+func TestMergeChatToolCallDeltasIgnoresNulls(t *testing.T) {
+	acc := make(map[int]*chatCompletionToolCall)
+	mapped := make(map[int]int)
+	mergeChatToolCallDeltas(acc, []chatCompletionToolCallDelta{
+		{Index: 0, ID: "call_x", Type: "function", Function: chatCompletionToolFunction{Name: "write"}, Raw: json.RawMessage(`{"index":0,"id":"call_x","type":"function","function":{"name":"write","arguments":""}}`)},
+		{Index: 0, Function: chatCompletionToolFunction{Arguments: `{"a":1}`}, Raw: json.RawMessage(`{"index":0,"id":null,"function":{"name":null,"arguments":"{\"a\":1}"}}`)},
+	}, mapped)
+
+	call := acc[0]
+	if call == nil {
+		t.Fatal("expected accumulated tool call")
+	}
+	if call.ID != "call_x" || call.Function.Name != "write" || call.Function.Arguments != `{"a":1}` {
+		t.Fatalf("unexpected accumulated call %#v", call)
+	}
+	rawID := call.RawMap["id"]
+	rawName := call.RawMap["function"].(map[string]any)["name"]
+	if rawID != "call_x" || rawName != "write" {
+		t.Fatalf("expected null deltas to be ignored, got id=%v name=%v", rawID, rawName)
+	}
+}
+
+func TestToChatMessagesSanitizesPoisonedRawToolCall(t *testing.T) {
+	item := provider.ConversationItem{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolInvocation{{
+			Kind:   provider.InvokeCustomTool,
+			Name:   "write",
+			CallID: "call_a42",
+			Input:  `{"path": "notas.md"}`,
+			Raw:    json.RawMessage(`{"function":{"arguments":"{\"path\": \"notas.md\"}","name":null},"id":null,"type":"function"}`),
+		}},
+	}
+	messages := toChatMessages([]provider.ConversationItem{item})
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectNullValues(raw); err != nil {
+		t.Fatalf("expected sanitized tool call, %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	call := decoded[0]["tool_calls"].([]any)[0].(map[string]any)
+	if call["id"] != "call_a42" {
+		t.Fatalf("expected id repaired from call id, got %v", call["id"])
+	}
+	fn := call["function"].(map[string]any)
+	if fn["name"] != "write" {
+		t.Fatalf("expected name repaired from call name, got %v", fn["name"])
+	}
+}
+
 func TestToSDKChatMessagesAndTools(t *testing.T) {
 	sdkMsgs := toSDKChatMessages([]provider.ConversationItem{provider.UserText("hi")})
 	if len(sdkMsgs) != 1 {
@@ -334,5 +486,110 @@ func TestToSDKChatMessagesAndTools(t *testing.T) {
 	}
 	if sdkTools[0].OfFunction == nil || sdkTools[0].OfFunction.Function.Name != "ls" {
 		t.Fatalf("unexpected tool mapping: %#v", sdkTools[0])
+	}
+}
+
+func TestResponseFromRawSSEText(t *testing.T) {
+	resp := &rawSSECompletedResponse{
+		Output: []rawSSEOutputItem{
+			{
+				Type: "message",
+				Content: []rawSSEContent{
+					{Type: "output_text", Text: "Hello, world!"},
+				},
+			},
+		},
+		Usage: rawSSEUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+	got := responseFromRawSSE(resp)
+	if got.FinalText != "Hello, world!" {
+		t.Errorf("expected FinalText=%q, got %q", "Hello, world!", got.FinalText)
+	}
+	if got.Usage.InputTokens != 10 || got.Usage.OutputTokens != 5 {
+		t.Errorf("unexpected usage: %+v", got.Usage)
+	}
+}
+
+func TestResponseFromRawSSEFunctionCall(t *testing.T) {
+	resp := &rawSSECompletedResponse{
+		Output: []rawSSEOutputItem{
+			{
+				Type:      "function_call",
+				Name:      "bash",
+				CallID:    "call_1",
+				Arguments: `{"command":"ls"}`,
+			},
+		},
+		Usage: rawSSEUsage{InputTokens: 20, OutputTokens: 10, TotalTokens: 30},
+	}
+	got := responseFromRawSSE(resp)
+	if len(got.PendingCalls) != 1 {
+		t.Fatalf("expected 1 pending call, got %d", len(got.PendingCalls))
+	}
+	call := got.PendingCalls[0]
+	if call.Name != "bash" || call.CallID != "call_1" {
+		t.Errorf("unexpected call: %+v", call)
+	}
+}
+
+func TestResponseFromRawSSENil(t *testing.T) {
+	got := responseFromRawSSE(nil)
+	if got.FinalText != "" || len(got.PendingCalls) != 0 {
+		t.Errorf("expected empty response for nil input, got %+v", got)
+	}
+}
+
+func TestStreamResponsesHandlesKeepAlive(t *testing.T) {
+	// Simulate the Zen SSE format: keep-alive comment + events with event: type lines.
+	sseBody := ": keep-alive\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" world\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello world\"}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":3,\"total_tokens\":8}}}\n\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseBody)
+	}))
+	defer srv.Close()
+
+	var deltas []string
+	onDelta := func(d provider.Delta) error {
+		if d.Content != "" {
+			deltas = append(deltas, d.Content)
+		}
+		return nil
+	}
+
+	var completed *rawSSECompletedResponse
+	err := postJSONStream(context.Background(), srv.Client(), srv.URL, map[string]any{}, map[string]string{}, func(data string) error {
+		var ev struct {
+			Response *rawSSECompletedResponse `json:"response"`
+			Type     string                   `json:"type"`
+			Delta    string                   `json:"delta"`
+		}
+		if jsonErr := json.Unmarshal([]byte(data), &ev); jsonErr != nil {
+			return nil
+		}
+		switch ev.Type {
+		case "response.output_text.delta":
+			if ev.Delta != "" {
+				return onDelta(provider.Delta{Content: ev.Delta})
+			}
+		case "response.completed":
+			completed = ev.Response
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("postJSONStream error: %v", err)
+	}
+
+	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != " world" {
+		t.Errorf("unexpected deltas: %v", deltas)
+	}
+	if completed == nil || len(completed.Output) == 0 {
+		t.Fatalf("expected completed response, got nil or empty")
+	}
+	resp := responseFromRawSSE(completed)
+	if resp.FinalText != "Hello world" {
+		t.Errorf("expected FinalText=%q, got %q", "Hello world", resp.FinalText)
 	}
 }

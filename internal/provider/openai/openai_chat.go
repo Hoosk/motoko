@@ -172,6 +172,7 @@ func toChatMessages(messages []provider.ConversationItem) []map[string]any {
 				if len(call.Raw) > 0 {
 					var rawToolCall map[string]any
 					if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+						sanitizeRawToolCall(rawToolCall, call)
 						toolCalls = append(toolCalls, rawToolCall)
 						continue
 					}
@@ -244,17 +245,7 @@ func responseTools(tools provider.ToolSet) []responses.ToolUnionParam {
 	}
 	result := make([]responses.ToolUnionParam, 0, len(tools.Local))
 	for _, tool := range tools.Local {
-		parameters := map[string]any{
-			keyType: keyObject,
-			keyProperties: map[string]any{
-				keyInput: map[string]any{
-					keyType:        keyString,
-					keyDescription: provider.ToolInputDescription(tool),
-				},
-			},
-			keyRequired:             []string{keyInput},
-			keyAdditionalProperties: false,
-		}
+		parameters := provider.InputSchema(tool)
 		result = append(result, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name:        tool.Name,
 			Description: param.NewOpt(strings.TrimSpace(tool.Description)),
@@ -276,17 +267,7 @@ func chatCompletionTools(tools provider.ToolSet) []map[string]any {
 			keyFunction: map[string]any{
 				keyName:        tool.Name,
 				keyDescription: strings.TrimSpace(tool.Description),
-				"parameters": map[string]any{
-					keyType: keyObject,
-					keyProperties: map[string]any{
-						keyInput: map[string]any{
-							keyType:        keyString,
-							keyDescription: provider.ToolInputDescription(tool),
-						},
-					},
-					keyRequired:             []string{keyInput},
-					keyAdditionalProperties: false,
-				},
+				"parameters":   provider.InputSchema(tool),
 			},
 		})
 	}
@@ -363,6 +344,8 @@ func mergeMaps(dest, src map[string]any) {
 			} else {
 				dest[k] = v
 			}
+		} else if v == nil {
+			continue
 		} else {
 			dest[k] = v
 		}
@@ -392,6 +375,30 @@ func sortedChatToolCalls(acc map[int]*chatCompletionToolCall) []chatCompletionTo
 	return result
 }
 
+// sanitizeRawToolCall repairs a replayed raw tool call whose streamed origin
+// may carry JSON nulls (e.g. id or function name) by filling the missing
+// fields from the typed invocation. Persisted sessions from older builds can
+// contain such corrupted raws and would otherwise be rejected by upstreams.
+func sanitizeRawToolCall(raw map[string]any, call provider.ToolInvocation) {
+	if value, ok := raw["id"]; !ok || value == nil || value == "" {
+		raw["id"] = call.CallID
+	}
+	if value, ok := raw["type"]; !ok || value == nil || value == "" {
+		raw["type"] = keyFunction
+	}
+	fn, _ := raw[keyFunction].(map[string]any)
+	if fn == nil {
+		fn = make(map[string]any)
+		raw[keyFunction] = fn
+	}
+	if value, ok := fn[keyName]; !ok || value == nil || value == "" {
+		fn[keyName] = call.Name
+	}
+	if value, ok := fn["arguments"]; !ok || value == nil || value == "" {
+		fn["arguments"] = provider.AssistantToolCallArguments(call)
+	}
+}
+
 func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 	for _, msg := range messages {
@@ -408,6 +415,7 @@ func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatComple
 				if len(call.Raw) > 0 {
 					var rawToolCall map[string]any
 					if err := json.Unmarshal(call.Raw, &rawToolCall); err == nil {
+						sanitizeRawToolCall(rawToolCall, call)
 						var sdkCall openai.ChatCompletionMessageToolCallUnionParam
 						if rawBytes, err := json.Marshal(rawToolCall); err == nil {
 							if err := json.Unmarshal(rawBytes, &sdkCall); err == nil {
@@ -439,7 +447,11 @@ func toSDKChatMessages(messages []provider.ConversationItem) []openai.ChatComple
 				}
 			}
 			result = append(result, openai.ChatCompletionMessageParamUnion{
-				OfAssistant: &openai.ChatCompletionAssistantMessageParam{Role: "assistant", ToolCalls: sdkToolCalls},
+				OfAssistant: &openai.ChatCompletionAssistantMessageParam{
+					Role:      "assistant",
+					Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: param.NewOpt(msg.Content)},
+					ToolCalls: sdkToolCalls,
+				},
 			})
 			continue
 		}

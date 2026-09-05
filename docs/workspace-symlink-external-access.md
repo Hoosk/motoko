@@ -27,7 +27,7 @@ Repository instruction discovery is intentionally stricter. An `AGENTS.md` or `.
 
 ## Approval flow
 
-For an external symlink destination, the tool sends a question through the existing `QuestionBroker`. The prompt displays:
+For an external symlink destination, the tool sends a question through the unified dialog broker. The prompt displays:
 
 - The path requested inside the workspace.
 - The canonical external destination.
@@ -44,6 +44,15 @@ The operation fails closed when:
 - The answer is empty, duplicated or contradictory.
 
 Approval is not cached. A later invocation must ask again.
+
+When `edit_approval` is `ask`, a modifying operation has two distinct gates:
+
+1. The external-access question authorizes the displayed canonical destination.
+2. The file-change approval authorizes the displayed diff.
+
+The operation keeps the same resolved destination across both gates and verifies
+the file identity and approved preimage before writing. A change while either
+dialog is open therefore fails instead of applying a stale diff.
 
 ## Path resolution
 
@@ -101,6 +110,11 @@ Regression coverage includes:
 - Replacement of the workspace symlink while approval is pending.
 - Replacement of the canonical final target while approval is pending.
 - Replacement of the nearest existing parent before creating a file.
+- Removal of the nearest existing parent before creating a file.
+- A changed external file while the diff approval is pending.
+- Dangling symlinks encountered during workspace grep.
+- Workspaces opened through a symbolic-link alias.
+- Contradictory approval answers containing custom text.
 - External `AGENTS.md` instruction symlinks.
 
 Validation performed on macOS ARM64 with Go 1.26:

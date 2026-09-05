@@ -25,9 +25,13 @@ func openFileSecure(resolved Resolution, write bool, mode, dirMode fs.FileMode) 
 	defer func() { _ = unix.Close(fd) }()
 
 	currentPath := string(filepath.Separator)
+	if err := verifyParentFD(resolved, currentPath, fd); err != nil {
+		return nil, err
+	}
+	anchorVerified := currentPath == resolved.anchor
 	for _, component := range parts[:len(parts)-1] {
 		next, openErr := unix.Openat(fd, component, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		if openErr != nil && write && !resolved.existing && openErr == unix.ENOENT {
+		if openErr != nil && write && !resolved.existing && anchorVerified && openErr == unix.ENOENT {
 			if mkdirErr := unix.Mkdirat(fd, component, uint32(dirMode.Perm())); mkdirErr != nil && mkdirErr != unix.EEXIST {
 				return nil, mkdirErr
 			}
@@ -39,25 +43,15 @@ func openFileSecure(resolved Resolution, write bool, mode, dirMode fs.FileMode) 
 		_ = unix.Close(fd)
 		fd = next
 		currentPath = filepath.Join(currentPath, component)
-		verifyFD, dupErr := unix.Dup(fd)
-		if dupErr != nil {
-			return nil, dupErr
-		}
-		parent := os.NewFile(uintptr(verifyFD), currentPath)
-		if parent == nil {
-			_ = unix.Close(verifyFD)
-			return nil, fmt.Errorf("open verified parent: invalid file descriptor")
-		}
-		if err := verifyAnchor(resolved, currentPath, parent); err != nil {
-			_ = parent.Close()
+		if err := verifyParentFD(resolved, currentPath, fd); err != nil {
 			return nil, err
 		}
-		_ = parent.Close()
+		anchorVerified = anchorVerified || currentPath == resolved.anchor
 	}
 
 	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 	if write {
-		flags = unix.O_WRONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+		flags = unix.O_RDWR | unix.O_NOFOLLOW | unix.O_CLOEXEC
 		if !resolved.existing {
 			flags |= unix.O_CREAT | unix.O_EXCL
 		}
@@ -76,4 +70,21 @@ func openFileSecure(resolved Resolution, write bool, mode, dirMode fs.FileMode) 
 		return nil, err
 	}
 	return file, nil
+}
+
+func verifyParentFD(resolved Resolution, path string, fd int) error {
+	if path != resolved.anchor {
+		return nil
+	}
+	verifyFD, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	parent := os.NewFile(uintptr(verifyFD), path)
+	if parent == nil {
+		_ = unix.Close(verifyFD)
+		return fmt.Errorf("open verified parent: invalid file descriptor")
+	}
+	defer func() { _ = parent.Close() }()
+	return verifyAnchor(resolved, path, parent)
 }

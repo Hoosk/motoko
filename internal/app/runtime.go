@@ -12,6 +12,7 @@ import (
 	"github.com/Hoosk/motoko/internal/agent"
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
+	"github.com/Hoosk/motoko/internal/mcp"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/session"
@@ -76,20 +77,18 @@ const (
 )
 
 const (
-	ActionShell   = types.ActionShell
-	ActionTask    = types.ActionTask
-	ActionAgent   = types.ActionAgent
-	ActionCompact = types.ActionCompact
+	ActionShell         = types.ActionShell
+	ActionShellApproval = types.ActionShellApproval
+	ActionTask          = types.ActionTask
+	ActionAgent         = types.ActionAgent
+	ActionCompact       = types.ActionCompact
+	ActionTool          = types.ActionTool
 )
 
 type TaskState = taskman.TaskState
 
 var ThinkingBudgetLevels = providerman.ThinkingBudgetLevels
 var ThinkingBudgetLabels = providerman.ThinkingBudgetLabels
-
-type pendingShell struct {
-	Command string
-}
 
 type Runtime struct {
 	cplDeps           completions.Deps
@@ -102,14 +101,14 @@ type Runtime struct {
 	taskMgr           *taskman.Manager
 	scheduleMgr       *scheduleman.Manager
 	sesMgr            *sessionman.Manager
-	questionBroker    *tools.QuestionBroker
+	broker            *tools.Broker
 	agOrch            *agentorch.Orchestrator
 	semantic          *semantic.Index
 	backgroundCancel  context.CancelFunc
 	updateInfo        *updater.VersionInfo
 	tachikomas        *tachikoma.Manager
-	pending           *pendingShell
 	tools             *tools.Registry
+	mcpMgr            *mcp.Manager
 	updateDone        chan struct{}
 	inputMode         InputMode
 	version           string
@@ -160,7 +159,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		tachikomas:        tachikoma.NewManager(),
 		taskMgr:           taskman.NewManager(),
 		scheduleMgr:       scheduleman.NewManager(),
-		questionBroker:    tools.NewQuestionBroker(),
+		broker:            tools.NewBroker(),
 		updateDone:        make(chan struct{}),
 		version:           runtimeOpts.Version,
 	}
@@ -185,63 +184,7 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		},
 	})
 	r.provMgr = providerman.NewManager(func() *config.AppConfig { return r.config }, func() func(config.ProviderConfig) (provider.Client, error) { return r.newProviderClient }, r.agOrch.RefreshAgent)
-	r.cmdDispatch = commands.New(commands.Deps{
-		ConfigFn:     func() *config.AppConfig { return r.config },
-		SaveConfigFn: func() error { return r.config.Save() },
-		ThemeFn:      func() string { return r.config.Theme },
-		SetThemeFn: func(name string) error {
-			r.config.Theme = name
-			return r.config.Save()
-		},
-
-		InputModeFn:    func() types.InputMode { return r.inputMode },
-		SetInputModeFn: func(m types.InputMode) { r.inputMode = m },
-
-		ModeFn:            func() types.Mode { return r.agOrch.Mode() },
-		SetAgentModeFn:    func(name string) { r.agOrch.SetAgentMode(name) },
-		AgentNameFn:       func() string { return r.agOrch.AgentName() },
-		AgentNamesFn:      func() []string { return r.agOrch.AgentNames() },
-		AgentConfiguredFn: func() bool { return r.agOrch.AgentConfigured() },
-		DebugFn:           func() bool { return r.agOrch.Debug() },
-		SetDebugFn:        func(d bool) { r.agOrch.SetDebug(d) },
-		AgentFn:           func() *agent.Agent { return r.agOrch.Agent() },
-		SystemPromptFn:    func(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) },
-
-		SessionFn: func() *session.Session { return r.sesMgr.CurrentSession() },
-		SaveSessionFn: func() error {
-			if s := r.sesMgr.CurrentSession(); s != nil {
-				return s.Save()
-			}
-			return nil
-		},
-		BrainFn:        func() *brain.Brain { return r.sesMgr.Brain() },
-		BrainInitErrFn: func() error { return r.sesMgr.BrainInitErr() },
-
-		ListTasksFn:     func() []*taskman.TaskState { return r.taskMgr.List() },
-		TerminateTaskFn: func(id string) error { return r.taskMgr.Terminate(id) },
-
-		ToolSpecsFn: func() []tools.Spec { return r.ToolSpecs() },
-		RunToolFn: func(ctx context.Context, name, args string) (tools.Result, error) {
-			return r.tools.Run(ctx, name, args)
-		},
-
-		ProvMgr: r.provMgr,
-
-		PendingFn: func() string {
-			if r.pending == nil {
-				return ""
-			}
-			return r.pending.Command
-		},
-		SetPendingFn: func(cmd string) { r.pending = &pendingShell{Command: cmd} },
-		ClearPendingFn: func() string {
-			cmd := r.pending.Command
-			r.pending = nil
-			return cmd
-		},
-
-		ContextWindowFn: func() int { return r.contextWindow },
-	})
+	r.cmdDispatch = commands.New(r.commandDeps())
 	r.cplDeps = completions.Deps{
 		AgentNamesFn:          func() []string { return r.agOrch.AgentNames() },
 		SemanticFn:            func() *semantic.Index { return r.semantic },
@@ -255,28 +198,15 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		styles.SetTheme(r.config.Theme)
 	}
 
-	r.scheduleMgr.SetOnChange(func(defs []scheduleman.Definition) {
-		r.persistSchedules(defs)
-	})
-	r.restoreSchedules()
+	r.setupSchedules()
+	r.setupTachikomas()
+	r.registerTools(sList)
 
-	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
-	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
-	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
-	r.tachikomas.Add(tachikoma.NewSearchTachikoma(r.semantic))
-	r.tachikomas.Add(tachikoma.NewDependencyTachikoma())
-
-	r.tools.Register(tools.NewInspectTool(r.tachikomas))
-	r.tools.Register(tools.NewDelegateTool(r))
-	r.tools.Register(tools.NewTaskTool(r))
-	r.tools.Register(tools.NewQuestionTool(r.questionBroker))
-	r.tools.Register(tools.NewBrainWriteTool(r))
-	r.tools.Register(tools.NewBrainReadTool(r))
-	r.tools.Register(tools.NewBrainListTool(r))
-
-	if len(sList) > 0 {
-		r.tools.Register(tools.NewActivateSkillTool(sList))
-	}
+	// MCP manager is built last so it can publish tools directly into the
+	// already-populated registry. Servers are started on Runtime.Start so the
+	// background context is available for transports and to honour the
+	// process-wide cancellation during shutdown.
+	r.mcpMgr = mcp.NewManager(r.mcpManagerConfig())
 
 	return r
 }
@@ -305,13 +235,6 @@ func (r *Runtime) Completions(input string) []string {
 
 func (r *Runtime) MentionSuggestions(input string) []string {
 	return completions.MentionSuggestions(r.cplDeps, input)
-}
-
-func (r *Runtime) PendingApproval() string {
-	if r.pending == nil {
-		return ""
-	}
-	return r.pending.Command
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
@@ -462,18 +385,32 @@ func (r *Runtime) CompactSession(ctx context.Context) Response {
 func (r *Runtime) ActiveSubagents() []string                   { return r.agOrch.ActiveSubagents() }
 func (r *Runtime) SystemPrompt(info system.ContextInfo) string { return r.agOrch.SystemPrompt(info) }
 func (r *Runtime) RunAgent(ctx context.Context, info system.ContextInfo, input string) (agent.Result, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgent(ctx, info, input)
 }
 func (r *Runtime) RunAgentStream(ctx context.Context, info system.ContextInfo, input string, onEvent func(AgentStreamEvent) error) (agent.Result, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunAgentStream(ctx, info, input, func(ev types.AgentStreamEvent) error {
 		return onEvent(AgentStreamEvent(ev))
 	})
 }
 func (r *Runtime) RunSubagent(ctx context.Context, cfg tools.SubagentConfig) (string, error) {
-	ctx = tools.WithQuestionBroker(ctx, r.questionBroker)
+	ctx = tools.WithBroker(ctx, r.broker)
+	ctx = tools.WithConfig(ctx, r.config)
 	return r.agOrch.RunSubagent(ctx, cfg)
+}
+
+func (r *Runtime) RunTool(ctx context.Context, name, args string) (tools.Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
+	ctx = tools.WithBroker(ctx, r.broker)
+	ctx = tools.WithConfig(ctx, r.config)
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
+	return r.tools.Run(ctx, name, args)
 }
 
 func (r *Runtime) Start(ctx context.Context) {
@@ -483,6 +420,9 @@ func (r *Runtime) Start(ctx context.Context) {
 	}
 	if r.tachikomas != nil {
 		r.tachikomas.Start(r.backgroundCtx)
+	}
+	if r.mcpMgr != nil && r.config != nil && len(r.config.MCPServers) > 0 {
+		r.mcpMgr.Start(r.backgroundCtx, mcpServerConfigs(r.config.MCPServers))
 	}
 	_ = provider.LoadCatalog(context.Background())
 	r.agOrch.RefreshAgent()
@@ -522,6 +462,35 @@ func (r *Runtime) restoreSchedules() {
 	r.scheduleMgr.Restore(scheduleman.ParseScheduleBrain(content))
 }
 
+func (r *Runtime) setupSchedules() {
+	r.scheduleMgr.SetOnChange(func(defs []scheduleman.Definition) {
+		r.persistSchedules(defs)
+	})
+	r.restoreSchedules()
+}
+
+func (r *Runtime) setupTachikomas() {
+	r.tachikomas.Add(tachikoma.NewGitTachikoma(10 * time.Second))
+	r.tachikomas.Add(tachikoma.NewCodeTachikoma(r.semantic, 30*time.Second))
+	r.tachikomas.Add(tachikoma.NewDiffTachikoma(r.semantic, 15*time.Second))
+	r.tachikomas.Add(tachikoma.NewSearchTachikoma(r.semantic))
+	r.tachikomas.Add(tachikoma.NewDependencyTachikoma())
+}
+
+func (r *Runtime) registerTools(sList []skills.Skill) {
+	r.tools.Register(tools.NewInspectTool(r.tachikomas))
+	r.tools.Register(tools.NewDelegateTool(r))
+	r.tools.Register(tools.NewTaskTool(r))
+	r.tools.Register(tools.NewQuestionTool(r.broker))
+	r.tools.Register(tools.NewBrainWriteTool(r))
+	r.tools.Register(tools.NewBrainReadTool(r))
+	r.tools.Register(tools.NewBrainListTool(r))
+
+	if len(sList) > 0 {
+		r.tools.Register(tools.NewActivateSkillTool(sList))
+	}
+}
+
 func (r *Runtime) persistSchedules(defs []scheduleman.Definition) {
 	if r.sesMgr == nil || r.sesMgr.Brain() == nil {
 		return
@@ -552,7 +521,19 @@ func (r *Runtime) WaitForUpdate() (*updater.VersionInfo, error) {
 
 func (r *Runtime) Tachikomas() *tachikoma.Manager { return r.tachikomas }
 
-func (r *Runtime) QuestionBroker() *tools.QuestionBroker { return r.questionBroker }
+func (r *Runtime) Broker() *tools.Broker {
+	if r == nil {
+		return nil
+	}
+	return r.broker
+}
+
+func (r *Runtime) PendingDialogs() int {
+	if r == nil || r.broker == nil {
+		return 0
+	}
+	return r.broker.PendingCount()
+}
 
 func (r *Runtime) BackgroundContext() context.Context {
 	if r.backgroundCtx != nil {
@@ -561,9 +542,30 @@ func (r *Runtime) BackgroundContext() context.Context {
 	return context.Background()
 }
 
+func (r *Runtime) AddMCPServer(srv config.MCPServerConfig) error {
+	if r.config == nil {
+		return fmt.Errorf("no config loaded")
+	}
+	r.config.UpsertMCPServer(srv)
+	if err := r.config.Save(); err != nil {
+		return err
+	}
+	if r.mcpMgr != nil {
+		bgCtx := r.backgroundCtx
+		if bgCtx == nil {
+			bgCtx = context.Background()
+		}
+		r.mcpMgr.Start(bgCtx, mcpServerConfigs([]config.MCPServerConfig{srv}))
+	}
+	return nil
+}
+
 func (r *Runtime) Stop() {
 	if r.backgroundCancel != nil {
 		r.backgroundCancel()
+	}
+	if r.mcpMgr != nil {
+		r.mcpMgr.Stop()
 	}
 }
 
@@ -639,4 +641,28 @@ func trailingMentionToken(input string) (string, bool) {
 		return "", false
 	}
 	return last, true
+}
+
+// mcpServerConfigs converts the persisted config entries into the shape the
+// mcp manager consumes. The conversion is intentionally explicit so future
+// fields (auth, headers, env templates) can be added without leaking the
+// persistence type into the mcp package.
+func mcpServerConfigs(in []config.MCPServerConfig) []mcp.ServerConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]mcp.ServerConfig, 0, len(in))
+	for _, s := range in {
+		out = append(out, mcp.ServerConfig{
+			Name:      s.Name,
+			Transport: s.NormalizeTransport(),
+			Command:   s.Command,
+			Args:      s.Args,
+			Env:       s.EnvSlice(),
+			URL:       s.URL,
+			Headers:   s.InterpolatedHeaders(),
+			Disabled:  s.Disabled,
+		})
+	}
+	return out
 }
