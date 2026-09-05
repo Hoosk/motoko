@@ -3,10 +3,10 @@ package patch
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 
 	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 	replaceMarker = ">>>>>>> REPLACE"
 )
 
-type Tool struct{}
+type Tool struct{ approveExternal ExternalApprover }
 
 type Result struct {
 	Summary string
@@ -75,8 +75,12 @@ type patchedLine struct {
 
 var unifiedHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
-func New() *Tool {
-	return &Tool{}
+func New(approvers ...ExternalApprover) *Tool {
+	tool := &Tool{}
+	if len(approvers) > 0 {
+		tool.approveExternal = approvers[0]
+	}
+	return tool
 }
 
 func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
@@ -94,21 +98,21 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 		return t.runJSONPatch(ctx, request.Path, request.Edits)
 	}
 
-	absPath, relPath, err := resolveWorkspaceWritePath(request.Path)
+	resolved, err := resolveWorkspaceWritePath(ctx, request.Path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
 
-	content, err := os.ReadFile(absPath)
-	if err != nil && !os.IsNotExist(err) {
+	relPath := resolved.Relative
+	content, err := readPatchContent(resolved)
+	if err != nil {
 		return Result{}, err
 	}
-
-	existed := !os.IsNotExist(err)
+	existed := resolved.Existing()
 	current := string(content)
 	updated := ""
 
-	if os.IsNotExist(err) {
+	if !existed {
 		if request.Search != "" {
 			return Result{}, fmt.Errorf("file %s does not exist and the SEARCH block is not empty", relPath)
 		}
@@ -127,7 +131,7 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
+	if err := pathpolicy.WriteFile(ctx, resolved, content, []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 
@@ -138,16 +142,17 @@ func (t *Tool) Run(ctx context.Context, args string) (Result, error) {
 }
 
 func (t *Tool) runJSONPatch(ctx context.Context, path string, edits []jsonPatchEdit) (Result, error) {
-	absPath, relPath, err := resolveWorkspaceWritePath(path)
+	resolved, err := resolveWorkspaceWritePath(ctx, path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
 
-	content, readErr := os.ReadFile(absPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
+	relPath := resolved.Relative
+	content, readErr := readPatchContent(resolved)
+	if readErr != nil {
 		return Result{}, readErr
 	}
-	existed := !os.IsNotExist(readErr)
+	existed := resolved.Existing()
 	updated := string(content)
 	if !existed {
 		if len(edits) != 1 {
@@ -178,7 +183,7 @@ func (t *Tool) runJSONPatch(ctx context.Context, path string, edits []jsonPatchE
 	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := WriteWorkspaceFile(ctx, absPath, content, []byte(updated), existed, 0o755, 0o644); err != nil {
+	if err := pathpolicy.WriteFile(ctx, resolved, content, []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 	return Result{
@@ -203,11 +208,12 @@ func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, e
 	if len(requests) == 0 {
 		return Result{}, fmt.Errorf("no AST mutations provided")
 	}
-	absPath, relPath, err := resolveWorkspaceWritePath(requests[0].Path)
+	resolved, err := resolveWorkspaceWritePath(ctx, requests[0].Path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
-	content, err := os.ReadFile(absPath)
+	relPath := resolved.Relative
+	content, err := pathpolicy.ReadFile(resolved)
 	if err != nil {
 		return Result{}, err
 	}
@@ -231,7 +237,7 @@ func (t *Tool) runASTPatch(ctx context.Context, requests []*astPatch) (Result, e
 	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), true, 0o755, 0o644); err != nil {
+	if err := pathpolicy.WriteFile(ctx, resolved, []byte(content), []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 	rendered := make([]string, 0, len(requests))
@@ -253,22 +259,23 @@ func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	absPath, relPath, err := resolveWorkspaceWritePath(path)
+	resolved, err := resolveWorkspaceWritePath(ctx, path, t.approveExternal)
 	if err != nil {
 		return Result{}, err
 	}
-	content, readErr := os.ReadFile(absPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
+	relPath := resolved.Relative
+	content, readErr := readPatchContent(resolved)
+	if readErr != nil {
 		return Result{}, readErr
 	}
-	if os.IsNotExist(readErr) && patch.OldPath != devNull {
+	if !resolved.Existing() && patch.OldPath != devNull {
 		return Result{}, fmt.Errorf("file %s does not exist to apply the unified diff", relPath)
 	}
 	updated, err := applyUnifiedPatch(string(content), patch)
 	if err != nil {
 		return Result{}, err
 	}
-	existed := !os.IsNotExist(readErr)
+	existed := resolved.Existing()
 	if !existed && updated == "" {
 		return Result{}, fmt.Errorf("refusing to create an empty file with unified patch: %s", relPath)
 	}
@@ -276,11 +283,18 @@ func (t *Tool) runUnifiedPatch(ctx context.Context, patch *unifiedPatch) (Result
 	if err := dialogpkg.GetBroker(ctx).RequestFileChange(ctx, dialogpkg.FileChange{Path: relPath, Diff: diff}); err != nil {
 		return Result{}, err
 	}
-	if err := WriteWorkspaceFile(ctx, absPath, []byte(content), []byte(updated), existed, 0o755, 0o644); err != nil {
+	if err := pathpolicy.WriteFile(ctx, resolved, []byte(content), []byte(updated), 0o644, 0o755); err != nil {
 		return Result{}, err
 	}
 	return Result{
 		Summary: fmt.Sprintf("Unified diff applied to %s.", relPath),
 		Output:  diff,
 	}, nil
+}
+
+func readPatchContent(resolved pathpolicy.Resolution) ([]byte, error) {
+	if !resolved.Existing() {
+		return nil, nil
+	}
+	return pathpolicy.ReadFile(resolved)
 }

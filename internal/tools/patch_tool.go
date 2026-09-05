@@ -4,6 +4,7 @@ import (
 	"context"
 
 	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 type PatchTool struct {
@@ -11,7 +12,9 @@ type PatchTool struct {
 }
 
 func NewPatchTool() *PatchTool {
-	return &PatchTool{engine: patchtool.New()}
+	return &PatchTool{engine: patchtool.New(func(ctx context.Context, resolved pathpolicy.Resolution) error {
+		return approveExternalAccess(ctx, "modify", resolved)
+	})}
 }
 
 func (t *PatchTool) Spec() Spec {

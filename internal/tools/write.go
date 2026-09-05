@@ -3,10 +3,10 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
+	"github.com/Hoosk/motoko/internal/tools/pathpolicy"
 )
 
 type WriteTool struct{}
@@ -42,19 +42,21 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("content is empty; refusing to write an empty file (use bash with truncation if intentional)")
 	}
 
-	absPath, relPath, err := patchtool.ResolveWorkspaceWritePath(path)
+	resolved, err := pathpolicy.Resolve(path)
 	if err != nil {
 		return Result{}, err
 	}
-
-	existed := false
-	previous := ""
-	if info, statErr := os.Stat(absPath); statErr == nil {
-		if info.IsDir() {
-			return Result{}, fmt.Errorf("path is a directory: %s", relPath)
-		}
-		existed = true
-		data, readErr := os.ReadFile(absPath)
+	if err := pathpolicy.ValidateWrite(resolved); err != nil {
+		return Result{}, err
+	}
+	if err := approveExternalAccess(ctx, "modify", resolved); err != nil {
+		return Result{}, err
+	}
+	absPath, relPath := resolved.Path, resolved.Relative
+	existed := resolved.Existing()
+	var previous string
+	if existed {
+		data, readErr := pathpolicy.ReadFile(resolved)
 		if readErr != nil {
 			return Result{}, fmt.Errorf("failed to read existing file: %w", readErr)
 		}
@@ -65,7 +67,7 @@ func (t *WriteTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := patchtool.WriteWorkspaceFile(ctx, absPath, []byte(previous), []byte(content), existed, 0o700, 0o600); err != nil {
+	if err := pathpolicy.WriteFile(ctx, resolved, []byte(previous), []byte(content), 0o600, 0o700); err != nil {
 		return Result{}, fmt.Errorf("failed to write file: %w", err)
 	}
 	output := diff
