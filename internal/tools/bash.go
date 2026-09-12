@@ -61,8 +61,8 @@ func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
 	}
 
 	var cmd *exec.Cmd
-	// The bash tool exists to run agent-provided commands; that taint is the
-	// product, and execution flows through the shell approval broker.
+	// The bash tool exists to run agent-provided commands; the taint is the
+	// product. Unlike the patch tool there is no broker gate on this path.
 	if strings.Contains(shell, "bash") || strings.Contains(shell, "zsh") {
 		cmd = exec.CommandContext(ctx, shell, "-lc", command) // #nosec G702
 	} else {
