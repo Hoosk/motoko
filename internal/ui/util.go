@@ -37,6 +37,7 @@ const (
 	keyCtrlT          = "ctrl+t"
 	modePlan          = "plan"
 	categoryShortcuts = "Shortcuts"
+	assistantDelta    = "assistant_delta"
 	thinkingDelta     = "thinking_delta"
 )
 

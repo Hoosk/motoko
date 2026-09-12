@@ -7,6 +7,10 @@ import (
 	"github.com/charmbracelet/glamour"
 )
 
+// One glamour TermRenderer is shared across all renders: constructing one is
+// expensive, and it only needs rebuilding when the wrap width changes (on
+// terminal resize). The mutex guards the package-level state because the
+// renderer itself is not safe for concurrent use.
 var (
 	mdMu       sync.Mutex
 	mdRenderer *glamour.TermRenderer

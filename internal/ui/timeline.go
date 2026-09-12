@@ -135,25 +135,8 @@ func (m *TimelineModel) onAgentStreamEvent(msg AgentStreamEventMsg) {
 		return
 	}
 	event := msg.Event
-	if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
-		targetKind := app.EntryAssistant
-		content := event.Content
-		if event.Kind == thinkingDelta {
-			targetKind = app.EntryReasoning
-			content = event.ReasoningContent
-		}
-
-		if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
-			m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
-			m.model.StreamEntryIndex = len(m.model.Entries) - 1
-			m.model.StreamedRunes = nil
-		}
-		if content != "" {
-			m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
-			if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
-				m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
-			}
-		}
+	if event.Kind == assistantDelta || event.Kind == thinkingDelta {
+		m.applyDelta(event)
 	} else {
 		m.appendStreamEvent(event)
 		if m.model.StreamEntryIndex != -1 {
@@ -162,6 +145,29 @@ func (m *TimelineModel) onAgentStreamEvent(msg AgentStreamEventMsg) {
 		}
 	}
 	m.renderMessages()
+}
+
+// applyDelta appends a streaming text/thinking chunk to the current stream
+// entry, opening a new one when the streamed kind changes.
+func (m *TimelineModel) applyDelta(event app.AgentStreamEvent) {
+	targetKind := app.EntryAssistant
+	content := event.Content
+	if event.Kind == thinkingDelta {
+		targetKind = app.EntryReasoning
+		content = event.ReasoningContent
+	}
+
+	if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
+		m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
+		m.model.StreamEntryIndex = len(m.model.Entries) - 1
+		m.model.StreamedRunes = nil
+	}
+	if content != "" {
+		m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
+		if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
+			m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
+		}
+	}
 }
 
 // onMouse handles sidebar/timeline mouse interactions. The boolean reports
@@ -237,25 +243,8 @@ func (m *TimelineModel) ApplyStreamBatch(events []app.AgentStreamEvent) {
 		return
 	}
 	for _, event := range events {
-		if event.Kind == "assistant_delta" || event.Kind == thinkingDelta {
-			targetKind := app.EntryAssistant
-			content := event.Content
-			if event.Kind == thinkingDelta {
-				targetKind = app.EntryReasoning
-				content = event.ReasoningContent
-			}
-
-			if m.model.StreamEntryIndex == -1 || m.model.Entries[m.model.StreamEntryIndex].Kind != targetKind {
-				m.appendEntry(app.Entry{Kind: targetKind, Text: ""})
-				m.model.StreamEntryIndex = len(m.model.Entries) - 1
-				m.model.StreamedRunes = nil
-			}
-			if content != "" {
-				m.model.StreamedRunes = append(m.model.StreamedRunes, []rune(content)...)
-				if m.model.StreamEntryIndex >= 0 && m.model.StreamEntryIndex < len(m.model.Entries) {
-					m.model.Entries[m.model.StreamEntryIndex].Text = string(m.model.StreamedRunes)
-				}
-			}
+		if event.Kind == assistantDelta || event.Kind == thinkingDelta {
+			m.applyDelta(event)
 			continue
 		}
 

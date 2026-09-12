@@ -29,9 +29,9 @@ func (m *Model) VisibleEntries() []app.Entry {
 	return visible
 }
 
-// syncRenderCache aligns the per-entry render cache with the current entry
+// SyncRenderCache aligns the per-entry render cache with the current entry
 // list. A width change discards all cached renders; appends only extend the
-// cache with fresh slots.
+// cache, clearing re-exposed slots so stale entries can never be served.
 func (m *Model) SyncRenderCache(width int) {
 	n := len(m.Entries)
 	if m.cacheWidth != width {
@@ -39,15 +39,16 @@ func (m *Model) SyncRenderCache(width int) {
 		m.cacheWidth = width
 		return
 	}
-	if len(m.renderCache) == n {
-		return
-	}
-	if len(m.renderCache) > n {
-		m.renderCache = m.renderCache[:n]
+	old := len(m.renderCache)
+	if old == n {
 		return
 	}
 	if cap(m.renderCache) >= n {
-		m.renderCache = m.renderCache[:n]
+		grown := m.renderCache[:n]
+		if n > old {
+			clear(grown[old:n])
+		}
+		m.renderCache = grown
 		return
 	}
 	cache := make([]renderedEntry, n)
@@ -56,16 +57,22 @@ func (m *Model) SyncRenderCache(width int) {
 }
 
 // RenderedFor returns the rendered block for the entry together with its
-// line metadata, reusing the cache while the entry text and width stay
-// unchanged.
+// line metadata. Callers must have called SyncRenderCache for the current
+// width first; out-of-range indices fall back to an uncached render. The
+// returned metadata is shared cache state and must be treated as read-only.
 func (m *Model) RenderedFor(idx int, entry app.Entry) (string, []RenderLine) {
+	if idx < 0 || idx >= len(m.renderCache) {
+		rendered := m.RenderEntry(entry)
+		return rendered, m.renderEntryMetadata(entry, rendered)
+	}
 	cached := &m.renderCache[idx]
-	if cached.valid && cached.source == entry.Text {
+	if cached.valid && cached.source == entry.Text && cached.kind == entry.Kind {
 		return cached.rendered, cached.meta
 	}
 	cached.rendered = m.RenderEntry(entry)
 	cached.meta = m.renderEntryMetadata(entry, cached.rendered)
 	cached.source = entry.Text
+	cached.kind = entry.Kind
 	cached.valid = true
 	return cached.rendered, cached.meta
 }
@@ -109,21 +116,24 @@ func (m *Model) renderEntryMetadata(entry app.Entry, rendered string) []RenderLi
 		}
 		return meta
 	case app.EntryCommand, app.EntryOutput, app.EntryError, app.EntrySystem, app.EntryHelp:
-		return PlainLineMetadata(rendered, true)
+		return plainMetaFromLines(plainLines, true)
 	default:
-		return PlainLineMetadata(rendered, false)
+		return plainMetaFromLines(plainLines, false)
 	}
 }
 
-// PlainLineMetadata maps a rendered block to plain, non-content lines used
-// for startup chrome that must stay out of text selection.
-func PlainLineMetadata(rendered string, selectable bool) []RenderLine {
-	lines := strings.Split(StripANSI(rendered), "\n")
+func plainMetaFromLines(lines []string, selectable bool) []RenderLine {
 	meta := make([]RenderLine, 0, len(lines))
 	for _, line := range lines {
 		meta = append(meta, RenderLine{Plain: line, Content: line, Selectable: selectable})
 	}
 	return meta
+}
+
+// PlainLineMetadata maps a rendered block to plain, non-content lines used
+// for startup chrome that must stay out of text selection.
+func PlainLineMetadata(rendered string, selectable bool) []RenderLine {
+	return plainMetaFromLines(strings.Split(StripANSI(rendered), "\n"), selectable)
 }
 
 func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer bool) {

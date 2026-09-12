@@ -21,6 +21,7 @@ type TextPos struct {
 type renderedEntry struct {
 	rendered string
 	source   string
+	kind     app.EntryKind
 	meta     []RenderLine
 	valid    bool
 }

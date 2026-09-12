@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
@@ -136,17 +135,17 @@ func TestTimelineThinkingShowsNoSpinnerBlock(t *testing.T) {
 	m.SyncLayout(80, 20)
 	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryAssistant, Text: "texto util"}}}})
 
-	m.SetThinking(true)
-	before := m.model.Messages
+	beforeContent := m.model.ViewportContent
+	beforeLines := len(m.model.RenderLines)
 
+	m.SetThinking(true)
 	m.Update(ThinkingTickMsg{})
 
-	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
-	if strings.Contains(got, "processing") {
-		t.Fatalf("expected no spinner block while thinking, got %q", got)
+	if len(m.model.RenderLines) != beforeLines {
+		t.Fatalf("expected no extra render lines while thinking, got %d want %d", len(m.model.RenderLines), beforeLines)
 	}
-	if !slices.Equal(m.model.Messages, before) {
-		t.Fatal("expected thinking tick to not re-render the timeline")
+	if m.model.ViewportContent != beforeContent {
+		t.Fatal("expected thinking state to leave the timeline render untouched")
 	}
 }
 
@@ -367,7 +366,9 @@ func BenchmarkTimelineStreamDeltaWithHistory(b *testing.B) {
 	streamIdx := len(m.timeline.model.Entries) - 1
 
 	b.ResetTimer()
+	b.ReportAllocs()
 	for b.Loop() {
+		m.timeline.model.StreamedRunes = []rune(streamBase)
 		m.timeline.model.Entries[streamIdx].Text = streamBase
 		updated, _ := m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{{Kind: "assistant_delta", Content: "x"}}, Done: true})
 		m = updated.(Model)
