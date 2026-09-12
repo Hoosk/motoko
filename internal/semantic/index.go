@@ -73,6 +73,11 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 	if err != nil {
 		return nil, err
 	}
+	fsRoot, rootErr := os.OpenRoot(root)
+	if rootErr != nil {
+		return nil, rootErr
+	}
+	defer fsRoot.Close()
 	changed := findChangedFiles(root)
 	snapshot.ChangedPaths = changed
 	changedMap := make(map[string]bool)
@@ -119,7 +124,7 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		if infoErr != nil || info.Size() > maxIndexedFileSize {
 			return nil
 		}
-		fileContent, readErr := os.ReadFile(path)
+		fileContent, readErr := fsRoot.ReadFile(rel)
 		if readErr != nil {
 			return nil
 		}

@@ -17,6 +17,10 @@ import (
 // ErrNoUpdateAvailable is returned when the current version is already the latest.
 var ErrNoUpdateAvailable = errors.New("no update available")
 
+// maxBinarySize caps the extracted binary so a crafted archive cannot fill
+// the disk (decompression bomb).
+const maxBinarySize = 256 << 20
+
 // Update checks for a new version and updates the binary if available.
 func (u *Updater) Update(ctx context.Context) error {
 	info, err := u.CheckVersion(ctx)
@@ -96,8 +100,12 @@ func (u *Updater) Update(ctx context.Context) error {
 		expectedName2 := fmt.Sprintf("motoko_%s_%s", u.goos, u.goarch)
 
 		if header.Typeflag == tar.TypeReg && (baseName == expectedName1 || baseName == expectedName2 || strings.Contains(baseName, "motoko")) {
-			if _, err := io.Copy(tmpFile, tarReader); err != nil {
+			written, err := io.Copy(tmpFile, io.LimitReader(tarReader, maxBinarySize+1))
+			if err != nil {
 				return fmt.Errorf("extract binary to temp file: %w", err)
+			}
+			if written > maxBinarySize {
+				return fmt.Errorf("binary exceeds size limit (%d bytes)", maxBinarySize)
 			}
 			found = true
 			break

@@ -45,7 +45,9 @@ func NewStdioTransport(cfg StdioConfig) (*StdioTransport, error) {
 	if cfg.Command == "" {
 		return nil, fmt.Errorf("mcp: stdio transport requires Command")
 	}
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	// MCP stdio servers are started from user configuration, mirroring every
+	// other MCP client.
+	cmd := exec.Command(cfg.Command, cfg.Args...) // #nosec G204
 	if len(cfg.Env) > 0 {
 		cmd.Env = append(os.Environ(), cfg.Env...)
 	}
