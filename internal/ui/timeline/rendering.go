@@ -29,20 +29,115 @@ func (m *Model) VisibleEntries() []app.Entry {
 	return visible
 }
 
+// syncRenderCache aligns the per-entry render cache with the current entry
+// list. A width change discards all cached renders; appends only extend the
+// cache with fresh slots.
+func (m *Model) SyncRenderCache(width int) {
+	n := len(m.Entries)
+	if m.cacheWidth != width {
+		m.renderCache = make([]renderedEntry, n)
+		m.cacheWidth = width
+		return
+	}
+	if len(m.renderCache) == n {
+		return
+	}
+	if len(m.renderCache) > n {
+		m.renderCache = m.renderCache[:n]
+		return
+	}
+	if cap(m.renderCache) >= n {
+		m.renderCache = m.renderCache[:n]
+		return
+	}
+	cache := make([]renderedEntry, n)
+	copy(cache, m.renderCache)
+	m.renderCache = cache
+}
+
+// RenderedFor returns the rendered block for the entry together with its
+// line metadata, reusing the cache while the entry text and width stay
+// unchanged.
+func (m *Model) RenderedFor(idx int, entry app.Entry) (string, []RenderLine) {
+	cached := &m.renderCache[idx]
+	if cached.valid && cached.source == entry.Text {
+		return cached.rendered, cached.meta
+	}
+	cached.rendered = m.RenderEntry(entry)
+	cached.meta = m.renderEntryMetadata(entry, cached.rendered)
+	cached.source = entry.Text
+	cached.valid = true
+	return cached.rendered, cached.meta
+}
+
+// renderEntryMetadata builds the per-line metadata for a rendered entry. The
+// plain lines are stripped once per cache miss, not once per render.
+func (m *Model) renderEntryMetadata(entry app.Entry, rendered string) []RenderLine {
+	plainLines := strings.Split(StripANSI(rendered), "\n")
+	switch entry.Kind {
+	case app.EntryAssistant:
+		meta := make([]RenderLine, 0, len(plainLines))
+		for _, line := range plainLines {
+			meta = append(meta, RenderLine{
+				Plain:      line,
+				Content:    strings.TrimPrefix(line, "▎ "),
+				ContentX:   AssistantContentX,
+				Selectable: true,
+			})
+		}
+		return meta
+	case app.EntryReasoning:
+		meta := make([]RenderLine, 0, len(plainLines))
+		for _, line := range plainLines {
+			meta = append(meta, RenderLine{
+				Plain:      line,
+				Content:    strings.TrimPrefix(line, "  "),
+				ContentX:   ReasoningContentX,
+				Selectable: true,
+			})
+		}
+		return meta
+	case app.EntryUser:
+		meta := make([]RenderLine, 0, len(plainLines))
+		for _, line := range plainLines {
+			meta = append(meta, RenderLine{
+				Plain:      line,
+				Content:    line,
+				ContentX:   UserContentX,
+				Selectable: true,
+			})
+		}
+		return meta
+	case app.EntryCommand, app.EntryOutput, app.EntryError, app.EntrySystem, app.EntryHelp:
+		return PlainLineMetadata(rendered, true)
+	default:
+		return PlainLineMetadata(rendered, false)
+	}
+}
+
+// PlainLineMetadata maps a rendered block to plain, non-content lines used
+// for startup chrome that must stay out of text selection.
+func PlainLineMetadata(rendered string, selectable bool) []RenderLine {
+	lines := strings.Split(StripANSI(rendered), "\n")
+	meta := make([]RenderLine, 0, len(lines))
+	for _, line := range lines {
+		meta = append(meta, RenderLine{Plain: line, Content: line, Selectable: selectable})
+	}
+	return meta
+}
+
 func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer bool) {
 	styledLines := strings.Split(styled, "\n")
-	plainLines := strings.Split(StripANSI(styled), "\n")
-	for i := range plainLines {
-		line := ""
-		if i < len(styledLines) {
-			line = styledLines[i]
-		}
-		lineMeta := RenderLine{Plain: plainLines[i], Content: plainLines[i]}
+	for i, line := range styledLines {
+		var lineMeta RenderLine
 		if i < len(meta) {
 			lineMeta = meta[i]
 			if lineMeta.Plain == "" {
-				lineMeta.Plain = plainLines[i]
+				lineMeta.Plain = StripANSI(line)
 			}
+		} else {
+			plain := StripANSI(line)
+			lineMeta = RenderLine{Plain: plain, Content: plain}
 		}
 		m.RenderLines = append(m.RenderLines, RenderLine{
 			Styled:     line,
@@ -54,74 +149,6 @@ func (m *Model) AppendRenderedBlock(styled string, meta []RenderLine, addSpacer 
 	}
 	if addSpacer {
 		m.RenderLines = append(m.RenderLines, RenderLine{Plain: "", Content: "", Selectable: false})
-	}
-}
-
-func (m *Model) RenderLineMetadata(idx int) []RenderLine {
-	startupMessageCount := m.startupMessageCount()
-	if idx < startupMessageCount {
-		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
-		meta := make([]RenderLine, 0, len(plainLines))
-		for _, line := range plainLines {
-			meta = append(meta, RenderLine{Plain: line, Content: line, Selectable: false})
-		}
-		return meta
-	}
-	entryIdx := idx - startupMessageCount
-	visible := m.VisibleEntries()
-	if entryIdx < 0 || entryIdx >= len(visible) {
-		return nil
-	}
-	entry := visible[entryIdx]
-	switch entry.Kind {
-	case app.EntryAssistant:
-		rendered := strings.Split(StripANSI(m.Messages[idx]), "\n")
-		meta := make([]RenderLine, 0, len(rendered))
-		for _, line := range rendered {
-			content := strings.TrimPrefix(line, "▎ ")
-			meta = append(meta, RenderLine{Plain: line, Content: content, ContentX: AssistantContentX, Selectable: true})
-		}
-		return meta
-	case app.EntryReasoning:
-		wrapped := strings.Split(WrapText(entry.Text, m.AssistantInnerWidth()), "\n")
-		meta := make([]RenderLine, 0, len(wrapped))
-		contentX := AssistantContentX
-		if entry.Kind == app.EntryReasoning {
-			contentX = ReasoningContentX
-		}
-		for _, line := range wrapped {
-			meta = append(meta, RenderLine{Content: line, ContentX: contentX, Selectable: true})
-		}
-		return meta
-	case app.EntryUser:
-		w := max(20, m.Viewport.Width)
-		wrapped := strings.Split(WrapText(entry.Text, w-5), "\n")
-		meta := make([]RenderLine, 0, len(wrapped))
-		// Body lines
-		for i, line := range wrapped {
-			var bodyLine string
-			if i == 0 {
-				bodyLine = " >  " + line
-			} else {
-				bodyLine = "    " + line
-			}
-			meta = append(meta, RenderLine{Content: bodyLine, ContentX: UserContentX, Selectable: true})
-		}
-		return meta
-	case app.EntryCommand, app.EntryOutput, app.EntryError, app.EntrySystem, app.EntryHelp:
-		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
-		meta := make([]RenderLine, 0, len(plainLines))
-		for _, line := range plainLines {
-			meta = append(meta, RenderLine{Content: line, Selectable: true})
-		}
-		return meta
-	default:
-		plainLines := strings.Split(StripANSI(m.Messages[idx]), "\n")
-		meta := make([]RenderLine, 0, len(plainLines))
-		for _, line := range plainLines {
-			meta = append(meta, RenderLine{Content: line, Selectable: false})
-		}
-		return meta
 	}
 }
 

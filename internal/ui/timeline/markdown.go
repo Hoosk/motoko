@@ -2,22 +2,43 @@ package timeline
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/glamour"
 )
 
-func renderAssistantMarkdown(text string, width int) string {
+var (
+	mdMu       sync.Mutex
+	mdRenderer *glamour.TermRenderer
+	mdWidth    int
+)
+
+func markdownRenderer(width int) *glamour.TermRenderer {
+	mdMu.Lock()
+	defer mdMu.Unlock()
+	if mdRenderer != nil && mdWidth == width {
+		return mdRenderer
+	}
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(max(20, width-2)),
+		glamour.WithWordWrap(width),
 		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
+		return nil
+	}
+	mdRenderer, mdWidth = renderer, width
+	return mdRenderer
+}
+
+func renderAssistantMarkdown(text string, width int) string {
+	renderer := markdownRenderer(max(20, width-2))
+	if renderer == nil {
 		return renderAssistantMessage(text)
 	}
-	defer func() { _ = renderer.Close() }()
-
+	mdMu.Lock()
 	rendered, err := renderer.Render(text)
+	mdMu.Unlock()
 	if err != nil {
 		return renderAssistantMessage(text)
 	}

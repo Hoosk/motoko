@@ -18,18 +18,26 @@ type TextPos struct {
 	Column int
 }
 
+type renderedEntry struct {
+	rendered string
+	source   string
+	meta     []RenderLine
+	valid    bool
+}
+
 type Model struct {
 	ViewportContent  string
 	Messages         []string
 	Entries          []app.Entry
 	RenderLines      []RenderLine
 	StreamedRunes    []rune
+	renderCache      []renderedEntry
 	Viewport         viewport.Model
 	SelectionFocus   TextPos
 	SelectionAnchor  TextPos
 	Height           int
 	Width            int
-	ThinkingFrame    int
+	cacheWidth       int
 	SelectedMessage  int
 	StreamEntryIndex int
 	AutoScroll       bool

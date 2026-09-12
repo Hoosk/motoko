@@ -106,6 +106,40 @@ func TestAppendRenderedBlockPreservesEmptySelectableContent(t *testing.T) {
 	}
 }
 
+func TestRenderedForCachesStableEntries(t *testing.T) {
+	m := New(80, 20)
+	m.Entries = []app.Entry{{Kind: app.EntryAssistant, Text: "hola"}}
+	m.SyncRenderCache(80)
+
+	first, _ := m.RenderedFor(0, m.Entries[0])
+	if !m.renderCache[0].valid {
+		t.Fatal("expected entry to be cached after first render")
+	}
+	if got, _ := m.RenderedFor(0, m.Entries[0]); got != first {
+		t.Fatal("expected cached render to be reused for unchanged entry")
+	}
+
+	m.Entries[0].Text = "mundo"
+	if got, _ := m.RenderedFor(0, m.Entries[0]); got == first {
+		t.Fatal("expected text change to invalidate the cached render")
+	}
+}
+
+func TestSyncRenderCacheInvalidatesOnWidthChange(t *testing.T) {
+	m := New(80, 20)
+	m.Entries = []app.Entry{{Kind: app.EntryAssistant, Text: "hola"}}
+	m.SyncRenderCache(80)
+	m.RenderedFor(0, m.Entries[0])
+	if len(m.renderCache) != 1 || !m.renderCache[0].valid {
+		t.Fatal("expected cache slot to be valid after render")
+	}
+
+	m.SyncRenderCache(60)
+	if m.renderCache[0].valid {
+		t.Fatal("expected width change to invalidate cached renders")
+	}
+}
+
 func TestModelNew(t *testing.T) {
 	m := New(100, 30)
 	if m.Width != 100 {

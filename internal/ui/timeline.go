@@ -112,12 +112,6 @@ func (m *TimelineModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.renderMessages()
 
-	case ThinkingTickMsg:
-		if m.model.Thinking {
-			m.model.ThinkingFrame = (m.model.ThinkingFrame + 1) % len(timeline.ThinkingFrames)
-			m.renderMessages()
-		}
-
 	case tea.MouseMsg:
 		if cmd, handled := m.onMouse(msg); handled {
 			return cmd
@@ -327,12 +321,24 @@ func (m *TimelineModel) renderMessages() {
 	if width <= 0 {
 		return
 	}
+	m.model.SyncRenderCache(width)
+	startup := m.startupMessages()
 	selectedIdx := -1
 	m.model.RenderLines = m.model.RenderLines[:0]
 	m.model.Messages = m.model.Messages[:0]
-	m.model.Messages = append(m.model.Messages, m.startupMessages()...)
-	for _, entry := range m.model.VisibleEntries() {
-		m.model.Messages = append(m.model.Messages, m.model.RenderEntry(entry))
+	m.model.Messages = append(m.model.Messages, startup...)
+	metas := make([][]timeline.RenderLine, 0, len(m.model.Entries)+len(startup))
+	for _, msg := range startup {
+		metas = append(metas, timeline.PlainLineMetadata(msg, false))
+	}
+	for i := range m.model.Entries {
+		entry := m.model.Entries[i]
+		if !m.model.ShowReasoning && entry.Kind == app.EntryReasoning {
+			continue
+		}
+		rendered, meta := m.model.RenderedFor(i, entry)
+		m.model.Messages = append(m.model.Messages, rendered)
+		metas = append(metas, meta)
 	}
 	if m.model.SelectedMessage >= 0 && len(m.model.Messages) > 0 {
 		selectedIdx = clamp(m.model.SelectedMessage, len(m.model.Messages)-1)
@@ -342,12 +348,7 @@ func (m *TimelineModel) renderMessages() {
 		if i == selectedIdx {
 			rendered = styles.SelectedMessageStyle.Render(msg)
 		}
-		m.model.AppendRenderedBlock(rendered, m.model.RenderLineMetadata(i), i < len(m.model.Messages)-1)
-	}
-	if m.model.Thinking {
-		spinner := styles.BoldNeonStyle.Render(timeline.ThinkingFrames[m.model.ThinkingFrame])
-		label := styles.ItalicGrayStyle.Render("  processing")
-		m.model.AppendRenderedBlock(spinner+label, []timeline.RenderLine{{Content: timeline.StripANSI(spinner + label)}}, false)
+		m.model.AppendRenderedBlock(rendered, metas[i], i < len(m.model.Messages)-1)
 	}
 
 	styledLines := make([]string, len(m.model.RenderLines))
@@ -359,14 +360,7 @@ func (m *TimelineModel) renderMessages() {
 }
 
 func (m *TimelineModel) SetThinking(thinking bool) {
-	if m.model.Thinking == thinking {
-		return
-	}
 	m.model.Thinking = thinking
-	if thinking {
-		m.model.ThinkingFrame = 0
-	}
-	m.renderMessages()
 }
 
 func (m *TimelineModel) SetStreaming(streaming bool) {

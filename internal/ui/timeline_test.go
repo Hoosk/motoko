@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,6 +110,43 @@ func TestTimelineUpdateIgnoresNonStreamingState(t *testing.T) {
 	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
 	if strings.Contains(got, "hola") {
 		t.Fatalf("did not expect assistant delta rendered while streaming disabled, got %q", got)
+	}
+}
+
+func TestTimelineStreamBatchUpdatesStreamedEntry(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.width, m.height = 80, 24
+	m.SyncLayout()
+	m.timeline.SetStreaming(true)
+
+	updated, _ := m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{
+		{Kind: "assistant_delta", Content: "hola "},
+		{Kind: "assistant_delta", Content: "mundo"},
+	}, Done: true})
+	m = updated.(Model)
+
+	got := timeline.StripANSI(strings.Join(m.timeline.model.Messages, "\n"))
+	if !strings.Contains(got, "hola mundo") {
+		t.Fatalf("expected batched deltas rendered, got %q", got)
+	}
+}
+
+func TestTimelineThinkingShowsNoSpinnerBlock(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryAssistant, Text: "texto util"}}}})
+
+	m.SetThinking(true)
+	before := m.model.Messages
+
+	m.Update(ThinkingTickMsg{})
+
+	got := timeline.StripANSI(strings.Join(m.model.Messages, "\n"))
+	if strings.Contains(got, "processing") {
+		t.Fatalf("expected no spinner block while thinking, got %q", got)
+	}
+	if !slices.Equal(m.model.Messages, before) {
+		t.Fatal("expected thinking tick to not re-render the timeline")
 	}
 }
 
@@ -304,5 +342,34 @@ func TestTimelineReasoningRendersIndentedWithoutRail(t *testing.T) {
 	}
 	if strings.Contains(got, "▎ thinking trace") {
 		t.Fatalf("expected reasoning without assistant rail, got %q", got)
+	}
+}
+
+func BenchmarkTimelineStreamDeltaWithHistory(b *testing.B) {
+	m := NewModel(app.NewRuntime())
+	m.width, m.height = 80, 24
+	m.SyncLayout()
+	m.timeline.SetStreaming(true)
+
+	entries := make([]app.Entry, 0, 60)
+	for range 30 {
+		entries = append(entries,
+			app.Entry{Kind: app.EntryAssistant, Text: "# Heading\n\nparagraph with **bold** and `code` spans.\n\n```go\nfmt.Println(\"hi\")\n```"},
+			app.Entry{Kind: app.EntryOutput, Text: strings.Repeat("line of output\n", 40)},
+		)
+	}
+	updated, _ := m.Update(ResponseAppliedMsg{Response: app.Response{Entries: entries}})
+	m = updated.(Model)
+
+	streamBase := strings.Repeat("streamed assistant chunk ", 80)
+	updated, _ = m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{{Kind: "assistant_delta", Content: streamBase}}, Done: true})
+	m = updated.(Model)
+	streamIdx := len(m.timeline.model.Entries) - 1
+
+	b.ResetTimer()
+	for b.Loop() {
+		m.timeline.model.Entries[streamIdx].Text = streamBase
+		updated, _ := m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{{Kind: "assistant_delta", Content: "x"}}, Done: true})
+		m = updated.(Model)
 	}
 }
