@@ -30,6 +30,7 @@ type Orchestrator struct {
 	onMaybeAutoCompact func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error
 	onGenerateTitle    func(ctx context.Context, userInput, assistantResponse string)
 	onPersistTurn      func(agent.Result)
+	onContextWindow    func(int)
 	activeSubagents    map[string]*types.SubagentInfo
 	contextInfoFn      func() system.ContextInfo
 	currentSessionFn   func() *session.Session
@@ -62,6 +63,7 @@ type Deps struct {
 	AvailableAgentsFn func() []agent.AgentDef
 	AvailableSkillsFn func() []skills.Skill
 	ContextInfoFn     func() system.ContextInfo
+	OnContextWindow   func(int)
 
 	OnPersistTurn      func(agent.Result)
 	OnGenerateTitle    func(ctx context.Context, userInput, assistantResponse string)
@@ -89,6 +91,7 @@ func New(deps Deps) *Orchestrator {
 		onPersistTurn:      deps.OnPersistTurn,
 		onGenerateTitle:    deps.OnGenerateTitle,
 		onMaybeAutoCompact: deps.OnMaybeAutoCompact,
+		onContextWindow:    deps.OnContextWindow,
 	}
 }
 
@@ -173,11 +176,13 @@ func (o *Orchestrator) RefreshAgent() {
 	cfg := o.configFn()
 	if cfg == nil {
 		o.agent = nil
+		o.feedContextWindow(0)
 		return
 	}
 	active, ok := cfg.Active()
 	if !ok {
 		o.agent = nil
+		o.feedContextWindow(0)
 		return
 	}
 
@@ -214,10 +219,20 @@ func (o *Orchestrator) RefreshAgent() {
 	client, err := providerFn(active)
 	if err != nil {
 		o.agent = nil
+		o.feedContextWindow(0)
 		return
 	}
+	o.feedContextWindow(active.ContextWindow)
 
 	o.agent = o.buildAgentFromDef(client, aDef, override, hasOverride)
+}
+
+// feedContextWindow publishes the resolved provider's context window back to
+// the runtime so scaling, compaction and the footer consume the real value.
+func (o *Orchestrator) feedContextWindow(cw int) {
+	if o.onContextWindow != nil {
+		o.onContextWindow(cw)
+	}
 }
 
 func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) *agent.Agent {
