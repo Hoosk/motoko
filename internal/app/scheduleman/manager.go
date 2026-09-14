@@ -179,9 +179,12 @@ func (m *Manager) runSchedule(ctx context.Context, def Definition) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if m.emit(ctx, def) {
-				m.removeAfterFire(def.ID)
-			}
+			// Remove the one-shot before delivering its event: once the
+			// consumer observes the event, the schedule must already be
+			// gone, and a failed delivery must not leave a zombie entry
+			// that can never fire again.
+			m.removeAfterFire(def.ID)
+			_ = m.emit(ctx, def)
 			return
 		}
 	}
