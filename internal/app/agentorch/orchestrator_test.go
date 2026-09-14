@@ -444,3 +444,37 @@ func TestRefreshAgentNoActiveProviderResetsContextWindow(t *testing.T) {
 		t.Fatalf("expected context window reset to 0 without active provider, got %d", fed)
 	}
 }
+
+func TestFinishRunSurfacesAutoCompactError(t *testing.T) {
+	deps := minimalDeps()
+	deps.OnMaybeAutoCompact = func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error {
+		return errors.New("provider exploded")
+	}
+
+	var events []types.AgentStreamEvent
+	orch := newTestOrch(deps)
+	orch.finishRun(context.Background(), "input", agent.Result{}, func(ev types.AgentStreamEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected one error event, got %#v", events)
+	}
+	if events[0].Kind != "error" {
+		t.Fatalf("expected kind %q, got %q", "error", events[0].Kind)
+	}
+	if !strings.Contains(events[0].Content, "Auto-compact failed") || !strings.Contains(events[0].Content, "provider exploded") {
+		t.Fatalf("unexpected error content %q", events[0].Content)
+	}
+}
+
+func TestFinishRunToleratesNilOnEvent(t *testing.T) {
+	deps := minimalDeps()
+	deps.OnMaybeAutoCompact = func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error {
+		return errors.New("provider exploded")
+	}
+
+	orch := newTestOrch(deps)
+	orch.finishRun(context.Background(), "input", agent.Result{}, nil)
+}

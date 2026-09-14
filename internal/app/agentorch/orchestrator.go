@@ -539,7 +539,14 @@ func (o *Orchestrator) finishRun(ctx context.Context, input string, result agent
 		}
 	}
 	if o.onMaybeAutoCompact != nil {
-		_ = o.onMaybeAutoCompact(ctx, onEvent)
+		if err := o.onMaybeAutoCompact(ctx, onEvent); err != nil {
+			if onEvent != nil {
+				_ = onEvent(types.AgentStreamEvent{
+					Kind:    "error",
+					Content: fmt.Sprintf("Auto-compact failed: %v", err),
+				})
+			}
+		}
 	}
 }
 
