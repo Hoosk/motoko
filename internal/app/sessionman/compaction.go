@@ -75,6 +75,20 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 		return fmt.Errorf("compaction returned empty summary")
 	}
 
+	newHistory := []provider.ConversationItem{
+		provider.UserText("Compacted conversation summary:\n" + summaryText),
+	}
+	newHistory = append(newHistory, recentHistory...)
+
+	// Persist the compacted history first: if saving fails, the brain must
+	// stay untouched so we never leave a summary.md without a matching
+	// compacted history.
+	m.currentSession.History = newHistory
+	m.currentSession.LastInputTokens = 0
+	if err := m.currentSession.Save(); err != nil {
+		return err
+	}
+
 	if m.brain != nil {
 		prevSummary, _ := m.brain.Read("summary.md")
 		newSummary := summaryText
@@ -86,12 +100,5 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 		}
 	}
 
-	newHistory := []provider.ConversationItem{
-		provider.UserText("Compacted conversation summary:\n" + summaryText),
-	}
-	newHistory = append(newHistory, recentHistory...)
-
-	m.currentSession.History = newHistory
-	m.currentSession.LastInputTokens = 0
-	return m.currentSession.Save()
+	return nil
 }

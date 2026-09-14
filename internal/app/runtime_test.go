@@ -500,7 +500,7 @@ func TestCompactSessionReturnsErrorWithoutActiveProviderWhenHistoryExists(t *tes
 
 func TestMaybeAutoCompactSkipsWhenHistoryUsageBelowThreshold(t *testing.T) {
 	r := NewRuntime()
-	r.contextWindow = 1000
+	r.contextWindow.Store(1000)
 	r.sesMgr.SetCurrentSession(&session.Session{
 		History:         []provider.ConversationItem{provider.UserText("hola")},
 		LastInputTokens: 799,
@@ -510,7 +510,7 @@ func TestMaybeAutoCompactSkipsWhenHistoryUsageBelowThreshold(t *testing.T) {
 	err := r.sesMgr.MaybeAutoCompact(context.Background(), func(AgentStreamEvent) error {
 		events++
 		return nil
-	}, r.config, r.newProviderClient, r.contextWindow)
+	}, r.config, r.newProviderClient, r.ContextWindow())
 	if err != nil {
 		t.Fatalf("maybeAutoCompact() error = %v", err)
 	}
@@ -581,7 +581,7 @@ func TestCompactSessionCompactsHistoryWithProviderSummary(t *testing.T) {
 func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 	withSessionBaseDir(t)
 	r := NewRuntime()
-	r.contextWindow = 1000
+	r.contextWindow.Store(1000)
 	r.config = &config.AppConfig{
 		ActiveProvider: "openai",
 		Providers: []config.ProviderConfig{{
@@ -606,7 +606,7 @@ func TestMaybeAutoCompactCompactsAndEmitsEventsAtThreshold(t *testing.T) {
 	err := r.sesMgr.MaybeAutoCompact(context.Background(), func(event AgentStreamEvent) error {
 		events = append(events, event)
 		return nil
-	}, r.config, r.newProviderClient, r.contextWindow)
+	}, r.config, r.newProviderClient, r.ContextWindow())
 	if err != nil {
 		t.Fatalf("maybeAutoCompact() error = %v", err)
 	}
