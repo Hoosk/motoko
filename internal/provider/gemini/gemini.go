@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 
@@ -205,7 +206,7 @@ func (c *geminiClient) buildGenerateContentConfig(ctx context.Context, systemPro
 			IncludeThoughts: true,
 		}
 		if strings.Contains(c.Model(), "2.5") {
-			budget32 := int32(c.thinkingBudget)
+			budget32 := int32(min(max(c.thinkingBudget, 0), math.MaxInt32))
 			cfg.ThinkingConfig.ThinkingBudget = &budget32
 		} else {
 			cfg.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(provider.BudgetToGeminiThinkingLevel(c.thinkingBudget))

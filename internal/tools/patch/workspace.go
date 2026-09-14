@@ -138,5 +138,7 @@ func WriteWorkspaceFile(ctx context.Context, absPath string, expected, updated [
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return os.WriteFile(absPath, updated, filePerm)
+	// Paths are validated and resolved by ValidateWritePath before they reach
+	// this point; writing agent-directed files is the tool's purpose.
+	return os.WriteFile(absPath, updated, filePerm) // #nosec G703
 }

@@ -26,8 +26,6 @@ linters:
       enable-all: true
     goconst:
       ignore-tests: true
-    maintidx:
-      threshold: 25
   exclusions:
     generated: lax
     presets:

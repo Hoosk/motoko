@@ -132,7 +132,7 @@ func LoadCatalog(ctx context.Context) error {
 
 	// Write cache file in background/best-effort
 	_ = os.MkdirAll(filepath.Dir(cachePath), 0755)
-	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+	if err := os.WriteFile(cachePath, data, 0600); err != nil {
 		tracelog.Logf("catalog: failed to write cache file: %v", err)
 	} else {
 		tracelog.Logf("catalog: cached models catalog successfully to %s", cachePath)

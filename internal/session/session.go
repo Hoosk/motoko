@@ -2,7 +2,7 @@ package session
 
 import (
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- workspace IDs are non-cryptographic identifiers; the hash format is the on-disk session dir name
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -67,7 +67,7 @@ func WorkspaceIDFor(path string) string {
 	if abs == "" {
 		abs = "."
 	}
-	hash := sha1.Sum([]byte(abs))
+	hash := sha1.Sum([]byte(abs)) // #nosec G401 -- see import note
 	return hex.EncodeToString(hash[:8])
 }
 

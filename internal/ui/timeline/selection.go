@@ -165,11 +165,15 @@ func (m *Model) HighlightedStyledLine(lineIdx int) string {
 
 func (m *Model) SyncHighlight() {
 	currentOffset := m.Viewport.YOffset
-	lines := make([]string, len(m.RenderLines))
-	for i := range m.RenderLines {
-		lines[i] = m.HighlightedStyledLine(i)
+	if m.Selecting && m.SelectionDragged {
+		lines := make([]string, len(m.RenderLines))
+		for i := range m.RenderLines {
+			lines[i] = m.HighlightedStyledLine(i)
+		}
+		m.Viewport.SetContent(strings.Join(lines, "\n"))
+	} else {
+		m.Viewport.SetContent(m.ViewportContent)
 	}
-	m.Viewport.SetContent(strings.Join(lines, "\n"))
 
 	if m.Viewport.Height <= 0 || len(m.RenderLines) == 0 {
 		return

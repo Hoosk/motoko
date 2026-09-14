@@ -112,6 +112,43 @@ func TestTimelineUpdateIgnoresNonStreamingState(t *testing.T) {
 	}
 }
 
+func TestTimelineStreamBatchUpdatesStreamedEntry(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.width, m.height = 80, 24
+	m.SyncLayout()
+	m.timeline.SetStreaming(true)
+
+	updated, _ := m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{
+		{Kind: "assistant_delta", Content: "hola "},
+		{Kind: "assistant_delta", Content: "mundo"},
+	}, Done: true})
+	m = updated.(Model)
+
+	got := timeline.StripANSI(strings.Join(m.timeline.model.Messages, "\n"))
+	if !strings.Contains(got, "hola mundo") {
+		t.Fatalf("expected batched deltas rendered, got %q", got)
+	}
+}
+
+func TestTimelineThinkingShowsNoSpinnerBlock(t *testing.T) {
+	m := NewTimelineModel()
+	m.SyncLayout(80, 20)
+	m.Update(ResponseAppliedMsg{Response: app.Response{Entries: []app.Entry{{Kind: app.EntryAssistant, Text: "texto util"}}}})
+
+	beforeContent := m.model.ViewportContent
+	beforeLines := len(m.model.RenderLines)
+
+	m.SetThinking(true)
+	m.Update(ThinkingTickMsg{})
+
+	if len(m.model.RenderLines) != beforeLines {
+		t.Fatalf("expected no extra render lines while thinking, got %d want %d", len(m.model.RenderLines), beforeLines)
+	}
+	if m.model.ViewportContent != beforeContent {
+		t.Fatal("expected thinking state to leave the timeline render untouched")
+	}
+}
+
 func TestTimelineUserDelimitersRerenderOnResize(t *testing.T) {
 	m := NewTimelineModel()
 	m.SyncLayout(80, 20)
@@ -304,5 +341,36 @@ func TestTimelineReasoningRendersIndentedWithoutRail(t *testing.T) {
 	}
 	if strings.Contains(got, "▎ thinking trace") {
 		t.Fatalf("expected reasoning without assistant rail, got %q", got)
+	}
+}
+
+func BenchmarkTimelineStreamDeltaWithHistory(b *testing.B) {
+	m := NewModel(app.NewRuntime())
+	m.width, m.height = 80, 24
+	m.SyncLayout()
+	m.timeline.SetStreaming(true)
+
+	entries := make([]app.Entry, 0, 60)
+	for range 30 {
+		entries = append(entries,
+			app.Entry{Kind: app.EntryAssistant, Text: "# Heading\n\nparagraph with **bold** and `code` spans.\n\n```go\nfmt.Println(\"hi\")\n```"},
+			app.Entry{Kind: app.EntryOutput, Text: strings.Repeat("line of output\n", 40)},
+		)
+	}
+	updated, _ := m.Update(ResponseAppliedMsg{Response: app.Response{Entries: entries}})
+	m = updated.(Model)
+
+	streamBase := strings.Repeat("streamed assistant chunk ", 80)
+	updated, _ = m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{{Kind: "assistant_delta", Content: streamBase}}, Done: true})
+	m = updated.(Model)
+	streamIdx := len(m.timeline.model.Entries) - 1
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		m.timeline.model.StreamedRunes = []rune(streamBase)
+		m.timeline.model.Entries[streamIdx].Text = streamBase
+		updated, _ := m.Update(AgentStreamBatchMsg{RequestID: 0, Events: []app.AgentStreamEvent{{Kind: "assistant_delta", Content: "x"}}, Done: true})
+		m = updated.(Model)
 	}
 }

@@ -37,6 +37,7 @@ const (
 	keyCtrlT          = "ctrl+t"
 	modePlan          = "plan"
 	categoryShortcuts = "Shortcuts"
+	assistantDelta    = "assistant_delta"
 	thinkingDelta     = "thinking_delta"
 )
 
@@ -56,13 +57,12 @@ func writeClipboard(text string) error {
 	if err := clipboard.WriteAll(text); err == nil {
 		return nil
 	}
-	commands := [][]string{
-		{"wl-copy"},
-		{"xclip", "-selection", "clipboard"},
-		{"xsel", "--clipboard", "--input"},
+	commands := []*exec.Cmd{
+		exec.Command("wl-copy"),
+		exec.Command("xclip", "-selection", "clipboard"),
+		exec.Command("xsel", "--clipboard", "--input"),
 	}
-	for _, args := range commands {
-		cmd := exec.Command(args[0], args[1:]...)
+	for _, cmd := range commands {
 		cmd.Stdin = strings.NewReader(text)
 		if err := cmd.Run(); err == nil {
 			return nil

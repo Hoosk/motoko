@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -103,6 +104,97 @@ func TestAppendRenderedBlockPreservesEmptySelectableContent(t *testing.T) {
 
 	if got := m.RenderLines[0].Content; got != "" {
 		t.Fatalf("expected empty content for visual rail line, got %q", got)
+	}
+}
+
+func TestRenderedForCachesStableEntries(t *testing.T) {
+	m := New(80, 20)
+	m.Entries = []app.Entry{{Kind: app.EntryAssistant, Text: "hola"}}
+	m.SyncRenderCache(80)
+
+	first, _ := m.RenderedFor(0, m.Entries[0])
+	if !m.renderCache[0].valid {
+		t.Fatal("expected entry to be cached after first render")
+	}
+	if got, _ := m.RenderedFor(0, m.Entries[0]); got != first {
+		t.Fatal("expected cached render to be reused for unchanged entry")
+	}
+
+	m.Entries[0].Text = "mundo"
+	if got, _ := m.RenderedFor(0, m.Entries[0]); got == first {
+		t.Fatal("expected text change to invalidate the cached render")
+	}
+}
+
+func TestSyncRenderCacheInvalidatesOnWidthChange(t *testing.T) {
+	m := New(80, 20)
+	m.Entries = []app.Entry{{Kind: app.EntryAssistant, Text: "hola"}}
+	m.SyncRenderCache(80)
+	m.RenderedFor(0, m.Entries[0])
+	if len(m.renderCache) != 1 || !m.renderCache[0].valid {
+		t.Fatal("expected cache slot to be valid after render")
+	}
+
+	m.SyncRenderCache(60)
+	if m.renderCache[0].valid {
+		t.Fatal("expected width change to invalidate cached renders")
+	}
+}
+
+func TestSyncRenderCacheSequenceRestoresStaleSlots(t *testing.T) {
+	m := New(80, 20)
+
+	seed := []app.Entry{
+		{Kind: app.EntryAssistant, Text: "compartido"},
+		{Kind: app.EntryOutput, Text: "salida"},
+		{Kind: app.EntryUser, Text: "consulta"},
+		{Kind: app.EntrySystem, Text: "nota"},
+		{Kind: app.EntryAssistant, Text: "final"},
+	}
+	m.Entries = append([]app.Entry(nil), seed...)
+	m.SyncRenderCache(80)
+	for i := range m.Entries {
+		m.RenderedFor(i, m.Entries[i])
+	}
+
+	m.Entries = nil
+	m.SyncRenderCache(80)
+
+	m.Entries = []app.Entry{
+		{Kind: app.EntrySystem, Text: "compartido"},
+		{Kind: app.EntryAssistant, Text: "salida"},
+		{Kind: app.EntryUser, Text: "consulta"},
+	}
+	m.SyncRenderCache(80)
+
+	rendered, _ := m.RenderedFor(0, m.Entries[0])
+	if strings.Contains(rendered, "▎") {
+		t.Fatalf("stale assistant render served for system entry: %q", rendered)
+	}
+	assistantRendered, _ := m.RenderedFor(1, m.Entries[1])
+	if !strings.Contains(assistantRendered, "▎") {
+		t.Fatalf("expected assistant rail for assistant entry, got %q", assistantRendered)
+	}
+}
+
+func TestSyncRenderCacheGrowBeyondCapacity(t *testing.T) {
+	m := New(80, 20)
+	m.Entries = []app.Entry{{Kind: app.EntrySystem, Text: "entry 0"}}
+	m.SyncRenderCache(80)
+	m.RenderedFor(0, m.Entries[0])
+
+	entries := make([]app.Entry, 0, 12)
+	for i := range 12 {
+		entries = append(entries, app.Entry{Kind: app.EntrySystem, Text: fmt.Sprintf("entry %d", i)})
+	}
+	m.Entries = entries
+	m.SyncRenderCache(80)
+
+	for i := range m.Entries {
+		rendered, _ := m.RenderedFor(i, m.Entries[i])
+		if !strings.Contains(rendered, fmt.Sprintf("entry %d", i)) {
+			t.Fatalf("expected rendered entry %d, got %q", i, rendered)
+		}
 	}
 }
 
