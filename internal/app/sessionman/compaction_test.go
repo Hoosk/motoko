@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Hoosk/motoko/internal/agent"
+	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/session"
@@ -122,5 +123,68 @@ func TestPersistTurnLastInputTokensUsesLastIteration(t *testing.T) {
 	}
 	if len(s.Turns) != 1 || s.Turns[0].InputGrowth != 40 {
 		t.Fatalf("unexpected turns %#v", s.Turns)
+	}
+}
+
+func TestDoCompactSavesHistoryBeforeBrain(t *testing.T) {
+	withSessionBaseDirSessionman(t)
+
+	// A workspace ID containing NUL makes os.MkdirAll fail inside Save,
+	// while the brain (pointing at a valid dir) stays untouched.
+	m := NewManager("bad\x00workspace")
+	s := session.New("bad\x00workspace", "/workspace")
+	m.SetCurrentSession(s)
+	b, err := brain.New("ws-ok", s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SetBrain(b, nil)
+
+	s.History = []provider.ConversationItem{
+		provider.UserText(strings.Repeat("A", 90000)),
+		provider.AssistantText("respuesta"),
+	}
+	s.LastInputTokens = 8000
+
+	err = m.doCompact(context.Background(), compactTestConfig(), compactTestProviderFn(t, fakeCompactClient{finalText: "resumen"}), 100000)
+	if err == nil {
+		t.Fatal("expected Save failure to propagate from doCompact")
+	}
+	if b.Exists("summary.md") {
+		t.Fatal("brain must not be written when history Save fails")
+	}
+}
+
+func TestDoCompactWritesBrainAfterSuccessfulSave(t *testing.T) {
+	withSessionBaseDirSessionman(t)
+	m := NewManager("ws")
+	s := session.New("ws", "/workspace")
+	m.SetCurrentSession(s)
+	b, err := brain.New("ws", s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SetBrain(b, nil)
+
+	s.History = []provider.ConversationItem{
+		provider.UserText(strings.Repeat("A", 90000)),
+		provider.AssistantText("respuesta"),
+	}
+	s.LastInputTokens = 8000
+
+	if err := m.doCompact(context.Background(), compactTestConfig(), compactTestProviderFn(t, fakeCompactClient{finalText: "resumen breve"}), 100000); err != nil {
+		t.Fatalf("doCompact() error = %v", err)
+	}
+	if !b.Exists("summary.md") {
+		t.Fatal("expected summary.md written after successful Save")
+	}
+	if len(s.History) != 2 {
+		t.Fatalf("expected compacted history with 2 items, got %d", len(s.History))
+	}
+	if got := s.History[0].PlainText(); !strings.Contains(got, "resumen breve") {
+		t.Fatalf("expected compacted summary in history, got %q", got)
+	}
+	if s.LastInputTokens != 0 {
+		t.Fatalf("expected LastInputTokens reset, got %d", s.LastInputTokens)
 	}
 }
