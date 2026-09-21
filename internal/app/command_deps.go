@@ -120,6 +120,6 @@ func (r *Runtime) commandDeps() commands.Deps {
 
 		PendingDialogsFn: func() int { return r.PendingDialogs() },
 
-		ContextWindowFn: func() int { return r.contextWindow },
+		ContextWindowFn: func() int { return int(r.contextWindow.Load()) },
 	}
 }

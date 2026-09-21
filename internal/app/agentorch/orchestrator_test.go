@@ -2,6 +2,7 @@ package agentorch
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -360,4 +361,120 @@ func TestToolAllowedForAgentExplicitLists(t *testing.T) {
 	if toolAllowedForAgent(stubPlainTool{name: "bash"}, defReadOnly, nil, nil) {
 		t.Error("bash should be excluded when allow-write is false")
 	}
+}
+
+func TestRefreshAgentFeedsContextWindow(t *testing.T) {
+	deps := minimalDeps()
+	deps.ConfigFn = func() *config.AppConfig {
+		return &config.AppConfig{
+			ActiveProvider: "openai",
+			Providers: []config.ProviderConfig{{
+				Name:          "openai",
+				Kind:          config.ProviderKindOpenAICompatible,
+				APIKey:        "k",
+				Model:         "gpt-4.1",
+				ContextWindow: 128000,
+			}},
+		}
+	}
+	deps.ProviderClientFn = func() func(config.ProviderConfig) (provider.Client, error) {
+		return func(config.ProviderConfig) (provider.Client, error) { return nil, nil }
+	}
+
+	var fed int
+	deps.OnContextWindow = func(cw int) { fed = cw }
+
+	orch := newTestOrch(deps)
+	orch.RefreshAgent()
+
+	if orch.Agent() == nil {
+		t.Fatal("expected agent to be built")
+	}
+	if fed != 128000 {
+		t.Fatalf("expected context window 128000 fed back, got %d", fed)
+	}
+}
+
+func TestRefreshAgentResetsContextWindowOnFailure(t *testing.T) {
+	deps := minimalDeps()
+	deps.ConfigFn = func() *config.AppConfig {
+		return &config.AppConfig{
+			ActiveProvider: "openai",
+			Providers: []config.ProviderConfig{{
+				Name:          "openai",
+				Kind:          config.ProviderKindOpenAICompatible,
+				APIKey:        "k",
+				Model:         "gpt-4.1",
+				ContextWindow: 128000,
+			}},
+		}
+	}
+	deps.ProviderClientFn = func() func(config.ProviderConfig) (provider.Client, error) {
+		return func(config.ProviderConfig) (provider.Client, error) { return nil, errors.New("boom") }
+	}
+
+	var fed int
+	deps.OnContextWindow = func(cw int) { fed = cw }
+
+	orch := newTestOrch(deps)
+	orch.RefreshAgent()
+
+	if orch.Agent() != nil {
+		t.Fatal("expected agent to be nil on provider error")
+	}
+	if fed != 0 {
+		t.Fatalf("expected context window reset to 0 on provider error, got %d", fed)
+	}
+}
+
+func TestRefreshAgentNoActiveProviderResetsContextWindow(t *testing.T) {
+	deps := minimalDeps()
+	deps.ConfigFn = func() *config.AppConfig { return &config.AppConfig{} }
+
+	var fed int
+	deps.OnContextWindow = func(cw int) { fed = cw }
+
+	orch := newTestOrch(deps)
+	orch.RefreshAgent()
+
+	if orch.Agent() != nil {
+		t.Fatal("expected agent to be nil without active provider")
+	}
+	if fed != 0 {
+		t.Fatalf("expected context window reset to 0 without active provider, got %d", fed)
+	}
+}
+
+func TestFinishRunSurfacesAutoCompactError(t *testing.T) {
+	deps := minimalDeps()
+	deps.OnMaybeAutoCompact = func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error {
+		return errors.New("provider exploded")
+	}
+
+	var events []types.AgentStreamEvent
+	orch := newTestOrch(deps)
+	orch.finishRun(context.Background(), "input", agent.Result{}, func(ev types.AgentStreamEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected one error event, got %#v", events)
+	}
+	if events[0].Kind != "error" {
+		t.Fatalf("expected kind %q, got %q", "error", events[0].Kind)
+	}
+	if !strings.Contains(events[0].Content, "Auto-compact failed") || !strings.Contains(events[0].Content, "provider exploded") {
+		t.Fatalf("unexpected error content %q", events[0].Content)
+	}
+}
+
+func TestFinishRunToleratesNilOnEvent(t *testing.T) {
+	deps := minimalDeps()
+	deps.OnMaybeAutoCompact = func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error {
+		return errors.New("provider exploded")
+	}
+
+	orch := newTestOrch(deps)
+	orch.finishRun(context.Background(), "input", agent.Result{}, nil)
 }

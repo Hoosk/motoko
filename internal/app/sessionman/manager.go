@@ -91,7 +91,7 @@ func (m *Manager) PersistTurn(result agent.Result) {
 		m.currentSession = session.New(m.workspaceID, workspacePath)
 	}
 	m.currentSession.History = append([]provider.ConversationItem(nil), result.History...)
-	m.currentSession.LastInputTokens = result.Usage.InputTokens
+	m.currentSession.LastInputTokens = lastIterationInputTokens(result)
 	m.currentSession.LastOutputTokens = result.Usage.OutputTokens
 	m.currentSession.LastReasoningTokens = result.Usage.ReasoningTokens
 	m.currentSession.LastCacheReadTokens = result.Usage.CacheReadInputTokens
@@ -105,15 +105,15 @@ func (m *Manager) PersistTurn(result agent.Result) {
 	m.currentSession.TotalCacheWriteTokens += result.Usage.CacheWriteInputTokens
 
 	totalChars := result.Usage.SystemStaticChars + result.Usage.SystemDynamicChars + result.Usage.ToolsChars + result.Usage.HistoryChars
-	if totalChars > 0 && result.Usage.InputTokens > 0 {
-		inputTokens := result.Usage.InputTokens
-		m.currentSession.LastSystemStaticTokens = int(float64(result.Usage.SystemStaticChars) / float64(totalChars) * float64(inputTokens))
-		m.currentSession.LastSystemDynamicTokens = int(float64(result.Usage.SystemDynamicChars) / float64(totalChars) * float64(inputTokens))
-		m.currentSession.LastToolsTokens = int(float64(result.Usage.ToolsChars) / float64(totalChars) * float64(inputTokens))
-		m.currentSession.LastHistoryTokens = int(float64(result.Usage.HistoryChars) / float64(totalChars) * float64(inputTokens))
+	lastInput := lastIterationInputTokens(result)
+	if totalChars > 0 && lastInput > 0 {
+		m.currentSession.LastSystemStaticTokens = int(float64(result.Usage.SystemStaticChars) / float64(totalChars) * float64(lastInput))
+		m.currentSession.LastSystemDynamicTokens = int(float64(result.Usage.SystemDynamicChars) / float64(totalChars) * float64(lastInput))
+		m.currentSession.LastToolsTokens = int(float64(result.Usage.ToolsChars) / float64(totalChars) * float64(lastInput))
+		m.currentSession.LastHistoryTokens = int(float64(result.Usage.HistoryChars) / float64(totalChars) * float64(lastInput))
 
 		sumEst := m.currentSession.LastSystemStaticTokens + m.currentSession.LastSystemDynamicTokens + m.currentSession.LastToolsTokens + m.currentSession.LastHistoryTokens
-		diff := inputTokens - sumEst
+		diff := lastInput - sumEst
 		if diff != 0 {
 			m.currentSession.LastSystemStaticTokens += diff
 		}
@@ -205,4 +205,17 @@ func (m *Manager) HistoryInputTokens() int {
 		return 0
 	}
 	return m.currentSession.LastInputTokens
+}
+
+// lastIterationInputTokens returns the input of the final iteration of the
+// turn, which reflects the real context size of the last request. The
+// aggregated Usage.InputTokens sums every iteration, which would inflate the
+// auto-compact threshold in multi-tool turns.
+func lastIterationInputTokens(result agent.Result) int {
+	if n := len(result.Iterations); n > 0 {
+		if in := result.Iterations[n-1].InputTokens; in > 0 {
+			return in
+		}
+	}
+	return result.Usage.InputTokens
 }

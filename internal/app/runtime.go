@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Hoosk/motoko/internal/agent"
@@ -112,7 +113,7 @@ type Runtime struct {
 	updateDone        chan struct{}
 	inputMode         InputMode
 	version           string
-	contextWindow     int
+	contextWindow     atomic.Int64
 	updateMu          sync.RWMutex
 }
 
@@ -171,16 +172,17 @@ func NewRuntime(opts ...RuntimeOptions) *Runtime {
 		BrainFn:           func() *brain.Brain { return r.sesMgr.Brain() },
 		CurrentSessionFn:  func() *session.Session { return r.sesMgr.CurrentSession() },
 		WorkspaceIDFn:     func() string { return r.sesMgr.WorkspaceID() },
-		ContextWindowFn:   func() int { return r.contextWindow },
+		ContextWindowFn:   func() int { return int(r.contextWindow.Load()) },
 		AvailableAgentsFn: func() []agent.AgentDef { return allAgents },
 		AvailableSkillsFn: func() []skills.Skill { return sList },
 		ContextInfoFn:     func() system.ContextInfo { return r.GetContextInfo() },
+		OnContextWindow:   func(cw int) { r.contextWindow.Store(int64(cw)) },
 		OnPersistTurn:     func(result agent.Result) { r.sesMgr.PersistTurn(result) },
 		OnGenerateTitle: func(ctx context.Context, userInput, assistantResponse string) {
 			r.sesMgr.GenerateTitle(ctx, userInput, assistantResponse, r.config, r.newProviderClient)
 		},
 		OnMaybeAutoCompact: func(ctx context.Context, onEvent func(types.AgentStreamEvent) error) error {
-			return r.sesMgr.MaybeAutoCompact(ctx, onEvent, r.config, r.newProviderClient, r.contextWindow)
+			return r.sesMgr.MaybeAutoCompact(ctx, onEvent, r.config, r.newProviderClient, int(r.contextWindow.Load()))
 		},
 	})
 	r.provMgr = providerman.NewManager(func() *config.AppConfig { return r.config }, func() func(config.ProviderConfig) (provider.Client, error) { return r.newProviderClient }, r.agOrch.RefreshAgent)
@@ -223,7 +225,7 @@ func (r *Runtime) InputMode() InputMode              { return r.inputMode }
 func (r *Runtime) AgentConfigured() bool             { return r.agOrch.AgentConfigured() }
 func (r *Runtime) Debug() bool                       { return r.agOrch.Debug() }
 func (r *Runtime) SemanticIndex() *semantic.Index    { return r.semantic }
-func (r *Runtime) ContextWindow() int                { return r.contextWindow }
+func (r *Runtime) ContextWindow() int                { return int(r.contextWindow.Load()) }
 
 func (r *Runtime) handleSlashCommand(input string, info system.ContextInfo) Response {
 	return r.cmdDispatch.Handle(input, info)
@@ -238,7 +240,7 @@ func (r *Runtime) MentionSuggestions(input string) []string {
 }
 
 func (r *Runtime) ToolSpecs() []tools.Spec {
-	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
+	maxOutputSize := system.MaxToolOutputBytes(int(r.contextWindow.Load()))
 	tCtx := tools.ToolContext{
 		Workspace:     r.sesMgr.WorkspaceID(),
 		ActiveMode:    string(r.agOrch.Mode()),
@@ -254,7 +256,7 @@ func (r *Runtime) ToolSpecs() []tools.Spec {
 }
 
 func (r *Runtime) ToolSuggestions(prefix string) []tools.Spec {
-	maxOutputSize := system.MaxToolOutputBytes(r.contextWindow)
+	maxOutputSize := system.MaxToolOutputBytes(int(r.contextWindow.Load()))
 	tCtx := tools.ToolContext{
 		Workspace:     r.sesMgr.WorkspaceID(),
 		ActiveMode:    string(r.agOrch.Mode()),
@@ -379,7 +381,7 @@ func (r *Runtime) LoadSession(id string) error {
 }
 func (r *Runtime) CurrentSessionEntries() []Entry { return r.sesMgr.CurrentSessionEntries() }
 func (r *Runtime) CompactSession(ctx context.Context) Response {
-	return r.sesMgr.CompactSession(ctx, r.config, r.newProviderClient, r.contextWindow)
+	return r.sesMgr.CompactSession(ctx, r.config, r.newProviderClient, int(r.contextWindow.Load()))
 }
 
 func (r *Runtime) ActiveSubagents() []string                   { return r.agOrch.ActiveSubagents() }
@@ -409,7 +411,7 @@ func (r *Runtime) RunTool(ctx context.Context, name, args string) (tools.Result,
 	ctx = tools.WithBrain(ctx, r.sesMgr.Brain())
 	ctx = tools.WithBroker(ctx, r.broker)
 	ctx = tools.WithConfig(ctx, r.config)
-	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(r.contextWindow))
+	ctx = tools.WithMaxOutputSize(ctx, system.MaxToolOutputBytes(int(r.contextWindow.Load())))
 	return r.tools.Run(ctx, name, args)
 }
 
