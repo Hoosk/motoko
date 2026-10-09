@@ -147,7 +147,7 @@ func TestBuildSystemPromptIncludesInspectNote(t *testing.T) {
 	if !strings.Contains(prompt, "GitTachikoma, CodeTachikoma, DiffTachikoma, SearchTachikoma, DependencyTachikoma") {
 		t.Fatalf("prompt missing valid inspect worker names: %s", prompt)
 	}
-	if !strings.Contains(prompt, "inspect CodeTachikoma") {
+	if !strings.Contains(prompt, `inspect {"worker": "CodeTachikoma"}`) {
 		t.Fatalf("prompt missing inspect example for CodeTachikoma: %s", prompt)
 	}
 }

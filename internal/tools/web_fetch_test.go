@@ -50,7 +50,7 @@ func TestWebFetchToolRun(t *testing.T) {
 		return http.DefaultTransport.RoundTrip(req)
 	})
 
-	result, err := tool.Run(context.Background(), server.URL)
+	result, err := tool.Run(context.Background(), `{"url":"`+server.URL+`"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestWebFetchToolRun(t *testing.T) {
 
 func TestWebFetchToolRunInvalidURL(t *testing.T) {
 	tool := NewWebFetchTool()
-	_, err := tool.Run(context.Background(), "   ")
+	_, err := tool.Run(context.Background(), `{"url":"   "}`)
 	if err == nil {
 		t.Fatal("expected error on empty URL")
 	}

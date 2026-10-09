@@ -85,6 +85,29 @@ func jsonHas(m map[string]any, keys ...string) bool {
 	return false
 }
 
+// jsonStringList extracts a string array, skipping non-string items. The
+// boolean reports whether one of the given keys was present and held an array.
+func jsonStringList(m map[string]any, keys ...string) ([]string, bool) {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		items, ok := value.([]any)
+		if !ok {
+			return nil, false
+		}
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			if text, ok := item.(string); ok {
+				out = append(out, strings.TrimSpace(text))
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 func resolveWorkspacePath(target string) (string, string, error) {
 	workspace, err := os.Getwd()
 	if err != nil {

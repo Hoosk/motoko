@@ -201,7 +201,7 @@ func availableToolsBlock(specs []tools.Spec) []string {
 		if hasBash {
 			note += " For those, use the 'bash' tool instead."
 		}
-		note += " Usage: 'task <comando>' to start a task, 'task terminate <id>' to kill a running task."
+		note += ` Usage: task {"command": "..."} to start a task, task {"terminate": "<task_id>"} to kill a running task.`
 		lines = append(lines, note)
 	}
 	if hasPatch {
@@ -213,9 +213,9 @@ func availableToolsBlock(specs []tools.Spec) []string {
 		lines = append(lines, note)
 	}
 	if hasInspect {
-		note := "  - inspect: PREFERRED way to access on-demand Tachikoma data. Use 'inspect <worker_name>' BEFORE falling back to read/grep/search when a background worker has on-demand signals.\n"
+		note := "  - inspect: PREFERRED way to access on-demand Tachikoma data. Use the inspect tool with the worker name BEFORE falling back to read/grep/search when a background worker has on-demand signals.\n"
 		note += "    Valid worker names: GitTachikoma, CodeTachikoma, DiffTachikoma, SearchTachikoma, DependencyTachikoma.\n"
-		note += "    Usage: 'inspect GitTachikoma' for branch/commit info, 'inspect CodeTachikoma' for semantic index, 'inspect DiffTachikoma' for recent change symbols, 'inspect SearchTachikoma' for code snippets."
+		note += `    Usage: inspect {"worker": "GitTachikoma"} for branch/commit info, inspect {"worker": "CodeTachikoma"} for semantic index, inspect {"worker": "DiffTachikoma"} for recent change symbols, inspect {"worker": "SearchTachikoma"} for code snippets.`
 		lines = append(lines, note)
 	}
 	lines = append(lines, "</available_tools>", "")

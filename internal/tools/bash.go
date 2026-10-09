@@ -24,7 +24,7 @@ func (t *BashTool) Spec() Spec {
 	return Spec{
 		Name:        toolNameBash,
 		Summary:     "Runs a shell command in the current workspace.",
-		Usage:       "bash <command>",
+		Usage:       `bash {"command": "go test ./..."}`,
 		InputSchema: schemaBash,
 	}
 }
@@ -36,7 +36,7 @@ func (t *BashTool) DynamicSpec(ctx ToolContext) Spec {
 }
 
 func (t *BashTool) Run(ctx context.Context, args string) (Result, error) {
-	command := strings.TrimSpace(args)
+	command := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
 		command = jsonStr(parsed, "command", "cmd")
 	}

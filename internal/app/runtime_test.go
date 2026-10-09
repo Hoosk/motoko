@@ -771,7 +771,7 @@ func TestRuntimeBrainCommands(t *testing.T) {
 	}
 
 	// Test writing via tool
-	_, err := r.tools.Run(context.Background(), "brain_write", "plan.md This is my plan")
+	_, err := r.tools.Run(context.Background(), "brain_write", `{"filename":"plan.md","content":"This is my plan"}`)
 	if err != nil {
 		t.Fatalf("failed to write plan via tool: %v", err)
 	}
@@ -792,7 +792,7 @@ func TestRuntimeBrainCommands(t *testing.T) {
 	}
 
 	// Test writing tasks
-	_, err = r.tools.Run(context.Background(), "brain_write", "tasks.md - [ ] Task 1")
+	_, err = r.tools.Run(context.Background(), "brain_write", `{"filename":"tasks.md","content":"- [ ] Task 1"}`)
 	if err != nil {
 		t.Fatalf("failed to write tasks: %v", err)
 	}

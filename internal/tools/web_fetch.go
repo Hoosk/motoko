@@ -26,13 +26,13 @@ func (t *WebFetchTool) Spec() Spec {
 	return Spec{
 		Name:        "web_fetch",
 		Summary:     "Downloads the content of a URL and extracts clean readable text without HTML tags.",
-		Usage:       "web_fetch <url>",
+		Usage:       `web_fetch {"url": "https://example.com/docs"}`,
 		InputSchema: schemaWebFetch,
 	}
 }
 
 func (t *WebFetchTool) Run(ctx context.Context, args string) (Result, error) {
-	targetURL := strings.TrimSpace(args)
+	targetURL := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
 		targetURL = jsonStr(parsed, "url")
 	}

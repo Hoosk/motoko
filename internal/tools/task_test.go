@@ -30,7 +30,7 @@ func TestTaskTool_Run(t *testing.T) {
 	t.Run("LaunchTask", func(t *testing.T) {
 		runner := &mockTaskRunner{}
 		tool := NewTaskTool(runner)
-		res, err := tool.Run(context.Background(), "go build ./...")
+		res, err := tool.Run(context.Background(), `{"command":"go build ./..."}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -45,7 +45,7 @@ func TestTaskTool_Run(t *testing.T) {
 	t.Run("TerminateTask", func(t *testing.T) {
 		runner := &mockTaskRunner{}
 		tool := NewTaskTool(runner)
-		res, err := tool.Run(context.Background(), "terminate task-123")
+		res, err := tool.Run(context.Background(), `{"terminate":"task-123"}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -61,7 +61,7 @@ func TestTaskTool_Run(t *testing.T) {
 		runner := &mockTaskRunner{}
 		tool := NewTaskTool(runner)
 		_, err := tool.Run(context.Background(), "")
-		if err == nil || !strings.Contains(err.Error(), "uso") {
+		if err == nil || !strings.Contains(err.Error(), "usage") {
 			t.Errorf("expected usage error, got %v", err)
 		}
 	})
@@ -69,7 +69,7 @@ func TestTaskTool_Run(t *testing.T) {
 	t.Run("RunnerError", func(t *testing.T) {
 		runner := &mockTaskRunner{err: errors.New("runner failed")}
 		tool := NewTaskTool(runner)
-		_, err := tool.Run(context.Background(), "go test")
+		_, err := tool.Run(context.Background(), `{"command":"go test"}`)
 		if err == nil || err.Error() != "runner failed" {
 			t.Errorf("expected 'runner failed' error, got %v", err)
 		}
