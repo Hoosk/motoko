@@ -47,13 +47,13 @@ func TestBrainTools(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for empty args")
 	}
-	_, err = writeTool.Run(ctx, "plan.md")
+	_, err = writeTool.Run(ctx, `{"filename":"plan.md"}`)
 	if err == nil {
 		t.Error("expected error for missing content")
 	}
 
 	// 3. Write plan
-	res, err := writeTool.Run(ctx, "plan.md This is the implementation plan.")
+	res, err := writeTool.Run(ctx, `{"filename":"plan.md","content":"This is the implementation plan."}`)
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
@@ -61,35 +61,7 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("unexpected summary: %s", res.Summary)
 	}
 
-	// 3a. Write plan via JSON args
-	_, err = writeTool.Run(ctx, `{"filename":"json-plan.md","content":"JSON plan"}`)
-	if err != nil {
-		t.Fatalf("json write failed: %v", err)
-	}
-	res, err = readTool.Run(ctx, `{"filename":"json-plan.md"}`)
-	if err != nil {
-		t.Fatalf("json read failed: %v", err)
-	}
-	if res.Output != "JSON plan" {
-		t.Errorf("got %q, want %q", res.Output, "JSON plan")
-	}
-
-	// 3b. Preserve leading and trailing spaces in content
-	res, err = writeTool.Run(ctx, "notes.md  line with leading and trailing spaces  ")
-	if err != nil {
-		t.Fatalf("write with spacing failed: %v", err)
-	}
-
-	res, err = readTool.Run(ctx, "notes.md")
-	if err != nil {
-		t.Fatalf("read notes failed: %v", err)
-	}
-	if res.Output != " line with leading and trailing spaces  " {
-		t.Errorf("got %q, want %q", res.Output, " line with leading and trailing spaces  ")
-	}
-
-	// 4. Read plan
-	res, err = readTool.Run(ctx, "plan.md")
+	res, err = readTool.Run(ctx, `{"filename":"plan.md"}`)
 	if err != nil {
 		t.Fatalf("read failed: %v", err)
 	}
@@ -97,12 +69,26 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("got %q, want %q", res.Output, "This is the implementation plan.")
 	}
 
-	// 4b. Write multiline file and test paginated read
-	_, err = writeTool.Run(ctx, "multi.md line1\nline2\nline3\nline4")
+	// 3b. Preserve leading and trailing spaces in content
+	_, err = writeTool.Run(ctx, `{"filename":"notes.md","content":" line with leading and trailing spaces  "}`)
+	if err != nil {
+		t.Fatalf("write with spacing failed: %v", err)
+	}
+
+	res, err = readTool.Run(ctx, `{"filename":"notes.md"}`)
+	if err != nil {
+		t.Fatalf("read notes failed: %v", err)
+	}
+	if res.Output != " line with leading and trailing spaces  " {
+		t.Errorf("got %q, want %q", res.Output, " line with leading and trailing spaces  ")
+	}
+
+	// 4. Write multiline file and test paginated read
+	_, err = writeTool.Run(ctx, `{"filename":"multi.md","content":"line1\nline2\nline3\nline4"}`)
 	if err != nil {
 		t.Fatalf("write multiline failed: %v", err)
 	}
-	res, err = readTool.Run(ctx, "multi.md 2 2")
+	res, err = readTool.Run(ctx, `{"filename":"multi.md","offset":2,"limit":2}`)
 	if err != nil {
 		t.Fatalf("paginated read failed: %v", err)
 	}
@@ -114,14 +100,6 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("unexpected summary: %s", res.Summary)
 	}
 
-	res, err = readTool.Run(ctx, `{"filename":"multi.md","offset":2,"limit":2}`)
-	if err != nil {
-		t.Fatalf("json paginated read failed: %v", err)
-	}
-	if res.Output != expectedOutput {
-		t.Errorf("json read got %q, want %q", res.Output, expectedOutput)
-	}
-
 	// 5. List files
 	res, err = listTool.Run(ctx, "")
 	if err != nil {
@@ -131,35 +109,22 @@ func TestBrainTools(t *testing.T) {
 		t.Errorf("expected list to contain plan.md, got: %q", res.Output)
 	}
 
-	// 5b. Test prefix stripping
-	_, err = writeTool.Run(ctx, "brain_write plan_prefixed.md Prefixed plan content")
+	// 5b. Round-trip arbitrary file names
+	_, err = writeTool.Run(ctx, `{"filename":"other.md","content":"other content"}`)
 	if err != nil {
-		t.Fatalf("prefixed write failed: %v", err)
+		t.Fatalf("write other failed: %v", err)
 	}
-	res, err = readTool.Run(ctx, "brain_read plan_prefixed.md")
+	res, err = readTool.Run(ctx, `{"filename":"other.md"}`)
 	if err != nil {
-		t.Fatalf("prefixed read failed: %v", err)
+		t.Fatalf("read other failed: %v", err)
 	}
-	if res.Output != "Prefixed plan content" {
-		t.Errorf("got %q, want %q", res.Output, "Prefixed plan content")
-	}
-
-	// 5c. Test prefixed with case insensitivity
-	_, err = writeTool.Run(ctx, "BRAIN_WRITE plan_case.md Case insensitive content")
-	if err != nil {
-		t.Fatalf("case-insensitive prefixed write failed: %v", err)
-	}
-	res, err = readTool.Run(ctx, "Brain_Read plan_case.md")
-	if err != nil {
-		t.Fatalf("case-insensitive prefixed read failed: %v", err)
-	}
-	if res.Output != "Case insensitive content" {
-		t.Errorf("got %q, want %q", res.Output, "Case insensitive content")
+	if res.Output != "other content" {
+		t.Errorf("got %q, want %q", res.Output, "other content")
 	}
 
 	// 6. Test with nil brain
 	provider.b = nil
-	_, err = writeTool.Run(ctx, "file.md content")
+	_, err = writeTool.Run(ctx, `{"filename":"file.md","content":"content"}`)
 	if err == nil {
 		t.Error("expected error with nil brain")
 	}
@@ -191,7 +156,7 @@ func TestBrainToolsContextPropagation(t *testing.T) {
 	ctx := WithBrain(context.Background(), subBrain)
 
 	// 1. Write should go to subBrain
-	_, err = writeTool.Run(ctx, "subfile.md Content for subagent")
+	_, err = writeTool.Run(ctx, `{"filename":"subfile.md","content":"Content for subagent"}`)
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
@@ -203,7 +168,7 @@ func TestBrainToolsContextPropagation(t *testing.T) {
 	}
 
 	// 2. Read should come from subBrain
-	res, err := readTool.Run(ctx, "subfile.md")
+	res, err := readTool.Run(ctx, `{"filename":"subfile.md"}`)
 	if err != nil {
 		t.Fatalf("read failed: %v", err)
 	}

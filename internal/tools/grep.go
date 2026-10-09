@@ -23,28 +23,18 @@ func (t *GrepTool) Spec() Spec {
 	return Spec{
 		Name:        "grep",
 		Summary:     "Search text by regex inside workspace files.",
-		Usage:       "grep <regex> [include-glob]",
+		Usage:       `grep {"pattern": "func Run", "include": "*.go"}`,
 		InputSchema: schemaGrep,
 	}
 }
 
 func (t *GrepTool) Run(ctx context.Context, args string) (Result, error) {
-	args = strings.TrimSpace(args)
-	parts := strings.Fields(args)
-	pattern := ""
-	include := ""
-	if parsed := parseJSONArgs(args); parsed != nil {
-		pattern = jsonStr(parsed, "pattern", "regex", "query")
-		include = jsonStr(parsed, "include", "glob", "file_pattern", "filePattern")
-	} else {
-		if len(parts) == 0 {
-			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
-		}
-		pattern = parts[0]
-		if len(parts) > 1 {
-			include = parts[1]
-		}
+	parsed := parseJSONArgs(args)
+	if parsed == nil {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
+	pattern := jsonStr(parsed, "pattern", "regex", "query")
+	include := jsonStr(parsed, "include", "glob", "file_pattern", "filePattern")
 	if pattern == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}

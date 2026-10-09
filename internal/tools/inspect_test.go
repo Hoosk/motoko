@@ -32,7 +32,7 @@ func TestInspectTool_Run(t *testing.T) {
 
 	t.Run("WorkerFound", func(t *testing.T) {
 		tool := NewInspectTool(mgr)
-		_, err := tool.Run(context.Background(), "NonExistent")
+		_, err := tool.Run(context.Background(), `{"worker":"NonExistent"}`)
 		if err == nil || !strings.Contains(err.Error(), "not found") {
 			t.Errorf("Expected error for non-existent worker, got %v", err)
 		}
@@ -77,7 +77,7 @@ func TestInspectTool_Run(t *testing.T) {
 		}
 
 		tool := NewInspectTool(mgr)
-		res, err := tool.Run(context.Background(), "DependencyTachikoma")
+		res, err := tool.Run(context.Background(), `{"worker":"DependencyTachikoma"}`)
 		if err != nil {
 			t.Fatalf("Unexpected error running inspect tool: %v", err)
 		}

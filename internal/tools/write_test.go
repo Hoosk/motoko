@@ -17,7 +17,7 @@ func TestWriteToolCreatesNewFile(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	res, err := tool.Run(context.Background(), "src/new.go\npackage new\n\nconst V = 1\n")
+	res, err := tool.Run(context.Background(), `{"path":"src/new.go","content":"package new\n\nconst V = 1\n"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 	result := make(chan error, 1)
 
 	go func() {
-		_, err := tool.Run(ctx, "approved.txt\nnew content\n")
+		_, err := tool.Run(ctx, `{"path":"approved.txt","content":"new content\n"}`)
 		result <- err
 	}()
 	pending, err := broker.Next(ctx)
@@ -68,7 +68,7 @@ func TestWriteToolRequiresAndHonorsApproval(t *testing.T) {
 
 	result = make(chan error, 1)
 	go func() {
-		_, err := tool.Run(ctx, "rejected.txt\nnot written\n")
+		_, err := tool.Run(ctx, `{"path":"rejected.txt","content":"not written\n"}`)
 		result <- err
 	}()
 	pending, err = broker.Next(ctx)
@@ -90,7 +90,7 @@ func TestWriteToolFailsClosedWithoutDialogBroker(t *testing.T) {
 	cfg := &config.AppConfig{EditApproval: config.EditApprovalAsk}
 	ctx := WithConfig(context.Background(), cfg)
 
-	_, err := NewWriteTool().Run(ctx, "blocked.txt\ncontent")
+	_, err := NewWriteTool().Run(ctx, `{"path":"blocked.txt","content":"content"}`)
 	if !errors.Is(err, ErrApprovalUnavailable) {
 		t.Fatalf("expected missing broker error, got %v", err)
 	}
@@ -111,7 +111,7 @@ func TestWriteToolRejectsStaleApproval(t *testing.T) {
 	ctx := WithBroker(WithConfig(context.Background(), cfg), broker)
 	result := make(chan error, 1)
 	go func() {
-		_, err := NewWriteTool().Run(ctx, "stale.txt\nproposed\n")
+		_, err := NewWriteTool().Run(ctx, `{"path":"stale.txt","content":"proposed\n"}`)
 		result <- err
 	}()
 	pending, err := broker.Next(ctx)
@@ -139,7 +139,7 @@ func TestWriteToolHonorsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := NewWriteTool().Run(ctx, "cancelled.txt\ncontent")
+	_, err := NewWriteTool().Run(ctx, `{"path":"cancelled.txt","content":"content"}`)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
@@ -156,7 +156,7 @@ func TestWriteToolOverwritesExistingFile(t *testing.T) {
 	}
 
 	tool := NewWriteTool()
-	res, err := tool.Run(context.Background(), "foo.txt\nNEW CONTENT")
+	res, err := tool.Run(context.Background(), `{"path":"foo.txt","content":"NEW CONTENT"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestWriteToolCreatesNestedDirectories(t *testing.T) {
 	root := withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "deep/nested/path/file.txt\nhello")
+	_, err := tool.Run(context.Background(), `{"path":"deep/nested/path/file.txt","content":"hello"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestWriteToolRejectsEmptyContent(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "foo.txt\n")
+	_, err := tool.Run(context.Background(), `{"path":"foo.txt","content":""}`)
 	if err == nil {
 		t.Fatal("expected error for empty content")
 	}
@@ -242,7 +242,7 @@ func TestWriteToolRejectsMissingPath(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "   \n   ")
+	_, err := tool.Run(context.Background(), `{"content":"x"}`)
 	if err == nil {
 		t.Fatal("expected error for empty path and content")
 	}
@@ -252,7 +252,7 @@ func TestWriteToolRejectsPathTraversal(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "../escape.txt\nbad")
+	_, err := tool.Run(context.Background(), `{"path":"../escape.txt","content":"bad"}`)
 	if err == nil {
 		t.Fatal("expected error for path traversal")
 	}
@@ -265,7 +265,7 @@ func TestWriteToolRejectsAbsolutePathOutsideWorkspace(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "/etc/passwd\nbad")
+	_, err := tool.Run(context.Background(), `{"path":"/etc/passwd","content":"bad"}`)
 	if err == nil {
 		t.Fatal("expected error for absolute path outside workspace")
 	}
@@ -275,7 +275,7 @@ func TestWriteToolRejectsGitDirectory(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), ".git/hooks/pre-commit\n#!/bin/sh\nrm -rf /\n")
+	_, err := tool.Run(context.Background(), `{"path":".git/hooks/pre-commit","content":"#!/bin/sh\nrm -rf /\n"}`)
 	if err == nil {
 		t.Fatal("expected error writing to .git/")
 	}
@@ -288,7 +288,7 @@ func TestWriteToolRejectsEnvFiles(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), ".env\nSECRET=hack")
+	_, err := tool.Run(context.Background(), `{"path":".env","content":"SECRET=hack"}`)
 	if err == nil {
 		t.Fatal("expected error writing .env")
 	}
@@ -301,7 +301,7 @@ func TestWriteToolRejectsEnvLocalFile(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), ".env.local\nSECRET=hack")
+	_, err := tool.Run(context.Background(), `{"path":".env.local","content":"SECRET=hack"}`)
 	if err == nil {
 		t.Fatal("expected error writing .env.local")
 	}
@@ -311,7 +311,7 @@ func TestWriteToolRejectsSSHKeys(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), ".ssh/id_rsa\nPRIVATE")
+	_, err := tool.Run(context.Background(), `{"path":".ssh/id_rsa","content":"PRIVATE"}`)
 	if err == nil {
 		t.Fatal("expected error writing SSH key")
 	}
@@ -321,7 +321,7 @@ func TestWriteToolRejectsAntigravityConfig(t *testing.T) {
 	withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), ".antigravitycli/agent.json\n{}")
+	_, err := tool.Run(context.Background(), `{"path":".antigravitycli/agent.json","content":"{}"}`)
 	if err == nil {
 		t.Fatal("expected error writing .antigravitycli/")
 	}
@@ -334,7 +334,7 @@ func TestWriteToolRejectsDirectoryAsTarget(t *testing.T) {
 	}
 
 	tool := NewWriteTool()
-	_, err := tool.Run(context.Background(), "subdir\ncontent")
+	_, err := tool.Run(context.Background(), `{"path":"subdir","content":"content"}`)
 	if err == nil {
 		t.Fatal("expected error when target is an existing directory")
 	}
@@ -347,7 +347,7 @@ func TestWriteToolAcceptsPathInsideWorkspace(t *testing.T) {
 	root := withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	_, err := tool.Run(context.Background(), "internal/system/context.go\nreplaced content\n")
+	_, err := tool.Run(context.Background(), `{"path":"internal/system/context.go","content":"replaced content\n"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestWriteToolOutputIncludesAbsolutePath(t *testing.T) {
 	root := withTempWorkspace(t)
 	tool := NewWriteTool()
 
-	res, err := tool.Run(context.Background(), "abs.txt\nhello world")
+	res, err := tool.Run(context.Background(), `{"path":"abs.txt","content":"hello world"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -395,27 +395,6 @@ func TestWriteToolOutputIncludesAbsolutePath(t *testing.T) {
 	absExpected, _ := filepath.Abs(filepath.Join(root, "abs.txt"))
 	if !strings.Contains(res.Output, absExpected) {
 		t.Errorf("expected output to include absolute path %q, got %q", absExpected, res.Output)
-	}
-}
-
-func TestWriteToolTrimsLeadingWriteToken(t *testing.T) {
-	withTempWorkspace(t)
-	tool := NewWriteTool()
-
-	res, err := tool.Run(context.Background(), "write token.txt\nhello")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(res.Summary, "created") {
-		t.Errorf("expected created, got %q", res.Summary)
-	}
-
-	data, err := os.ReadFile("token.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("unexpected content: %q", string(data))
 	}
 }
 

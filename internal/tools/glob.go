@@ -18,14 +18,14 @@ func (t *GlobTool) Spec() Spec {
 	return Spec{
 		Name:        "glob",
 		Summary:     "Finds file paths by pattern in the workspace.",
-		Usage:       "glob <pattern>",
+		Usage:       `glob {"pattern": "**/*.go"}`,
 		InputSchema: schemaGlob,
 	}
 }
 
 func (t *GlobTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
-	pattern := strings.TrimSpace(args)
+	pattern := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
 		pattern = jsonStr(parsed, "pattern", "glob")
 	}

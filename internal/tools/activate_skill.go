@@ -21,7 +21,7 @@ func (t *ActivateSkillTool) Spec() Spec {
 	return Spec{
 		Name:        "activate_skill",
 		Summary:     "Activates and loads detailed instructions of a skill from the catalog.",
-		Usage:       "activate_skill <name>",
+		Usage:       `activate_skill {"name": "golang-testing"}`,
 		InputSchema: schemaActivateSkill,
 	}
 }
@@ -36,32 +36,32 @@ func (t *ActivateSkillTool) DynamicSpec(ctx ToolContext) Spec {
 		}
 		xmlBuilder.WriteString("</available-skills>")
 		spec.Summary = xmlBuilder.String()
-		spec.Usage = fmt.Sprintf("activate_skill %s", strings.Join(ctx.AvailableSkills, "|"))
+		spec.Usage = fmt.Sprintf(`activate_skill {"name": "<%s>"}`, strings.Join(ctx.AvailableSkills, "|"))
 	}
 	return spec
 }
 
 func (t *ActivateSkillTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
-	args = strings.TrimSpace(args)
+	name := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
-		args = jsonStr(parsed, "name", "skill", "skill_name", "skillName")
+		name = jsonStr(parsed, "name", "skill", "skill_name", "skillName")
 	}
-	if args == "" {
+	if name == "" {
 		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
 	// Case-insensitive lookup
 	var found *skills.Skill
 	for i, s := range t.availableSkills {
-		if strings.EqualFold(s.Name, args) {
+		if strings.EqualFold(s.Name, name) {
 			found = &t.availableSkills[i]
 			break
 		}
 	}
 
 	if found == nil {
-		return Result{}, fmt.Errorf("unknown skill: %s", args)
+		return Result{}, fmt.Errorf("unknown skill: %s", name)
 	}
 
 	// Structured Wrapping as described in the specification:

@@ -53,7 +53,7 @@ func TestWebSearchToolRun(t *testing.T) {
 		return http.DefaultTransport.RoundTrip(req)
 	})
 
-	result, err := tool.Run(context.Background(), "test query")
+	result, err := tool.Run(context.Background(), `{"query":"test query"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestWebSearchToolRun(t *testing.T) {
 
 func TestWebSearchToolRunEmptyQuery(t *testing.T) {
 	tool := NewWebSearchTool()
-	_, err := tool.Run(context.Background(), "   ")
+	_, err := tool.Run(context.Background(), `{"query":"   "}`)
 	if err == nil {
 		t.Fatal("expected error on empty query")
 	}
@@ -113,7 +113,7 @@ func TestWebSearchToolRunFallback(t *testing.T) {
 		return http.DefaultTransport.RoundTrip(req)
 	})
 
-	result, err := tool.Run(context.Background(), "fallback query")
+	result, err := tool.Run(context.Background(), `{"query":"fallback query"}`)
 	if err != nil {
 		t.Fatal(err)
 	}

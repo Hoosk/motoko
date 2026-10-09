@@ -105,7 +105,7 @@ func TestCompileGlobMatchesRecursivePattern(t *testing.T) {
 
 func TestGlobToolFindsGoFiles(t *testing.T) {
 	withTempWorkspace(t)
-	result, err := NewGlobTool().Run(context.Background(), "internal/app/*.go")
+	result, err := NewGlobTool().Run(context.Background(), `{"pattern":"internal/app/*.go"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestGlobToolFindsGoFiles(t *testing.T) {
 
 func TestGrepToolFindsContextInfoInSystemPackage(t *testing.T) {
 	withTempWorkspace(t)
-	result, err := NewGrepTool().Run(context.Background(), "ContextInfo internal/system/*.go")
+	result, err := NewGrepTool().Run(context.Background(), `{"pattern":"ContextInfo","include":"internal/system/*.go"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,21 +130,21 @@ func TestGlobAndGrepSkipGitIgnoredPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("internal/app/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	globResult, err := NewGlobTool().Run(context.Background(), "internal/**/*.go")
+	globResult, err := NewGlobTool().Run(context.Background(), `{"pattern":"internal/**/*.go"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(globResult.Output, "internal/app/runtime.go") {
 		t.Fatalf("expected ignored glob path skipped, got %q", globResult.Output)
 	}
-	grepResult, err := NewGrepTool().Run(context.Background(), "package internal/**/*.go")
+	grepResult, err := NewGrepTool().Run(context.Background(), `{"pattern":"package","include":"internal/**/*.go"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(grepResult.Output, "internal/app/runtime.go") {
 		t.Fatalf("expected ignored grep path skipped, got %q", grepResult.Output)
 	}
-	readResult, err := NewReadTool().Run(context.Background(), "internal/app/runtime.go 1 2")
+	readResult, err := NewReadTool().Run(context.Background(), `{"path":"internal/app/runtime.go","offset":1,"limit":2}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,14 +155,14 @@ func TestGlobAndGrepSkipGitIgnoredPaths(t *testing.T) {
 
 func TestReadToolReadsFileAndDirectory(t *testing.T) {
 	withTempWorkspace(t)
-	fileResult, err := NewReadTool().Run(context.Background(), "internal/system/context.go 1 3")
+	fileResult, err := NewReadTool().Run(context.Background(), `{"path":"internal/system/context.go","offset":1,"limit":3}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(fileResult.Output, "package system") {
 		t.Fatalf("expected file contents, got %q", fileResult.Output)
 	}
-	dirResult, err := NewReadTool().Run(context.Background(), "internal/system")
+	dirResult, err := NewReadTool().Run(context.Background(), `{"path":"internal/system"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestReadToolConcurrentInjectedInstructions(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			result, err := readTool.Run(context.Background(), "internal/system/context.go 1 1")
+			result, err := readTool.Run(context.Background(), `{"path":"internal/system/context.go","offset":1,"limit":1}`)
 			if err != nil {
 				errs <- err
 				return
@@ -250,14 +250,14 @@ func TestReadToolConcurrentInjectedInstructions(t *testing.T) {
 }
 
 func TestBashToolSuccessAndExitStatus(t *testing.T) {
-	success, err := NewBashTool().Run(context.Background(), "printf hola")
+	success, err := NewBashTool().Run(context.Background(), `{"command":"printf hola"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if success.Output != "hola" {
 		t.Fatalf("expected hola output, got %#v", success)
 	}
-	failure, err := NewBashTool().Run(context.Background(), "exit 7")
+	failure, err := NewBashTool().Run(context.Background(), `{"command":"exit 7"}`)
 	if err != nil {
 		t.Fatal(err)
 	}

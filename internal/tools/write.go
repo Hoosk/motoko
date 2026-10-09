@@ -19,7 +19,7 @@ func (t *WriteTool) Spec() Spec {
 	return Spec{
 		Name:        "write",
 		Summary:     "Create or fully overwrite a file in the workspace with the given content.",
-		Usage:       "write <path>\\n<content>   (or write {\"path\": \"...\", \"content\": \"...\"})",
+		Usage:       `write {"path": "internal/foo.go", "content": "package foo\n"}`,
 		InputSchema: schemaWrite,
 	}
 }
@@ -95,42 +95,17 @@ func verbForWrite(existed bool) string {
 }
 
 func parseWriteArgs(args string) (string, string, error) {
-	if parsed := parseJSONArgs(args); parsed != nil {
-		path := jsonStr(parsed, "path", "file", "file_path", "filePath")
-		if path == "" {
-			return "", "", fmt.Errorf("usage: write requires {\"path\": \"...\", \"content\": \"...\"}")
-		}
-		content := jsonRawStr(parsed, "content", "text", "body")
-		if content == "" {
-			return "", "", fmt.Errorf("usage: write requires non-empty \"content\" field")
-		}
-		return path, content, nil
+	parsed := parseJSONArgs(args)
+	if parsed == nil {
+		return "", "", fmt.Errorf(`usage: write {"path": "...", "content": "..."}`)
 	}
-
-	trimmed := strings.TrimLeft(args, " \t\n\r")
-	if strings.EqualFold(prefixToken(trimmed), "write") {
-		trimmed = strings.TrimSpace(trimmed[len("write"):])
-	}
-
-	idx := strings.IndexFunc(trimmed, func(c rune) bool {
-		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
-	})
-	if idx == -1 {
-		return "", "", fmt.Errorf("usage: %s", "write <path>\\n<content>")
-	}
-	path := strings.TrimSpace(trimmed[:idx])
-	content := strings.TrimLeft(trimmed[idx+1:], " \t\n\r")
+	path := jsonStr(parsed, "path", "file", "file_path", "filePath")
 	if path == "" {
-		return "", "", fmt.Errorf("usage: write <path>\\n<content>")
+		return "", "", fmt.Errorf(`usage: write requires {"path": "...", "content": "..."}`)
+	}
+	content := jsonRawStr(parsed, "content", "text", "body")
+	if content == "" {
+		return "", "", fmt.Errorf(`usage: write requires non-empty "content" field`)
 	}
 	return path, content, nil
-}
-
-func prefixToken(s string) string {
-	for i, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			return s[:i]
-		}
-	}
-	return s
 }

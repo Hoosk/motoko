@@ -105,7 +105,7 @@ func (c ContextInfo) GitSummary() string {
 		if len(c.ModifiedFiles) > 0 && len(c.ModifiedFiles) <= 10 {
 			status += " | files: " + strings.Join(c.ModifiedFiles, ", ")
 		} else if len(c.ModifiedFiles) > 10 {
-			status += " | many files modified, use 'inspect GitTachikoma' for full list"
+			status += ` | many files modified, use inspect {"worker": "GitTachikoma"} for full list`
 		}
 	}
 

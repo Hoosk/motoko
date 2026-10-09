@@ -32,13 +32,13 @@ func (t *WebSearchTool) Spec() Spec {
 	return Spec{
 		Name:        "web_search",
 		Summary:     "Searches the web using the Mojeek search engine.",
-		Usage:       "web_search <query>",
+		Usage:       `web_search {"query": "motoko go tui"}`,
 		InputSchema: schemaWebSearch,
 	}
 }
 
 func (t *WebSearchTool) Run(ctx context.Context, args string) (Result, error) {
-	query := strings.TrimSpace(args)
+	query := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
 		query = jsonStr(parsed, "query", "search")
 	}

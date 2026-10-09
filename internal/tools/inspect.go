@@ -23,7 +23,7 @@ func (t *InspectTool) Spec() Spec {
 	return Spec{
 		Name:        "inspect",
 		Summary:     "Get detailed information from a background Tachikoma worker.",
-		Usage:       "inspect <worker_name>",
+		Usage:       `inspect {"worker": "DiffTachikoma"}`,
 		InputSchema: schemaInspect,
 	}
 }
@@ -33,7 +33,7 @@ func (t *InspectTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("tachikoma manager not initialized")
 	}
 
-	name := strings.TrimSpace(args)
+	name := ""
 	if parsed := parseJSONArgs(args); parsed != nil {
 		name = jsonStr(parsed, "worker_name", "workerName", "worker", "name")
 	}

@@ -9,6 +9,9 @@ const (
 	schemaKeyAdditionalProps    = "additionalProperties"
 	schemaKeyDescription        = "description"
 	schemaKeyRequired           = "required"
+	schemaKeyArray              = "array"
+	schemaKeyItems              = "items"
+	schemaKeyBoolean            = "boolean"
 )
 
 // jsonSchema renders a JSON Schema (draft 2020-12) from a properties map and
@@ -119,8 +122,8 @@ var (
 		"header", strProp("Short header shown above the question."),
 		"question", strProp("Question text presented to the user."),
 		"options", map[string]any{
-			schemaKeyType: "array",
-			"items": map[string]any{
+			schemaKeyType: schemaKeyArray,
+			schemaKeyItems: map[string]any{
 				schemaKeyType: schemaKeyObject,
 				schemaKeyProperties: schemaProps(
 					"label", strProp("Option label."),
@@ -131,13 +134,22 @@ var (
 			},
 			schemaKeyDescription: "Answer options; omit for free-text questions.",
 		},
-		"multiple", map[string]any{schemaKeyType: "boolean", "description": "Allow multiple selections."},
-		"allow_custom", map[string]any{schemaKeyType: "boolean", "description": "Allow a custom answer."},
+		"multiple", map[string]any{schemaKeyType: schemaKeyBoolean, "description": "Allow multiple selections."},
+		"allow_custom", map[string]any{schemaKeyType: schemaKeyBoolean, "description": "Allow a custom answer."},
 	), "question")
 
 	schemaDelegate = jsonSchema(schemaProps(
 		"agent", strProp("Target agent name (plan, search, ...)."),
 		"instruction", strProp("Instruction for the sub-agent."),
+		"allow_delegate", map[string]any{schemaKeyType: schemaKeyBoolean, schemaKeyDescription: "Allow the sub-agent to delegate further."},
+		"inherit_brain", map[string]any{schemaKeyType: schemaKeyBoolean, schemaKeyDescription: "Copy the current session brain into the sub-agent (default true)."},
+		"max_iterations", intProp("Maximum tool iterations for the sub-agent (default 10)."),
+		"max_depth", intProp("Maximum delegation depth (default 2)."),
+		"tool_filter", map[string]any{
+			schemaKeyType:        "array",
+			schemaKeyDescription: "Restrict the tools exposed to the sub-agent.",
+			"items":              map[string]any{schemaKeyType: "string"},
+		},
 	), "agent", "instruction")
 
 	schemaBrainWrite = jsonSchema(schemaProps(
@@ -157,7 +169,7 @@ var (
 		"edits", map[string]any{
 			"type":        "array",
 			schemaKeyDescription: "List of edits: [{old, new}] or [{old_string, new_string}].",
-			"items": map[string]any{
+			schemaKeyItems: map[string]any{
 				schemaKeyType: schemaKeyObject,
 				schemaKeyProperties: schemaProps(
 					"old", strProp("Exact text to replace."),

@@ -30,7 +30,7 @@ func TestActivateSkillTool(t *testing.T) {
 	}
 
 	// Test successful run
-	res, err := tool.Run(context.Background(), "test-skill")
+	res, err := tool.Run(context.Background(), `{"name":"test-skill"}`)
 	if err != nil {
 		t.Fatalf("failed to run tool: %v", err)
 	}
@@ -44,20 +44,12 @@ func TestActivateSkillTool(t *testing.T) {
 	}
 
 	// Test case-insensitive
-	resCase, err := tool.Run(context.Background(), "TEST-SKILL")
+	resCase, err := tool.Run(context.Background(), `{"name":"TEST-SKILL"}`)
 	if err != nil {
 		t.Fatalf("failed case-insensitive run: %v", err)
 	}
 	if !strings.Contains(resCase.Output, "Test skill instructions body") {
 		t.Errorf("expected case-insensitive output to contain skill body")
-	}
-
-	resJSON, err := tool.Run(context.Background(), `{"name":"test-skill"}`)
-	if err != nil {
-		t.Fatalf("failed JSON run: %v", err)
-	}
-	if !strings.Contains(resJSON.Output, "Test skill instructions body") {
-		t.Errorf("expected JSON output to contain skill body")
 	}
 
 	// Test run with empty args
@@ -67,7 +59,7 @@ func TestActivateSkillTool(t *testing.T) {
 	}
 
 	// Test run with unknown skill
-	_, errUnknown := tool.Run(context.Background(), "unknown-skill")
+	_, errUnknown := tool.Run(context.Background(), `{"name":"unknown-skill"}`)
 	if errUnknown == nil {
 		t.Error("expected error with unknown skill, got nil")
 	}

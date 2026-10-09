@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -28,56 +27,37 @@ func (t *ReadTool) Spec() Spec {
 	return Spec{
 		Name:        "read",
 		Summary:     "Reads a file or lists a directory in the workspace.",
-		Usage:       "read <path> [offset] [limit]",
+		Usage:       `read {"path": "internal/app/runtime.go", "offset": 1, "limit": 200}`,
 		InputSchema: schemaRead,
 	}
 }
 
 func (t *ReadTool) Run(ctx context.Context, args string) (Result, error) {
 	_ = ctx
-	args = strings.TrimSpace(args)
-	parts := strings.Fields(args)
+	parsed := parseJSONArgs(args)
+	if parsed == nil {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+	}
+	path := jsonStr(parsed, "path", "filePath", "file_path", "file")
+	if path == "" {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+	}
 	offset := 1
 	limit := defaultReadLimit
-
-	if parsed := parseJSONArgs(args); parsed != nil {
-		path := jsonStr(parsed, "path", "filePath", "file_path", "file")
-		if path == "" {
-			return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
+	if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
+		if value < 1 {
+			return Result{}, fmt.Errorf("invalid offset: %d", value)
 		}
-		if value, ok := jsonInt(parsed, "offset", "line", "start"); ok {
-			if value < 1 {
-				return Result{}, fmt.Errorf("invalid offset: %d", value)
-			}
-			offset = value
+		offset = value
+	}
+	if value, ok := jsonInt(parsed, "limit", "lines", "max_lines", "count"); ok {
+		if value < 1 {
+			return Result{}, fmt.Errorf("invalid limit: %d", value)
 		}
-		if value, ok := jsonInt(parsed, "limit", "lines", "max_lines", "count"); ok {
-			if value < 1 {
-				return Result{}, fmt.Errorf("invalid limit: %d", value)
-			}
-			limit = value
-		}
-		parts = []string{path}
-	} else if len(parts) == 0 {
-		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
-	} else {
-		if len(parts) >= 2 {
-			value, err := strconv.Atoi(parts[1])
-			if err != nil || value < 1 {
-				return Result{}, fmt.Errorf("invalid offset: %s", parts[1])
-			}
-			offset = value
-		}
-		if len(parts) >= 3 {
-			value, err := strconv.Atoi(parts[2])
-			if err != nil || value < 1 {
-				return Result{}, fmt.Errorf("invalid limit: %s", parts[2])
-			}
-			limit = value
-		}
+		limit = value
 	}
 
-	absPath, relPath, err := resolveWorkspacePath(parts[0])
+	absPath, relPath, err := resolveWorkspacePath(path)
 	if err != nil {
 		return Result{}, err
 	}

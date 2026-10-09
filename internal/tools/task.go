@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 type TaskRunner interface {
@@ -23,29 +22,33 @@ func (t *TaskTool) Spec() Spec {
 	return Spec{
 		Name:        "task",
 		Summary:     "Launch a long-running command in the background (returns ID) or cancel a running task.",
-		Usage:       "task <command> | task terminate <idTask>",
+		Usage:       `task {"command": "go test ./..."} | task {"terminate": "<task_id>"}`,
 		InputSchema: schemaTask,
 	}
 }
 
 func (t *TaskTool) Run(ctx context.Context, args string) (Result, error) {
 	if t.runner == nil {
-		return Result{}, fmt.Errorf("task runner no inicializado")
+		return Result{}, fmt.Errorf("task runner not initialized")
 	}
-	args = strings.TrimSpace(args)
-	if parsed := parseJSONArgs(args); parsed != nil {
-		if command := jsonStr(parsed, "command", "cmd"); command != "" {
-			args = command
-		} else if terminateID := jsonStr(parsed, "terminate", "task_id", "taskId", "id"); terminateID != "" {
-			args = "terminate " + terminateID
-		}
-	}
-	if args == "" {
-		return Result{}, fmt.Errorf("uso: %s", t.Spec().Usage)
+	parsed := parseJSONArgs(args)
+	if parsed == nil {
+		return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 	}
 
-	if after, ok := strings.CutPrefix(args, "terminate "); ok {
-		id := strings.TrimSpace(after)
+	if command := jsonStr(parsed, "command", "cmd"); command != "" {
+		id, err := t.runner.StartTask(ctx, command)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{
+			Spec:    t.Spec(),
+			Summary: fmt.Sprintf("Task %s launched.", id),
+			Output:  command,
+		}, nil
+	}
+
+	if id := jsonStr(parsed, "terminate", "task_id", "taskId", "id"); id != "" {
 		if err := t.runner.TerminateTask(id); err != nil {
 			return Result{}, err
 		}
@@ -56,13 +59,5 @@ func (t *TaskTool) Run(ctx context.Context, args string) (Result, error) {
 		}, nil
 	}
 
-	id, err := t.runner.StartTask(ctx, args)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{
-		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("Task %s launched.", id),
-		Output:  args,
-	}, nil
+	return Result{}, fmt.Errorf("usage: %s", t.Spec().Usage)
 }
