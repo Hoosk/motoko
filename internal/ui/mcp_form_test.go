@@ -239,6 +239,8 @@ func TestMCPFormHTTPEnterOnLastTextFieldSaves(t *testing.T) {
 	}
 }
 
+const fakeMCPCommand = "motoko-test-no-such-mcp-server"
+
 func TestMCPFormSuccessfulStdioSave(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -246,7 +248,9 @@ func TestMCPFormSuccessfulStdioSave(t *testing.T) {
 	form.fieldIndex = 1
 	form.Update(keyRunes("git"), runtime)
 	form.fieldIndex = 2
-	form.Update(keyRunes("npx"), runtime)
+	// Saving also starts the server, so use a command that cannot run
+	// (npx would download and execute a package on every test run).
+	form.Update(keyRunes(fakeMCPCommand), runtime)
 	form.fieldIndex = 3
 	form.Update(keyRunes("-y @modelcontextprotocol/server-git"), runtime)
 	form.fieldIndex = 4 // save
@@ -256,8 +260,8 @@ func TestMCPFormSuccessfulStdioSave(t *testing.T) {
 	}
 	for _, s := range runtime.Config().MCPServers {
 		if s.Name == "git" {
-			if s.Command != "npx" {
-				t.Errorf("expected command=npx, got %q", s.Command)
+			if s.Command != fakeMCPCommand {
+				t.Errorf("expected command=%s, got %q", fakeMCPCommand, s.Command)
 			}
 			if len(s.Args) != 2 || s.Args[0] != "-y" || s.Args[1] != "@modelcontextprotocol/server-git" {
 				t.Errorf("unexpected args: %v", s.Args)

@@ -13,6 +13,7 @@ Motoko is a high-performance terminal AI assistant built in Go. It utilizes the 
 ## Testing
 - **Run all tests:** `go test ./...`
 - **Testing Style:** Ensure new features include unit tests in the same package (e.g., `logic_test.go`).
+- **Test Isolation:** Packages whose tests reach config, sessions, the brain or the model cache must isolate per-user directories with `func TestMain(m *testing.M) { os.Exit(testhome.Run(m)) }` (`internal/testhome`). Setting `XDG_CONFIG_HOME` alone is not enough on macOS. Tests must not download or execute external packages (e.g. via `npx`).
 
 ## Code Style & Conventions
 - **Go Idioms:** Follow standard Go formatting (`gofmt`) and linting conventions.
