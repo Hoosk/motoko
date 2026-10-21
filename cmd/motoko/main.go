@@ -128,6 +128,9 @@ func runQuestion(ctx context.Context, runtimeObj *app.Runtime, question string) 
 		fmt.Fprintln(os.Stderr, "Error: --question cannot use edit_approval=ask; run interactively or set edit_approval=auto")
 		os.Exit(1)
 	}
+	if cfg := runtimeObj.Config(); cfg != nil && cfg.PendingWorkspace() != nil {
+		fmt.Fprintln(os.Stderr, "Note: ignoring untrusted project config in .agents/ (config.json, mcp.json). Run motoko interactively here to review and trust it.")
+	}
 	runtimeObj.Start(ctx)
 
 	// Wait up to 2 seconds for Tachikomas to complete their first run

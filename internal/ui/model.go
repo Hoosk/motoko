@@ -105,6 +105,7 @@ func (m Model) Init() tea.Cmd {
 		m.footer.Init(),
 		m.sidebar.Init(),
 		m.waitDialog(),
+		m.askWorkspaceTrust(),
 		m.waitScheduleEvent(),
 		m.waitTaskEvent(),
 		m.checkForUpdatesCmd(),

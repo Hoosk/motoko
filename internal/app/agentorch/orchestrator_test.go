@@ -3,6 +3,7 @@ package agentorch
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -477,4 +478,110 @@ func TestFinishRunToleratesNilOnEvent(t *testing.T) {
 
 	orch := newTestOrch(deps)
 	orch.finishRun(context.Background(), "input", agent.Result{}, nil)
+}
+
+func delegationTestOrch(t *testing.T, agents []agent.AgentDef, overrides map[string]config.AgentOverride) *Orchestrator {
+	t.Helper()
+	deps := minimalDeps()
+	deps.ConfigFn = func() *config.AppConfig {
+		return &config.AppConfig{
+			ActiveProvider: "p",
+			Providers:      []config.ProviderConfig{{Name: "p", Kind: config.ProviderKindOpenAICompatible, APIKey: "k", Model: "m"}},
+			Agents:         overrides,
+		}
+	}
+	deps.ProviderClientFn = func() func(config.ProviderConfig) (provider.Client, error) {
+		return func(config.ProviderConfig) (provider.Client, error) { return nil, nil }
+	}
+	deps.AvailableAgentsFn = func() []agent.AgentDef { return agents }
+	return newTestOrch(deps)
+}
+
+var (
+	planDef  = agent.AgentDef{Name: "plan", Permissions: agent.AgentPermissions{AllowDelegate: true, AllowWebAccess: true}}
+	buildDef = agent.AgentDef{Name: "build", Permissions: agent.AgentPermissions{
+		AllowWrite: true, AllowDelegate: true, AllowTask: true, AllowWebAccess: true, AllowBrainWrite: true,
+	}}
+)
+
+func allowedNames(p toolPolicy, names ...string) []string {
+	var out []string
+	for _, n := range names {
+		if p.allows(stubPlainTool{name: n}) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func TestDelegationCannotEscalateWritePermissions(t *testing.T) {
+	orch := delegationTestOrch(t, []agent.AgentDef{planDef, buildDef}, nil)
+	orch.SetAgentMode("plan")
+
+	// plan (read-only) delegates to build: the subagent must stay read-only.
+	_, sub, err := orch.createSubagent("build", tools.SubagentConfig{Mode: "build"}, orch.callerPolicy(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedNames(sub, "bash", "write", "patch", "task", "read"); !slices.Equal(got, []string{"read"}) {
+		t.Fatalf("plan -> build subagent got tools %v, want only [read]", got)
+	}
+
+	// build delegating to build keeps its write tools.
+	orch.SetAgentMode("build")
+	_, sub, err = orch.createSubagent("build", tools.SubagentConfig{Mode: "build"}, orch.callerPolicy(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedNames(sub, "bash", "write"); len(got) != 2 {
+		t.Fatalf("build -> build subagent lost write tools: %v", got)
+	}
+}
+
+func TestDelegationNarrowsAcrossNestedSubagents(t *testing.T) {
+	orch := delegationTestOrch(t, []agent.AgentDef{planDef, buildDef}, nil)
+	orch.SetAgentMode("build")
+	// build -> plan (read-only) -> build: the innermost one inherits plan's limits.
+	_, planSub, err := orch.createSubagent("plan", tools.SubagentConfig{Mode: "plan", AllowDelegate: true}, orch.callerPolicy(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), callerPolicyKey{}, planSub)
+	_, inner, err := orch.createSubagent("build", tools.SubagentConfig{Mode: "build"}, orch.callerPolicy(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedNames(inner, "bash", "write", "task"); len(got) != 0 {
+		t.Fatalf("nested subagent regained %v through a read-only parent", got)
+	}
+}
+
+func TestDelegationKeepsSubagentOwnRestrictions(t *testing.T) {
+	custom := agent.AgentDef{Name: "reviewer", Permissions: agent.AgentPermissions{
+		AllowWrite:   true,
+		AllowedTools: []string{"read", "grep", "bash"},
+		DeniedTools:  []string{"bash"},
+	}}
+	orch := delegationTestOrch(t, []agent.AgentDef{buildDef, custom}, nil)
+	orch.SetAgentMode("build")
+
+	// The model asks for a wider tool_filter than the agent's own allow list
+	// and the default exclusion of "delegate" used to replace the deny list.
+	_, sub, err := orch.createSubagent("reviewer", tools.SubagentConfig{
+		Mode:       "reviewer",
+		ToolFilter: []string{"read", "web_fetch", "bash"},
+	}, orch.callerPolicy(context.Background()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := allowedNames(sub, "read", "grep", "bash", "web_fetch", "delegate"); !slices.Equal(got, []string{"read"}) {
+		t.Fatalf("reviewer subagent got %v, want only [read]", got)
+	}
+}
+
+func TestIntersectToolListsDisjointAllowsNothing(t *testing.T) {
+	p := toolPolicy{def: buildDef, allowed: intersectToolLists([]string{"read"}, []string{"grep"})}
+	if got := allowedNames(p, "read", "grep", "write"); len(got) != 0 {
+		t.Fatalf("disjoint allow lists must allow nothing, got %v", got)
+	}
 }

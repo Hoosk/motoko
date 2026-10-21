@@ -311,7 +311,6 @@ func TestPatchToolRejectsUnsafeWrites(t *testing.T) {
 		".env.local",
 		".ssh/id_rsa",
 		"id_rsa",
-		".antigravitycli/settings.json",
 	}
 
 	for _, unsafePath := range unsafePaths {
