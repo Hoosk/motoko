@@ -32,7 +32,18 @@ func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language strin
 		extractor, _ = languages.GetExtractor(language)
 	}
 
-	root, _ := sitter.ParseCtx(context.Background(), content, lang)
+	// Parse with an explicit parser so the C-allocated tree is released as soon
+	// as extraction finishes instead of waiting for finalizers; the whole
+	// workspace is re-parsed on every refresh.
+	parser := sitter.NewParser()
+	defer parser.Close()
+	parser.SetLanguage(lang)
+	tree, _ := parser.ParseCtx(context.Background(), nil, content)
+	if tree == nil {
+		return nil, nil, nil
+	}
+	defer tree.Close()
+	root := tree.RootNode()
 	if root == nil {
 		return nil, nil, nil
 	}

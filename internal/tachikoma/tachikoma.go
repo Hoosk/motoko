@@ -8,6 +8,7 @@ import (
 
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/system"
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
 const updatesBufferSize = 32
@@ -58,6 +59,16 @@ func (m *Manager) SetActivePrompt(prompt string) {
 }
 
 func (m *Manager) Start(ctx context.Context) {
+	// One watcher for the whole workspace, shared by every worker. A nil hub
+	// (watching unavailable) still goes into ctx so workers fall back to
+	// polling instead of each retrying with a watcher of its own.
+	hub, err := NewWatchHub(ctx, ".")
+	if err != nil {
+		tracelog.Logf("tachikoma watch hub unavailable: %v", err)
+		hub = nil
+	}
+	ctx = withWatchHub(ctx, hub)
+
 	for _, t := range m.tachikomas {
 		m.wg.Add(1)
 		go func(t Tachikoma) {
@@ -185,10 +196,20 @@ func (m *Manager) Updates() <-chan Update {
 	return m.updates
 }
 
-func runRefreshLoop(ctx context.Context, interval time.Duration, watchPaths []string, watchDebounce time.Duration, refresh func()) error {
+// runRefreshLoop calls refresh once, then on every interval tick and after
+// filesystem changes in scope settle for watchDebounce. A zero scope disables
+// watching.
+func runRefreshLoop(ctx context.Context, interval time.Duration, scope WatchScope, watchDebounce time.Duration, refresh func()) error {
 	var events <-chan struct{}
-	if len(watchPaths) > 0 {
-		events, _ = WatchHelper(ctx, watchPaths, watchDebounce)
+	if scope != 0 {
+		hub, shared := watchHubFrom(ctx)
+		if !shared && ctx.Err() == nil {
+			// Running outside a Manager: watch on our own.
+			hub, _ = NewWatchHub(ctx, ".")
+		}
+		if hub != nil {
+			events = hub.Subscribe(scope, watchDebounce)
+		}
 	}
 
 	refresh()

@@ -1,11 +1,17 @@
 package ignore
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/Hoosk/motoko/internal/git"
 )
+
+// checkIgnoreTimeout bounds a single live git check-ignore lookup.
+const checkIgnoreTimeout = 2 * time.Second
 
 var fixedIgnoredDirs = map[string]struct{}{
 	".git":         {},
@@ -16,7 +22,9 @@ var fixedIgnoredDirs = map[string]struct{}{
 type Matcher struct {
 	ignoredFiles map[string]struct{}
 	ignoredDirs  map[string]struct{}
-	patterns     []ignorePattern
+	// gitRoot is set when the snapshot came from git, enabling live lookups.
+	gitRoot  string
+	patterns []ignorePattern
 }
 
 // ignorePattern represents a single parsed .gitignore pattern used as
@@ -137,16 +145,29 @@ func (m *Matcher) Ignored(relPath string, isDir bool) bool {
 	return false
 }
 
+// IgnoredByGit asks git whether relPath is ignored right now. Unlike Ignored,
+// which consults the snapshot taken by Load, it sees paths created since. It
+// returns false when the matcher was not built from a git repository.
+func (m *Matcher) IgnoredByGit(relPath string) bool {
+	if m == nil || m.gitRoot == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkIgnoreTimeout)
+	defer cancel()
+	// Exit status 0 means ignored, 1 means not ignored.
+	_, err := git.Output(ctx, m.gitRoot, "check-ignore", "-q", "--", relPath)
+	return err == nil
+}
+
 func (m *Matcher) loadGitIgnored(root string) {
-	cmd := exec.Command("git", "ls-files", "--others", "-i", "--exclude-standard", "--directory")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := git.Output(context.Background(), root, "ls-files", "--others", "-i", "--exclude-standard", "--directory")
 	if err != nil {
 		// Git is not available or root is not a git repo: fall back to
 		// parsing .gitignore files directly.
 		m.loadGitIgnoreFiles(root)
 		return
 	}
+	m.gitRoot = root
 	for rawLine := range strings.SplitSeq(string(out), "\n") {
 		rawLine = strings.TrimSpace(rawLine)
 		if rawLine == "" {

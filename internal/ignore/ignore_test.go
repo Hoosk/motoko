@@ -40,6 +40,45 @@ func TestMatcherUsesGitIgnoredSnapshot(t *testing.T) {
 	}
 }
 
+func TestMatcherIgnoredByGitSeesDirectoriesCreatedAfterLoad(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("target/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	matcher, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Created after the snapshot, like a build output directory.
+	if err := os.MkdirAll(filepath.Join(root, "target", "debug"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if matcher.Ignored("target", true) {
+		t.Fatal("snapshot unexpectedly knows about target/")
+	}
+	if !matcher.IgnoredByGit("target") {
+		t.Fatal("expected live lookup to report target/ ignored")
+	}
+	if matcher.IgnoredByGit("src") {
+		t.Fatal("did not expect src/ ignored")
+	}
+}
+
+func TestMatcherIgnoredByGitOutsideRepository(t *testing.T) {
+	matcher, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matcher.IgnoredByGit("anything") {
+		t.Fatal("expected no live lookups without git")
+	}
+}
+
 func TestMatcherAlwaysIgnoresFixedDirectories(t *testing.T) {
 	matcher, err := Load(t.TempDir())
 	if err != nil {

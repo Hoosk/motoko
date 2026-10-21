@@ -97,7 +97,7 @@ func (d *DependencyTachikoma) Run(ctx context.Context, publish func(Update) bool
 		})
 	}
 
-	return runRefreshLoop(ctx, d.interval, []string{"."}, time.Second, refresh)
+	return runRefreshLoop(ctx, d.interval, ScopeWorkspace, time.Second, refresh)
 }
 
 func parseGoMod(content string) (string, []string) {

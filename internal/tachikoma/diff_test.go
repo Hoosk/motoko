@@ -1,7 +1,11 @@
 package tachikoma
 
 import (
+	"context"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/semantic"
 	"github.com/Hoosk/motoko/internal/semantic/symtypes"
@@ -78,4 +82,37 @@ func TestDiffTachikoma_IdentifyChanges(t *testing.T) {
 			t.Error("Did not find both functions covered by the span")
 		}
 	})
+}
+
+func TestDiffTachikomaComputeSemanticDiffIgnoresUserConfig(t *testing.T) {
+	root := newWatchTestRepo(t)
+	src := "package src\n\nfunc FuncA() int {\n\treturn 1\n}\n\nfunc FuncB() int {\n\treturn 2\n}\n"
+	writeWatchTestFile(t, filepath.Join(root, "src", "pkg.go"), src)
+	runWatchTestGit(t, root, "add", ".")
+	runWatchTestGit(t, root, "commit", "-qm", "add pkg")
+
+	// Settings that broke the old "+++ b/" parsing.
+	runWatchTestGit(t, root, "config", "diff.noprefix", "true")
+	runWatchTestGit(t, root, "config", "color.diff", "always")
+
+	// Staged-only change inside FuncB, seen from a subdirectory.
+	writeWatchTestFile(t, filepath.Join(root, "src", "pkg.go"), strings.Replace(src, "return 2", "return 3", 1))
+	runWatchTestGit(t, root, "add", "src/pkg.go")
+	t.Chdir(filepath.Join(root, "src"))
+
+	snapshot, err := semantic.BuildSnapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := semantic.NewIndex()
+	index.SetSnapshotForTest(snapshot)
+
+	diff, err := NewDiffTachikoma(index, time.Minute).computeSemanticDiff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := diff.Files["pkg.go"]
+	if len(changes) != 1 || changes[0].Name != "FuncB" {
+		t.Fatalf("expected FuncB change in pkg.go, got %#v", diff.Files)
+	}
 }

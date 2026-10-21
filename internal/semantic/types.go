@@ -9,7 +9,12 @@ type Symbol = symtypes.Symbol
 type Snippet = symtypes.Snippet
 type FileSummary = symtypes.FileSummary
 
-const defaultTopFiles = 6
+const (
+	defaultTopFiles = 6
+	// maxPropagationSeeds caps how many direct matches spread score to the
+	// files they import or reference.
+	maxPropagationSeeds = 16
+)
 
 type Snapshot struct {
 	symtypes.Snapshot

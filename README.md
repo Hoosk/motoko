@@ -76,7 +76,7 @@ Unlike tools that perform exhaustive or blind codebase scans, Motoko runs **Tach
 *   **Incremental Search (`SearchTachikoma`):** Ranks and pre-retrieves relevant code blocks based on user queries.
 *   **Dependency Audit (`DependencyTachikoma`):** Summarizes project manifests (`go.mod`, `package.json`, `Cargo.toml`, etc.).
 
-All background workers use debounced filesystem notifications (`fsnotify`) and coordinate via a unified Go channel to keep context fresh without impacting system performance.
+All background workers share a single `fsnotify` watcher that skips ignored paths (including directories created later, such as build output) and watches only `HEAD`, the index and branch refs inside `.git`. Each worker gets debounced notifications, and git is queried without taking `index.lock`, so Motoko never competes with your own git commands.
 
 ---
 

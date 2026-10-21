@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Hoosk/motoko/internal/git"
 	"github.com/Hoosk/motoko/internal/semantic"
 )
 
@@ -55,7 +56,7 @@ func (d *DiffTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 		publish(Update{Name: d.Name(), Status: status, Payload: payload})
 	}
 
-	return runRefreshLoop(ctx, d.interval, []string{"."}, time.Second, refresh)
+	return runRefreshLoop(ctx, d.interval, ScopeWorkspace|ScopeGitMeta, time.Second, refresh)
 }
 
 func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, error) {
@@ -66,9 +67,7 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 		return result, nil
 	}
 
-	// Get abbreviated diff to identify changed lines
-	cmd := exec.CommandContext(ctx, "git", "diff", "-U0")
-	out, err := cmd.Output()
+	out, err := changedLinesDiff(ctx)
 	if err != nil {
 		return result, err
 	}
@@ -105,6 +104,28 @@ func (d *DiffTachikoma) computeSemanticDiff(ctx context.Context) (SemanticDiff, 
 	}
 
 	return result, nil
+}
+
+// diffArgs pins every option that user configuration could otherwise change
+// (prefixes, colour, external diff tools, path quoting). --relative keeps
+// paths relative to the working directory, matching the snapshot, when
+// motoko runs inside a subdirectory of the repository.
+var diffArgs = []string{
+	"-c", "core.quotePath=false",
+	"diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--relative", "-U0",
+}
+
+// changedLinesDiff returns a zero-context diff of staged and unstaged
+// changes against HEAD, or of the working tree alone before the first commit.
+func changedLinesDiff(ctx context.Context) ([]byte, error) {
+	out, err := git.Output(ctx, "", append(slices.Clone(diffArgs), "HEAD")...)
+	if err == nil {
+		return out, nil
+	}
+	if _, headErr := git.Output(ctx, "", "rev-parse", "--verify", "--quiet", "HEAD"); headErr == nil {
+		return nil, err
+	}
+	return git.Output(ctx, "", diffArgs...)
 }
 
 func (d *DiffTachikoma) identifyChangesInFile(snapshot *semantic.Snapshot, path string, start, count int, result *SemanticDiff) {

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"bytes"
 	"maps"
 	"path/filepath"
 	"sort"
@@ -49,18 +50,28 @@ func relevantFilesForTokens(s Snapshot, tokens []string, limit int) []FileSummar
 	expanded := make(map[string]int)
 	maps.Copy(expanded, scores)
 
-	for _, a := range s.Files {
-		scoreA := scores[a.Path]
-		if scoreA <= 0 {
-			continue
+	// Only the strongest direct matches propagate. Short prompt tokens match
+	// most files, so propagating from every positive score made this
+	// quadratic in the size of the workspace.
+	var seeds []scoredFile
+	for _, file := range s.Files {
+		if score := scores[file.Path]; score > 0 {
+			seeds = append(seeds, scoredFile{file: file, score: score})
 		}
+	}
+	sortScoredFiles(seeds)
+	if len(seeds) > maxPropagationSeeds {
+		seeds = seeds[:maxPropagationSeeds]
+	}
+	for _, seed := range seeds {
+		a := seed.file
 		for _, b := range s.Files {
 			if a.Path == b.Path {
 				continue
 			}
 			if areConnected(a, b) {
 				// Propagate 30% of A's score to B
-				expanded[b.Path] += scoreA * 3 / 10
+				expanded[b.Path] += seed.score * 3 / 10
 			}
 		}
 	}
@@ -291,12 +302,13 @@ func referencesSymbol(a, b FileSummary) bool {
 	if len(b.Exports) == 0 || len(a.Content) == 0 {
 		return false
 	}
-	aStr := strings.ToLower(string(a.Content))
+	// Identifiers are case-sensitive, so match them as-is instead of
+	// lowercasing a copy of the whole file for every pair.
 	for _, exp := range b.Exports {
 		if exp == "" {
 			continue
 		}
-		if strings.Contains(aStr, strings.ToLower(exp)) {
+		if bytes.Contains(a.Content, []byte(exp)) {
 			return true
 		}
 	}
