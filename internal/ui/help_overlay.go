@@ -43,7 +43,7 @@ func (h *helpOverlayState) Update(msg tea.Msg) tea.Cmd {
 		h.viewHeight = max(8, msg.Height-14)
 	case tea.KeyMsg:
 		switch msg.String() {
-		case keyEsc, keyCtrlH:
+		case keyEsc, keyCtrlG, keyF1:
 			h.active = false
 		case keyTab, keyRight:
 			h.tab = (h.tab + 1) % 3
@@ -109,13 +109,13 @@ func (h helpOverlayState) activeLines(runtime *app.Runtime) []string {
 	default:
 		return []string{
 			formatShortcut("enter", "send / select"),
-			formatShortcut("tab/right", "next suggestion or tab"),
-			formatShortcut("shift+tab/left", "previous suggestion or tab"),
+			formatShortcut("tab", "next suggestion or tab"),
+			formatShortcut("shift+tab", "previous suggestion or tab"),
 			formatShortcut("up/down", "history, lists, scroll"),
 			formatShortcut("ctrl+k", "command palette"),
-			formatShortcut("ctrl+h", "toggle help overlay"),
+			formatShortcut("ctrl+g/f1", "toggle help overlay"),
 			formatShortcut("ctrl+t", "toggle tool catalog"),
-			formatShortcut("ctrl+m", "open model selector"),
+			formatShortcut("ctrl+l", "open model selector"),
 			formatShortcut("ctrl+p", "open provider form"),
 			formatShortcut("ctrl+o", "open session picker"),
 			formatShortcut("ctrl+a", "open agent mode selector"),
@@ -123,6 +123,7 @@ func (h helpOverlayState) activeLines(runtime *app.Runtime) []string {
 			formatShortcut("ctrl+q", "focus queued prompts"),
 			formatShortcut("ctrl+up/down", "reorder queued prompts"),
 			formatShortcut("alt+up/down", "select previous/next message"),
+			formatShortcut("pgup/pgdown", "scroll conversation"),
 			formatShortcut("alt+c", "copy selected message"),
 			formatShortcut("ctrl+r", "toggle reasoning visibility"),
 			formatShortcut("esc", "close overlay or stop request"),

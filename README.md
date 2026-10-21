@@ -85,10 +85,11 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | Shortcut | Description |
 | :--- | :--- |
 | **Enter** | Send message / Apply active selection |
-| **Tab** / **Right** | Next inline suggestion / mention |
-| **Shift+Tab** / **Left** | Previous inline suggestion / mention |
+| **Tab** | Next inline suggestion / mention |
+| **Shift+Tab** | Previous inline suggestion / mention |
 | **Up** / **Down** | Navigate command history / Select options |
-| **Alt + Up / Down** | Scroll through message timeline |
+| **Alt + Up / Down** | Select previous / next message |
+| **PgUp** / **PgDown** | Scroll the message timeline |
 | **Alt + C** | Copy selected message contents |
 | **Esc** | Close popups / Cancel action |
 | **Ctrl + C** | Exit Motoko |
@@ -97,10 +98,10 @@ All background workers use debounced filesystem notifications (`fsnotify`) and c
 | **Ctrl + Up / Down** | Reorder queued prompts |
 | **Ctrl + S** / **Alt + S** | Toggle Context Sidebar visibility (disabled under width 40; auto-restored on large terminals) |
 | **Ctrl + T** | Toggle Tool Catalog overlay |
-| **Ctrl + H** | Toggle Help overlay |
+| **Ctrl + G** / **F1** | Toggle Help overlay |
 | **Ctrl + R** | Toggle Reasoning/Thinking output visibility |
 | **Ctrl + P** | Open LLM Provider configuration |
-| **Ctrl + M** | Open Model selector |
+| **Ctrl + L** | Open Model selector |
 | **Ctrl + O** | Open Session picker |
 | **Ctrl + A** | Open Agent Mode selector |
 

@@ -4,9 +4,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/config"
 	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/semantic/symtypes"
 	"github.com/Hoosk/motoko/internal/tools"
 
 	"github.com/Hoosk/motoko/internal/app/types"
@@ -410,9 +412,51 @@ func TestShellCompletionsGit(t *testing.T) {
 }
 
 func TestShellCompletionsNoMatch(t *testing.T) {
-	got := shellCompletions("xyzabc")
-	if len(got) != 1 || got[0] != "xyzabc" {
-		t.Errorf("expected [xyzabc] for unknown prefix, got %v", got)
+	// Echoing the (lowercased) input back as a suggestion made Enter replace
+	// `git commit -m "Fix Bug"` with its lowercase form before running it.
+	if got := shellCompletions(`git commit -m "Fix Bug"`); len(got) != 0 {
+		t.Errorf("expected no suggestions for unknown command, got %v", got)
+	}
+}
+
+func TestTrailingMentionTokenCompletedBySpace(t *testing.T) {
+	if token, ok := trailingMentionToken("explain @README.md "); ok {
+		t.Errorf("expected completed mention to end the token, got %q", token)
+	}
+}
+
+func TestMentionSuggestionsRankFileNameMatchesFirst(t *testing.T) {
+	idx := semantic.NewIndex()
+	idx.SetSnapshotForTest(&semantic.Snapshot{Snapshot: symtypes.Snapshot{
+		GeneratedAt: time.Now(),
+		Files: []semantic.FileSummary{
+			{Path: "internal/ui/model_picker.go"},
+			{Path: "docs/model.go.md"},
+			{Path: "internal/ui/model.go"},
+		},
+	}})
+	d := noopDeps()
+	d.SemanticFn = func() *semantic.Index { return idx }
+
+	got := MentionSuggestions(d, "explain @model.go")
+	if len(got) == 0 || got[0] != "@internal/ui/model.go" {
+		t.Fatalf("expected exact file name match first, got %v", got)
+	}
+}
+
+func TestMentionSuggestionsDoNotBuildIndex(t *testing.T) {
+	// No snapshot yet: suggestions must not walk the workspace on the UI
+	// thread (Ensure would re-index synchronously).
+	idx := semantic.NewIndex()
+	d := depsWithAgents([]string{"plan"})
+	d.SemanticFn = func() *semantic.Index { return idx }
+
+	got := MentionSuggestions(d, "@p")
+	if !slices.Equal(got, []string{"@plan"}) {
+		t.Fatalf("expected only agent suggestions, got %v", got)
+	}
+	if idx.LatestSnapshot() != nil {
+		t.Fatal("MentionSuggestions built an index snapshot")
 	}
 }
 

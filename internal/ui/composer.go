@@ -80,8 +80,10 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 		m.refreshSuggestions()
 
 	case tea.KeyMsg:
+		// Tab cycles suggestions; Left/Right stay with the textarea so the
+		// cursor can always move (suggestions are present most of the time).
 		switch msg.String() {
-		case keyTab, keyRight:
+		case keyTab:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(1)
 				return m, nil
@@ -90,7 +92,7 @@ func (m ComposerModel) Update(msg tea.Msg) (ComposerModel, tea.Cmd) {
 				m.advanceSuggestion(1)
 				return m, nil
 			}
-		case keyShiftTab, keyLeft:
+		case keyShiftTab:
 			if len(m.mentionSuggestions) > 0 {
 				m.advanceMention(-1)
 				return m, nil
@@ -372,7 +374,7 @@ func (m ComposerModel) renderSuggestionsLine() string {
 				}
 			} else {
 				if chromeWidth < 50 {
-					detail = "Tab: suggest • Ctrl+H: help"
+					detail = "Tab: suggest • Ctrl+G: help"
 				} else if chromeWidth < 75 {
 					detail = "Tab: rotate suggestions • /provider add • /models list"
 				} else {

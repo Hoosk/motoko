@@ -41,12 +41,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	// 5. Delegate to standard components
-	cmds = append(cmds, m.timeline.Update(msg))
-
+	// 5. Delegate to standard components. A key press goes to either the
+	// timeline or the composer, never both: the composer types letters that
+	// the timeline would otherwise act on.
 	var cmd tea.Cmd
-	m.composer, cmd = m.composer.Update(msg)
-	cmds = append(cmds, cmd)
+	key, isKey := msg.(tea.KeyMsg)
+	timelineKey := isKey && m.timeline.ownsKey(key)
+	if !isKey || timelineKey {
+		cmds = append(cmds, m.timeline.Update(msg))
+	}
+	if !timelineKey {
+		m.composer, cmd = m.composer.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	var fCmd tea.Cmd
 	m.footer, fCmd = m.footer.Update(msg)
@@ -311,8 +318,7 @@ func (m *Model) onQueueKey(msg tea.KeyMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 }
 
 func (m *Model) onGlobalKey(msg tea.KeyMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
-	switch msg.String() {
-	case keyEsc:
+	if msg.String() == keyEsc {
 		if m.showTools || m.helpOverlay.active {
 			m.showTools = false
 			m.helpOverlay.active = false
@@ -322,38 +328,51 @@ func (m *Model) onGlobalKey(msg tea.KeyMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.cancelCurrent()
 			return cmds, true
 		}
+		return cmds, false
+	}
+	return m.runShortcut(msg.String(), cmds)
+}
+
+// runShortcut performs the action bound to a global shortcut, from the
+// keyboard or the command palette. It reports whether key was a shortcut so
+// the key does not also reach the composer, whose text editing bindings reuse
+// several of these keys (Ctrl+K deletes to end of line, Ctrl+A moves to line
+// start, Ctrl+T transposes characters, Ctrl+P recalls history).
+func (m *Model) runShortcut(key string, cmds []tea.Cmd) ([]tea.Cmd, bool) {
+	switch key {
 	case keyCtrlP:
 		m.providerForm.Open(m.runtime)
-	case "ctrl+q":
-		if len(m.promptQueue) > 0 {
-			m.queueFocus = !m.queueFocus
-			m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
+	case keyCtrlQ:
+		if len(m.promptQueue) == 0 {
+			cmds = append(cmds, m.showNotification("No queued prompts"))
 			return cmds, true
 		}
-	case "ctrl+m":
+		m.queueFocus = !m.queueFocus
+		m.queueSel = clamp(m.queueSel, max(0, len(m.promptQueue)-1))
+	case keyCtrlL:
 		cmds = append(cmds, m.listModels())
-	case "ctrl+o":
+	case keyCtrlO:
 		m.sessionPicker.Open()
 		cmds = append(cmds, m.listSessions())
-	case "ctrl+s", "alt+s":
+	case keyCtrlS, keyAltS:
 		if _, allowed := m.sidebarLayout(); !allowed {
 			cmds = append(cmds, m.showNotification("Sidebar disabled: terminal width too small (min 40)"))
 		} else {
 			m.toggleSidebar()
 		}
-	case "ctrl+a":
+	case keyCtrlA:
 		m.modePopup.Open(m.runtime)
-	case "ctrl+k":
+	case keyCtrlK:
 		m.commandPalette.Open(m.paletteContext())
-	case "ctrl+t":
+	case keyCtrlT:
 		m.showTools = !m.showTools
-	case "ctrl+h":
+	case keyCtrlG, keyF1:
 		if m.helpOverlay.active {
 			m.helpOverlay.active = false
 		} else {
 			m.helpOverlay.Open()
 		}
-	case "ctrl+r":
+	case keyCtrlR:
 		m.timeline.model.ShowReasoning = !m.timeline.model.ShowReasoning
 		m.timeline.renderMessages()
 		stateStr := "hidden"
@@ -361,8 +380,14 @@ func (m *Model) onGlobalKey(msg tea.KeyMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			stateStr = "visible"
 		}
 		cmds = append(cmds, m.showNotification("Reasoning is now "+stateStr))
+	case keyCancelRequest:
+		if m.timeline.model.Thinking && m.cancelCurrent != nil {
+			m.cancelCurrent()
+		}
+	default:
+		return cmds, false
 	}
-	return cmds, false
+	return cmds, true
 }
 
 func (m *Model) onPaletteSelected(msg PaletteSelectedMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
@@ -371,29 +396,7 @@ func (m *Model) onPaletteSelected(msg PaletteSelectedMsg, cmds []tea.Cmd) ([]tea
 		return cmds, false
 	}
 	if msg.Shortcut != "" {
-		switch msg.Shortcut {
-		case keyCtrlM:
-			cmds = append(cmds, m.listModels())
-		case keyCtrlP:
-			m.providerForm.Open(m.runtime)
-		case keyCtrlO:
-			m.sessionPicker.Open()
-			cmds = append(cmds, m.listSessions())
-		case keyCtrlA:
-			m.modePopup.Open(m.runtime)
-		case keyCtrlH:
-			m.helpOverlay.Open()
-		case keyCtrlT:
-			m.showTools = true
-		case "ctrl+s":
-			if _, allowed := m.sidebarLayout(); allowed {
-				m.toggleSidebar()
-			}
-		case "cancel-request":
-			if m.timeline.model.Thinking && m.cancelCurrent != nil {
-				m.cancelCurrent()
-			}
-		}
+		cmds, _ = m.runShortcut(msg.Shortcut, cmds)
 		return cmds, false
 	}
 	if msg.Execute {

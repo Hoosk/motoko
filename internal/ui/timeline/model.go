@@ -2,6 +2,7 @@ package timeline
 
 import (
 	"github.com/Hoosk/motoko/internal/app"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 )
 
@@ -51,6 +52,12 @@ type Model struct {
 
 func New(width, height int) Model {
 	vp := viewport.New(width, height)
+	// The default viewport keymap scrolls on letters and space (f, b, j, k,
+	// u, d, h, l), which the composer needs for typing. Keep paging only.
+	vp.KeyMap = viewport.KeyMap{
+		PageDown: key.NewBinding(key.WithKeys("pgdown")),
+		PageUp:   key.NewBinding(key.WithKeys("pgup")),
+	}
 	m := Model{
 		Viewport:        vp,
 		AutoScroll:      true,

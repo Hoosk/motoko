@@ -11,6 +11,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// toolbarHints lists the toolbar shortcut hints from longest to shortest.
+var toolbarHints = []string{
+	"Ctrl+K palette • Ctrl+G help • Ctrl+Q queue • Ctrl+R reasoning",
+	"Ctrl+K palette • Ctrl+G help",
+	"Ctrl+K palette",
+}
+
 func (m Model) renderComposerToolbar(width int) string {
 	agentName := m.runtime.AgentName()
 	var modeIndicator string
@@ -42,20 +49,31 @@ func (m Model) renderComposerToolbar(width int) string {
 		subagentsStr = styles.BoldBlueStyle.Render("subagents ") + styles.WhiteStyle.Render(strings.Join(activeSubagents, ", "))
 	}
 
-	helpHint := styles.GrayStyle.Render("Ctrl+K palette • Ctrl+H help • Ctrl+Q queue • Ctrl+R reasoning")
-
 	leftContent := left
 	if subagentsStr != "" {
 		leftContent += "  " + subagentsStr
 	}
-
 	leftLen := lipgloss.Width(leftContent)
+
+	// The layout reserves a single line for the toolbar: pick the longest
+	// hint that fits instead of letting it wrap and push the footer off.
+	helpHint := ""
+	for _, hint := range toolbarHints {
+		if leftLen+lipgloss.Width(hint)+2 <= width {
+			helpHint = styles.GrayStyle.Render(hint)
+			break
+		}
+	}
 	rightLen := lipgloss.Width(helpHint)
 	paddingLen := max(
 		// Account for right margin
 		width-leftLen-rightLen-2, 0)
 
 	toolbarContent := leftContent + strings.Repeat(" ", paddingLen) + helpHint
+	if lipgloss.Width(toolbarContent) > width-2 {
+		// A long subagent list can still overflow on its own.
+		toolbarContent = truncate(toolbarContent, width-2)
+	}
 	return styles.SystemStyle.Width(width).Render(toolbarContent)
 }
 
@@ -219,7 +237,7 @@ func timelineOnboarding(runtime *app.Runtime) []string {
 		styles.SystemStyle.Render("Inspect code, edit files, run tools, or ask for a focused review."),
 		styles.GrayStyle.Render("Workspace: " + workspace),
 		styles.GrayStyle.Render("Mode: " + mode + "  •  Provider: " + provider),
-		styles.GrayStyle.Render("Shortcuts: Ctrl+K palette  •  Ctrl+H help  •  Ctrl+M models  •  Ctrl+P provider"),
+		styles.GrayStyle.Render("Shortcuts: Ctrl+K palette  •  Ctrl+G help  •  Ctrl+L models  •  Ctrl+P provider"),
 		styles.GrayStyle.Render("Try: /help  /models list  /sessions  /provider add  @README.md explain the entry point"),
 	}
 }

@@ -1,8 +1,11 @@
 package completions
 
 import (
-	"context"
+	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Hoosk/motoko/internal/app/commands"
 	"github.com/Hoosk/motoko/internal/config"
@@ -205,20 +208,12 @@ func MentionSuggestions(d Deps, input string) []string {
 			result = append(result, "@"+name)
 		}
 	}
-	sem := d.SemanticFn()
-	if sem != nil {
-		if snapshot, err := sem.Ensure(context.Background()); err == nil && snapshot != nil {
-			seen := make(map[string]struct{})
-			for _, file := range snapshot.Files {
-				path := file.Path
-				if _, ok := seen[path]; ok {
-					continue
-				}
-				if prefix == "" || strings.Contains(strings.ToLower(path), prefix) {
-					seen[path] = struct{}{}
-					result = append(result, "@"+path)
-				}
-			}
+	// This runs on every keystroke inside the UI update, so it must never
+	// trigger a (potentially seconds long) re-index: use whatever snapshot
+	// CodeTachikoma last produced.
+	if sem := d.SemanticFn(); sem != nil {
+		if snapshot := sem.LatestSnapshot(); snapshot != nil {
+			result = append(result, fileMentions(snapshot.Files, prefix)...)
 		}
 	}
 	if len(result) > 8 {
@@ -227,8 +222,57 @@ func MentionSuggestions(d Deps, input string) []string {
 	return result
 }
 
+// fileMentions returns "@path" for files matching prefix, best match first:
+// exact path or file name, then file name prefix, then path prefix, then any
+// substring. Without ranking, "@model.go" could complete to model_picker.go.
+func fileMentions(files []semantic.FileSummary, prefix string) []string {
+	type ranked struct {
+		path string
+		rank int
+	}
+	var matches []ranked
+	seen := make(map[string]struct{})
+	for _, file := range files {
+		if _, ok := seen[file.Path]; ok {
+			continue
+		}
+		lowerPath := strings.ToLower(file.Path)
+		base := strings.ToLower(filepath.Base(file.Path))
+		rank := -1
+		switch {
+		case prefix == "":
+			rank = 0
+		case lowerPath == prefix || base == prefix:
+			rank = 0
+		case strings.HasPrefix(base, prefix):
+			rank = 1
+		case strings.HasPrefix(lowerPath, prefix):
+			rank = 2
+		case strings.Contains(lowerPath, prefix):
+			rank = 3
+		}
+		if rank < 0 {
+			continue
+		}
+		seen[file.Path] = struct{}{}
+		matches = append(matches, ranked{path: file.Path, rank: rank})
+	}
+	slices.SortStableFunc(matches, func(a, b ranked) int { return a.rank - b.rank })
+	result := make([]string, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, "@"+match.path)
+	}
+	return result
+}
+
+// trailingMentionToken returns the "@..." word being typed at the end of
+// input. Once the input ends in whitespace the mention is complete; reporting
+// it would keep the dropdown open and make Enter re-apply it forever.
 func trailingMentionToken(input string) (string, bool) {
 	if input == "" {
+		return "", false
+	}
+	if last, _ := utf8.DecodeLastRuneInString(input); unicode.IsSpace(last) {
 		return "", false
 	}
 	fields := strings.Fields(input)
@@ -277,9 +321,6 @@ func shellCompletions(prefix string) []string {
 		if strings.HasPrefix(strings.ToLower(command), prefix) {
 			result = append(result, command)
 		}
-	}
-	if len(result) == 0 {
-		return []string{prefix}
 	}
 	return result
 }
