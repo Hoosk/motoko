@@ -7,6 +7,9 @@ import (
 	"github.com/Hoosk/motoko/internal/semantic"
 )
 
+// backgroundRefreshTimeout bounds a full re-index run by CodeTachikoma.
+const backgroundRefreshTimeout = 2 * time.Minute
+
 type CodeTachikoma struct {
 	index    *semantic.Index
 	interval time.Duration
@@ -25,7 +28,11 @@ func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 		status := "semantic index unavailable"
 		var payload any
 		if c.index != nil {
-			snapshot, err := c.index.Refresh(ctx)
+			// Background refreshes may take longer than the index's
+			// interactive default; timing out would discard the snapshot.
+			refreshCtx, cancel := context.WithTimeout(ctx, backgroundRefreshTimeout)
+			snapshot, err := c.index.Refresh(refreshCtx)
+			cancel()
 			if err != nil {
 				status = err.Error()
 			} else {
@@ -36,5 +43,5 @@ func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) erro
 		publish(Update{Name: c.Name(), Status: status, Payload: payload})
 	}
 
-	return runRefreshLoop(ctx, c.interval, []string{"."}, 500*time.Millisecond, refresh)
+	return runRefreshLoop(ctx, c.interval, ScopeWorkspace, 500*time.Millisecond, refresh)
 }

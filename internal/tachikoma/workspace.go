@@ -26,5 +26,5 @@ func (w *WorkspaceTachikoma) Run(ctx context.Context, publish func(Update) bool)
 		publish(Update{Name: w.Name(), Status: fmt.Sprintf("workspace %s", info.Workspace)})
 	}
 
-	return runRefreshLoop(ctx, w.interval, nil, 0, refresh)
+	return runRefreshLoop(ctx, w.interval, 0, 0, refresh)
 }

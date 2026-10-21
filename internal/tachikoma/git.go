@@ -22,7 +22,7 @@ func (g *GitTachikoma) Name() string {
 func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error {
 	refresh := func() {
 		baseInfo := system.GetContextInfo()
-		gitInfo := system.GetGitInfo(baseInfo.Path)
+		gitInfo := system.GetGitInfo(ctx, baseInfo.Path)
 		status := "git not detected"
 		if gitInfo.HasGit {
 			status = gitInfo.GitSummary()
@@ -31,5 +31,5 @@ func (g *GitTachikoma) Run(ctx context.Context, publish func(Update) bool) error
 		publish(Update{Name: g.Name(), Status: status, Payload: gitInfo})
 	}
 
-	return runRefreshLoop(ctx, g.interval, []string{".", ".git"}, time.Second, refresh)
+	return runRefreshLoop(ctx, g.interval, ScopeWorkspace|ScopeGitMeta, time.Second, refresh)
 }

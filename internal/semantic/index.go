@@ -4,12 +4,12 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Hoosk/motoko/internal/git"
 	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
 )
 
@@ -78,7 +78,7 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		return nil, rootErr
 	}
 	defer fsRoot.Close()
-	changed := findChangedFiles(root)
+	changed := findChangedFiles(ctx, root)
 	snapshot.ChangedPaths = changed
 	changedMap := make(map[string]bool)
 	for _, p := range changed {
@@ -158,25 +158,14 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 	return snapshot, nil
 }
 
-func findChangedFiles(root string) []string {
-	cmd := exec.Command("git", "status", "--short")
-	cmd.Dir = root
-	out, err := cmd.Output()
+func findChangedFiles(ctx context.Context, root string) []string {
+	status, err := git.ReadStatus(ctx, root, true)
 	if err != nil {
 		return nil
 	}
-	var paths []string
-	lines := strings.SplitSeq(string(out), "\n")
-	for line := range lines {
-		line = strings.TrimSpace(line)
-		if len(line) < 3 {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		paths = append(paths, parts[len(parts)-1])
+	paths := make([]string, 0, len(status.Entries))
+	for _, entry := range status.Entries {
+		paths = append(paths, entry.Path)
 	}
 	return paths
 }

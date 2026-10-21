@@ -1,11 +1,13 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/Hoosk/motoko/internal/git"
 )
 
 type SkillDef struct {
@@ -54,7 +56,7 @@ func GetContextInfo() ContextInfo {
 	return info
 }
 
-func GetGitInfo(workspacePath string) ContextInfo {
+func GetGitInfo(ctx context.Context, workspacePath string) ContextInfo {
 	info := ContextInfo{
 		Path: workspacePath,
 	}
@@ -65,31 +67,18 @@ func GetGitInfo(workspacePath string) ContextInfo {
 	info.Signals = make(map[string]string)
 	info.OnDemandSignals = make(map[string]string)
 
-	// Try to get branch name
-	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	if info.Path != "" {
-		branchCmd.Dir = info.Path
+	// A single status call yields both the branch and the changed files; it
+	// fails outside a repository.
+	status, err := git.ReadStatus(ctx, workspacePath, false)
+	if err != nil {
+		return info
 	}
-	branch, err := branchCmd.Output()
-	if err == nil {
-		info.HasGit = true
-		info.GitBranch = strings.TrimSpace(string(branch))
-		populateGitStatus(&info)
-	} else {
-		// Fallback: check if we are inside a git repo at all
-		gitCheck := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-		if info.Path != "" {
-			gitCheck.Dir = info.Path
-		}
-		err := gitCheck.Run()
-		if err == nil {
-			info.HasGit = true
-			info.GitBranch = "no branch"
-			populateGitStatus(&info)
-		} else {
-			info.HasGit = false
-		}
+	info.HasGit = true
+	info.GitBranch = status.Branch
+	if info.GitBranch == "" {
+		info.GitBranch = "no branch"
 	}
+	applyGitStatus(&info, status)
 
 	return info
 }
@@ -168,42 +157,17 @@ func (c ContextInfo) RelevantSnippetsSummary() string {
 	return strings.Join(c.RelevantSnippets, "\n\n")
 }
 
-func populateGitStatus(info *ContextInfo) {
-	statusCmd := exec.Command("git", "status", "--short")
-	if info.Path != "" {
-		statusCmd.Dir = info.Path
-	}
-
-	output, err := statusCmd.Output()
-	if err != nil {
-		return
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return
-	}
-
-	for _, line := range lines {
-		if len(line) < 3 {
-			continue
-		}
-
-		// Capture file name (status is 2 chars + space)
-		fileName := strings.TrimSpace(line[3:])
-		if fileName != "" {
-			info.ModifiedFiles = append(info.ModifiedFiles, fileName)
-		}
-
-		if strings.HasPrefix(line, "??") {
+func applyGitStatus(info *ContextInfo, status git.Status) {
+	for _, entry := range status.Entries {
+		info.ModifiedFiles = append(info.ModifiedFiles, entry.Path)
+		if entry.Untracked() {
 			info.Untracked++
 			continue
 		}
-
-		if line[0] != ' ' {
+		if entry.Staged() {
 			info.Staged++
 		}
-		if line[1] != ' ' {
+		if entry.Unstaged() {
 			info.Unstaged++
 		}
 	}

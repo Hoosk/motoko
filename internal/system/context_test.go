@@ -1,6 +1,12 @@
 package system
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/Hoosk/motoko/internal/git"
+)
 
 func TestContextInfoSummaries(t *testing.T) {
 	info := ContextInfo{
@@ -45,16 +51,28 @@ func TestContextInfoFallbackSummaries(t *testing.T) {
 	}
 }
 
-func TestPopulateGitStatusCountsEntries(t *testing.T) {
+func TestApplyGitStatusCountsEntries(t *testing.T) {
 	info := &ContextInfo{}
-	populateGitStatus(info)
-	if info.Staged < 0 || info.Unstaged < 0 || info.Untracked < 0 {
-		t.Fatalf("git counters should never be negative: %#v", info)
+	applyGitStatus(info, git.Status{Entries: []git.Entry{
+		// Worktree-only change listed first: the old --short parser trimmed
+		// its leading space, turning "foo.go" into "oo.go" counted as staged.
+		{Path: "foo.go", Index: '.', Worktree: 'M'},
+		{Path: "bar.go", Index: 'M', Worktree: 'M'},
+		{Path: "new.go", OrigPath: "old.go", Index: 'R', Worktree: '.'},
+		{Path: "notes.txt", Index: '?', Worktree: '?'},
+	}})
+
+	if info.Staged != 2 || info.Unstaged != 2 || info.Untracked != 1 || !info.GitDirty {
+		t.Fatalf("unexpected counters: %#v", info)
+	}
+	want := []string{"foo.go", "bar.go", "new.go", "notes.txt"}
+	if strings.Join(info.ModifiedFiles, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected files %v, want %v", info.ModifiedFiles, want)
 	}
 }
 
 func TestGetGitInfo(t *testing.T) {
-	info := GetGitInfo(".")
+	info := GetGitInfo(context.Background(), ".")
 	if !info.HasGit {
 		t.Log("Note: running test in non-git workspace")
 		return
