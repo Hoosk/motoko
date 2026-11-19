@@ -167,6 +167,105 @@ func TestEnrichContextMentionedFiles(t *testing.T) {
 	}
 }
 
+// semanticTestSnapshot builds a snapshot with a single indexed Go file. When
+// heavy is true, enough languages are added to push the summary past the
+// sharding threshold.
+func semanticTestSnapshot(heavy bool) *semantic.Snapshot {
+	snapshot := &semantic.Snapshot{
+		Snapshot: symtypes.Snapshot{
+			Files: []semantic.FileSummary{{
+				Path:     "internal/app/runtime.go",
+				Language: "go",
+				Content:  []byte("package app\n\nfunc RunAgent() error {\n\treturn nil\n}\n"),
+				Symbols:  []semantic.Symbol{{Name: "RunAgent", Kind: "func", Line: 3, Range: semantic.LineRange{Start: 3, End: 5}}},
+			}},
+			GeneratedAt: time.Now(),
+		},
+	}
+	if heavy {
+		snapshot.LanguageCounts = make(map[string]int)
+		for i := range 20 {
+			snapshot.LanguageCounts["verylonglanguagenamethatforceslargesummary_"+string(rune('a'+i))] = 1000 + i
+		}
+	}
+	return snapshot
+}
+
+func semanticTestOrch(snapshot *semantic.Snapshot) *Orchestrator {
+	semIdx := semantic.NewIndex()
+	semIdx.SetSnapshotForTest(snapshot)
+	deps := minimalDeps()
+	deps.SemanticFn = func() *semantic.Index { return semIdx }
+	return newTestOrch(deps)
+}
+
+func TestEnrichContextHeavySummaryIsShardedWhenComputedLocally(t *testing.T) {
+	snapshot := semanticTestSnapshot(true)
+	if !system.SemanticSummaryIsHeavy(snapshot.Summary()) {
+		t.Fatalf("test snapshot summary should be heavy, got %d chars", len(snapshot.Summary()))
+	}
+	orch := semanticTestOrch(snapshot)
+
+	info := orch.EnrichContext(context.Background(), system.ContextInfo{}, "RunAgent")
+
+	if info.SemanticSummary != system.SemanticSummaryPlaceholder {
+		t.Fatalf("expected placeholder semantic summary, got %q", info.SemanticSummary)
+	}
+	if _, ok := info.OnDemandSignals[system.SemanticWorkerName]; !ok {
+		t.Fatalf("expected %s on-demand signal, got %#v", system.SemanticWorkerName, info.OnDemandSignals)
+	}
+	if _, ok := info.Signals["semantic"]; ok {
+		t.Fatalf("heavy summary must not be injected as a background signal, got %#v", info.Signals)
+	}
+	if len(info.RelevantFiles) == 0 || len(info.RelevantSnippets) == 0 {
+		t.Fatalf("expected relevant files and snippets to still be selected, got files=%v snippets=%v", info.RelevantFiles, info.RelevantSnippets)
+	}
+}
+
+func TestEnrichContextRespectsTachikomaOnDemandDecision(t *testing.T) {
+	orch := semanticTestOrch(semanticTestSnapshot(true))
+
+	// Simulates tachikoma.Manager.GetContextInfo having sharded the summary.
+	base := system.ContextInfo{
+		Signals:         map[string]string{},
+		OnDemandSignals: map[string]string{system.SemanticWorkerName: system.SemanticOnDemandHint},
+		SemanticSummary: system.SemanticSummaryPlaceholder,
+	}
+	info := orch.EnrichContext(context.Background(), base, "RunAgent")
+
+	if info.SemanticSummary != system.SemanticSummaryPlaceholder {
+		t.Fatalf("expected placeholder to be preserved, got %q", info.SemanticSummary)
+	}
+	if _, ok := info.Signals["semantic"]; ok {
+		t.Fatalf("on-demand summary must not be re-injected as a background signal, got %#v", info.Signals)
+	}
+	for name, status := range info.Signals {
+		if len(status) > system.SemanticSummaryInlineLimit {
+			t.Fatalf("signal %s carries a heavy payload (%d chars)", name, len(status))
+		}
+	}
+	if len(info.RelevantSnippets) == 0 {
+		t.Fatal("expected relevant snippets to still be selected")
+	}
+}
+
+func TestEnrichContextSmallSummaryIsInlined(t *testing.T) {
+	snapshot := semanticTestSnapshot(false)
+	orch := semanticTestOrch(snapshot)
+
+	info := orch.EnrichContext(context.Background(), system.ContextInfo{}, "RunAgent")
+
+	if info.SemanticSummary != snapshot.Summary() {
+		t.Fatalf("expected full semantic summary, got %q", info.SemanticSummary)
+	}
+	if got := info.Signals["semantic"]; got != snapshot.Summary() {
+		t.Fatalf("expected small summary as background signal, got %q", got)
+	}
+	if _, ok := info.OnDemandSignals[system.SemanticWorkerName]; ok {
+		t.Fatal("small summary must not be advertised on demand")
+	}
+}
+
 func TestEnrichContextNoSemanticIndex(t *testing.T) {
 	orch := newTestOrch(minimalDeps())
 	info := orch.EnrichContext(context.Background(), system.ContextInfo{}, "")

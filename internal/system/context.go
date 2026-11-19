@@ -40,6 +40,47 @@ type ContextInfo struct {
 	HasGit            bool
 }
 
+// Semantic summary sharding: a semantic summary larger than
+// SemanticSummaryInlineLimit is not inlined in the prompt. Instead the
+// CodeTachikoma worker is advertised as an on-demand signal and the summary
+// is replaced by SemanticSummaryPlaceholder.
+const (
+	SemanticSummaryInlineLimit = 500
+	SemanticWorkerName         = "CodeTachikoma"
+	SemanticOnDemandHint       = "Detailed semantic index of the codebase is ready."
+	SemanticSummaryPlaceholder = "Codebase indexed (heavy). Use 'inspect CodeTachikoma' for details."
+)
+
+// SemanticSummaryIsHeavy reports whether summary is too large to be inlined in
+// the prompt and must be served on demand instead.
+func SemanticSummaryIsHeavy(summary string) bool {
+	return len(summary) > SemanticSummaryInlineLimit
+}
+
+// SemanticOnDemand reports whether the semantic index is served on demand
+// (via the inspect tool) rather than inlined in the prompt.
+func (c ContextInfo) SemanticOnDemand() bool {
+	_, ok := c.OnDemandSignals[SemanticWorkerName]
+	return ok
+}
+
+// ApplySemanticSummary stores summary as the semantic summary, applying the
+// sharding rule: heavy summaries are replaced by a placeholder and the semantic
+// worker is advertised as an on-demand signal. It returns true when the full
+// summary was inlined.
+func (c *ContextInfo) ApplySemanticSummary(summary string) bool {
+	if !SemanticSummaryIsHeavy(summary) {
+		c.SemanticSummary = summary
+		return true
+	}
+	if c.OnDemandSignals == nil {
+		c.OnDemandSignals = make(map[string]string)
+	}
+	c.OnDemandSignals[SemanticWorkerName] = SemanticOnDemandHint
+	c.SemanticSummary = SemanticSummaryPlaceholder
+	return false
+}
+
 func GetContextInfo() ContextInfo {
 	info := ContextInfo{}
 
