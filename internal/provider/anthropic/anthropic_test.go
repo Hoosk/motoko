@@ -121,8 +121,8 @@ func TestToSDKMessagesToolCalling(t *testing.T) {
 	}
 }
 
-func TestToSDKMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
-	assertPenultimateToolUseCacheControl(
+func TestToSDKMessagesSetsCacheControlOnTurnBoundaryAndLastMessage(t *testing.T) {
+	assertTurnBoundaryCacheControl(
 		t,
 		toSDKMessages(toolUseCacheControlMessages()),
 		func(msg sdk.MessageParam) sdk.CacheControlEphemeralParam { return msg.Content[0].OfText.CacheControl },
@@ -132,8 +132,8 @@ func TestToSDKMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
 	)
 }
 
-func TestToSDKBetaMessagesSetsCacheControlOnPenultimateToolUse(t *testing.T) {
-	assertPenultimateToolUseCacheControl(
+func TestToSDKBetaMessagesSetsCacheControlOnTurnBoundaryAndLastMessage(t *testing.T) {
+	assertTurnBoundaryCacheControl(
 		t,
 		toSDKBetaMessages(toolUseCacheControlMessages()),
 		func(msg sdk.BetaMessageParam) sdk.BetaCacheControlEphemeralParam {
@@ -159,7 +159,10 @@ func toolUseCacheControlMessages() []provider.ConversationItem {
 	}
 }
 
-func assertPenultimateToolUseCacheControl[Msg any, Cache comparable](t *testing.T, got []Msg, firstCache func(Msg) Cache, secondHasToolUseCache func(Msg) bool) {
+// assertTurnBoundaryCacheControl checks [user, assistant tool_use, user]: the
+// tool_use right before the latest user turn and the last message are marked,
+// the first message (no turn before it) is not.
+func assertTurnBoundaryCacheControl[Msg any, Cache comparable](t *testing.T, got []Msg, firstCache func(Msg) Cache, secondHasToolUseCache func(Msg) bool) {
 	t.Helper()
 	if len(got) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(got))
@@ -169,10 +172,77 @@ func assertPenultimateToolUseCacheControl[Msg any, Cache comparable](t *testing.
 		t.Fatalf("expected first message cache control to be empty, got %#v", firstCache(got[0]))
 	}
 	if !secondHasToolUseCache(got[1]) {
-		t.Fatalf("expected penultimate tool_use cache control, got %#v", got[1])
+		t.Fatalf("expected turn-boundary tool_use cache control, got %#v", got[1])
 	}
-	if firstCache(got[2]) != zero {
-		t.Fatalf("expected last message cache control to be empty, got %#v", firstCache(got[2]))
+	if firstCache(got[2]) == zero {
+		t.Fatalf("expected last message cache control to be set, got %#v", got[2])
+	}
+}
+
+func agentLoopMessages() []provider.ConversationItem {
+	call1 := provider.ToolInvocation{Kind: provider.InvokeCustomTool, Name: "bash", Input: "ls", CallID: "call_1"}
+	call2 := provider.ToolInvocation{Kind: provider.InvokeCustomTool, Name: "bash", Input: "pwd", CallID: "call_2"}
+	return []provider.ConversationItem{
+		provider.UserText("turn 1"),                                      // 0
+		provider.AssistantText("answer 1"),                               // 1 <- before previous turn
+		provider.UserText("turn 2"),                                      // 2
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call1}), // 3
+		provider.ToolResultForInvocation(call1, "out 1"),                 // 4
+		provider.AssistantText("answer 2"),                               // 5 <- before current turn
+		provider.UserText("<environment>...</context>\n\nturn 3"),        // 6
+		provider.AssistantTurn("", "", []provider.ToolInvocation{call2}), // 7
+		provider.ToolResultForInvocation(call2, "out 2"),                 // 8 <- last
+	}
+}
+
+func TestMessageCacheBreakpointsAgentLoop(t *testing.T) {
+	got := messageCacheBreakpoints(agentLoopMessages())
+	want := map[int]bool{1: true, 5: true, 8: true}
+	for i, marked := range got {
+		if marked != want[i] {
+			t.Fatalf("message %d: expected breakpoint=%t, got %t (all: %v)", i, want[i], marked, got)
+		}
+	}
+	// Tool results and tool calls are not turn starts.
+	if isTurnStart(agentLoopMessages()[4]) || isTurnStart(agentLoopMessages()[3]) {
+		t.Fatal("tool traffic must not count as a turn start")
+	}
+	if len(messageCacheBreakpoints(nil)) != 0 {
+		t.Fatal("expected no breakpoints for empty messages")
+	}
+	if single := messageCacheBreakpoints([]provider.ConversationItem{provider.UserText("hi")}); !single[0] {
+		t.Fatal("expected the only message to be marked")
+	}
+}
+
+// TestBuildMessageParamsStaysWithinBreakpointLimit guards the API limit of 4
+// cache_control breakpoints per request (system + 3 message marks, no tools).
+func TestBuildMessageParamsStaysWithinBreakpointLimit(t *testing.T) {
+	client := NewClient(config.ProviderConfig{
+		Preset:  config.ProviderPresetAnthropic,
+		BaseURL: "http://api.example.com",
+		APIKey:  "test-key",
+		Model:   "claude-test-model",
+	}).(*anthropicClient)
+	tools := provider.ToolSet{Local: []provider.LocalToolDefinition{
+		{Name: "bash", Description: "run", InputHint: "cmd"},
+		{Name: "read", Description: "read", InputHint: "path"},
+	}}
+	params, _ := client.buildMessageParams(context.Background(), "system prompt", agentLoopMessages(), tools)
+	body, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(body), `"cache_control"`); n != 4 {
+		t.Fatalf("expected exactly 4 cache_control breakpoints, got %d: %s", n, body)
+	}
+	for _, tool := range params.Tools {
+		if tool.OfTool.CacheControl != (sdk.CacheControlEphemeralParam{}) {
+			t.Fatalf("expected no tool-level breakpoint, got %#v", tool.OfTool)
+		}
+	}
+	if params.System[0].CacheControl == (sdk.CacheControlEphemeralParam{}) {
+		t.Fatal("expected system prompt breakpoint")
 	}
 }
 

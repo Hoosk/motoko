@@ -3,8 +3,10 @@ package system
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/git"
@@ -106,11 +108,11 @@ func (c ContextInfo) SignalSummary() string {
 		return "no extra signals"
 	}
 	parts := make([]string, 0, len(c.Signals)+len(c.OnDemandSignals))
-	for name, status := range c.Signals {
-		parts = append(parts, fmt.Sprintf("%s: %s", name, status))
+	for _, name := range sortedKeys(c.Signals) {
+		parts = append(parts, fmt.Sprintf("%s: %s", name, c.Signals[name]))
 	}
-	for name, hint := range c.OnDemandSignals {
-		parts = append(parts, fmt.Sprintf("%s (available on-demand): %s", name, hint))
+	for _, name := range sortedKeys(c.OnDemandSignals) {
+		parts = append(parts, fmt.Sprintf("%s (available on-demand): %s", name, c.OnDemandSignals[name]))
 	}
 	return strings.Join(parts, " | ")
 }
@@ -124,9 +126,8 @@ func (c ContextInfo) CategorizedSignalSummary() string {
 
 	if len(c.Signals) > 0 {
 		sb.WriteString("[Background Signals]\n")
-		// Note: In a real production environment, we might want to sort these keys for deterministic output.
-		for name, status := range c.Signals {
-			fmt.Fprintf(&sb, "- %s: %s\n", name, status)
+		for _, name := range sortedKeys(c.Signals) {
+			fmt.Fprintf(&sb, "- %s: %s\n", name, c.Signals[name])
 		}
 	}
 
@@ -135,12 +136,19 @@ func (c ContextInfo) CategorizedSignalSummary() string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("[On-Demand Signals]\n")
-		for name, hint := range c.OnDemandSignals {
-			fmt.Fprintf(&sb, "- %s: %s\n", name, hint)
+		for _, name := range sortedKeys(c.OnDemandSignals) {
+			fmt.Fprintf(&sb, "- %s: %s\n", name, c.OnDemandSignals[name])
 		}
 	}
 
 	return strings.TrimSpace(sb.String())
+}
+
+// sortedKeys returns the map keys in lexical order so prompt sections built
+// from signal maps are byte-identical across calls (Go map iteration order is
+// randomized, which would otherwise defeat provider prompt caching).
+func sortedKeys(m map[string]string) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 func (c ContextInfo) RelevantFilesSummary() string {

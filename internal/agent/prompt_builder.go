@@ -239,16 +239,18 @@ func toolPresence(specs []tools.Spec) (hasTask, hasBash, hasPatch, hasInspect bo
 	return hasTask, hasBash, hasPatch, hasInspect
 }
 
-// buildDynamicPrompt assembles the per-turn dynamic context that should live in
-// the uncached tail of the conversation instead of the system prompt.
-func buildDynamicPrompt(providerKind string, info system.ContextInfo) string {
+// buildDynamicPrompt assembles the per-turn dynamic context that is kept out of
+// the static system prompt. now is passed in (instead of read here) so the
+// block is byte-identical across every iteration of a turn and can sit inside
+// the provider's cached prefix.
+func buildDynamicPrompt(providerKind string, info system.ContextInfo, now time.Time) string {
 	var lines []string
 
 	lines = append(lines,
 		"<environment>",
 		fmt.Sprintf("  OS: %s", runtime.GOOS),
 		fmt.Sprintf("  Arch: %s", runtime.GOARCH),
-		fmt.Sprintf("  Current Time: %s", time.Now().Format(time.RFC3339)),
+		fmt.Sprintf("  Current Time: %s", now.Format(time.RFC3339)),
 		fmt.Sprintf("  Workspace: %s", info.Workspace),
 		fmt.Sprintf("  Working Directory: %s", info.Path),
 		fmt.Sprintf("  Provider: %s", providerKind),
