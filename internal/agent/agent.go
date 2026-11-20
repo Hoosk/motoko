@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +21,12 @@ const (
 	defaultMaxToolIterations = 250
 	inputBloatThresholdPct   = 15.0
 	stepErrorKind            = "error"
+	stepToolKind             = "tool"
+	// toolRepeatAbortThreshold is the total number of identical tool calls
+	// (same tool, same canonical arguments) at which the run is aborted.
+	// Repeats below the threshold are not executed; the model receives a
+	// nudge pointing it at the earlier result instead.
+	toolRepeatAbortThreshold = 3
 )
 
 type Result struct {
@@ -115,7 +122,7 @@ func (a *Agent) RunStream(ctx context.Context, info system.ContextInfo, userInpu
 // runState carries the mutable per-run bookkeeping across agent iterations.
 type runState struct {
 	startedAt      time.Time
-	seenToolCalls  map[string]struct{}
+	seenToolCalls  map[string]int
 	context        ContextSnapshot
 	dynamicPrompt  string
 	history        []provider.ConversationItem
@@ -148,7 +155,7 @@ func (a *Agent) newRunState(info system.ContextInfo, userInput string, priorHist
 		dynamicPrompt:  buildDynamicPrompt(a.provider.ProviderKind(), info, startedAt),
 		steps:          []Step{{Kind: "user", Title: "prompt", Content: userInput}},
 		iterations:     make([]provider.Usage, 0, max(1, maxIterations)),
-		seenToolCalls:  make(map[string]struct{}),
+		seenToolCalls:  make(map[string]int),
 		availableTools: availableTools,
 		specs:          specs,
 		context: ContextSnapshot{
@@ -327,22 +334,70 @@ func accumulateUsage(total *provider.Usage, u provider.Usage) {
 }
 
 type toolResult struct {
-	rejection   string
 	historyItem provider.ConversationItem
+	rejection   string
+	key         string
 	steps       []Step
 	idx         int
 	rejected    bool
+	succeeded   bool
+	write       bool
 }
 
-// executeTools runs a batch of tool invocations in parallel and returns the
-// accumulated steps and history items in the original call order.
-func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocation, availableTools []string, onEvent func(StreamEvent) error, seenToolCalls map[string]struct{}) ([]Step, []provider.ConversationItem, bool, string, error) {
-	ch := make(chan toolResult, len(pending))
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	execCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+// plannedCall is a pending tool invocation after name repair, input
+// normalization and repeat classification.
+type plannedCall struct {
+	nudge     string
+	toolName  string
+	toolInput string
+	key       string
+	call      provider.ToolInvocation
+}
 
+// toolCallKey identifies a tool call by tool name and canonical arguments.
+// Provider call IDs are deliberately excluded: they are unique per call, so
+// including them would hide genuine repeats.
+func toolCallKey(toolName, toolInput string) string {
+	return strings.ToLower(toolName) + "\x00" + canonicalToolInput(toolInput)
+}
+
+// canonicalToolInput re-encodes JSON arguments so key order and whitespace
+// differences do not defeat repeat detection. Non-JSON input is returned
+// trimmed as-is.
+func canonicalToolInput(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if !json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return trimmed
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return trimmed
+	}
+	return string(canonical)
+}
+
+func repeatedToolCallNudge(toolName string) string {
+	return fmt.Sprintf("Not executed: you already ran %s with these exact arguments earlier in this turn, and its result is above in the conversation. Use that result or change your approach (different arguments or a different tool). Repeating this identical call again will abort the run.", toolName)
+}
+
+func batchDuplicateToolCallNudge(toolName string) string {
+	return fmt.Sprintf("Not executed: this %s call duplicates another call with identical arguments in the same batch. Use the result of that call instead.", toolName)
+}
+
+// planToolCalls normalizes the pending calls and classifies repeats against
+// seenToolCalls. The first occurrence of a call per batch counts toward the
+// abort threshold; extra identical calls within the same batch are answered
+// with a nudge and do not count. It returns an error when a call reaches
+// toolRepeatAbortThreshold.
+func planToolCalls(pending []provider.ToolInvocation, availableTools []string, seenToolCalls map[string]int) ([]plannedCall, error) {
+	planned := make([]plannedCall, len(pending))
+	inBatch := make(map[string]struct{}, len(pending))
 	for idx, call := range pending {
 		toolName := strings.TrimSpace(call.Name)
 		if repairedName := tools.RepairToolName(toolName, availableTools); repairedName != "" {
@@ -355,25 +410,63 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 		if toolInput == "" && len(call.Arguments) > 0 {
 			toolInput = strings.TrimSpace(string(call.Arguments))
 		}
-		toolKey := toolName + "\x00" + toolInput + "\x00" + strings.TrimSpace(call.CallID)
+		key := toolCallKey(toolName, toolInput)
+		p := plannedCall{call: call, toolName: toolName, toolInput: toolInput, key: key}
 
-		mu.Lock()
-		if _, seen := seenToolCalls[toolKey]; seen {
-			mu.Unlock()
-			return nil, nil, false, "", fmt.Errorf("tool cycle detected: %s %s", toolName, toolInput)
+		if _, dup := inBatch[key]; dup {
+			tracelog.Logf("agent tool batch duplicate name=%s", toolName)
+			p.nudge = batchDuplicateToolCallNudge(toolName)
+			planned[idx] = p
+			continue
 		}
-		seenToolCalls[toolKey] = struct{}{}
-		mu.Unlock()
+		inBatch[key] = struct{}{}
 
+		seenToolCalls[key]++
+		count := seenToolCalls[key]
+		if count >= toolRepeatAbortThreshold {
+			return nil, fmt.Errorf("tool cycle detected: %s called %d times with identical arguments %s", toolName, count, toolInput)
+		}
+		if count > 1 {
+			tracelog.Logf("agent tool repeat name=%s count=%d", toolName, count)
+			p.nudge = repeatedToolCallNudge(toolName)
+		}
+		planned[idx] = p
+	}
+	return planned, nil
+}
+
+// executeTools runs a batch of tool invocations in parallel and returns the
+// accumulated steps and history items in the original call order. Repeated
+// calls are answered with a nudge instead of being executed, and a successful
+// write tool resets the repeat-detection state.
+func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocation, availableTools []string, onEvent func(StreamEvent) error, seenToolCalls map[string]int) ([]Step, []provider.ConversationItem, bool, string, error) {
+	planned, err := planToolCalls(pending, availableTools, seenToolCalls)
+	if err != nil {
+		return nil, nil, false, "", err
+	}
+
+	ch := make(chan toolResult, len(pending))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for idx, p := range planned {
+		if p.nudge != "" {
+			ch <- skippedToolResult(idx, p, onEvent, &mu)
+			continue
+		}
 		wg.Add(1)
-		go func(idx int, call provider.ToolInvocation, toolName, toolInput string) {
+		go func(idx int, p plannedCall) {
 			defer wg.Done()
-			res := a.runTool(execCtx, idx, call, toolName, toolInput, onEvent, &mu)
+			res := a.runTool(execCtx, idx, p.call, p.toolName, p.toolInput, onEvent, &mu)
+			res.key = p.key
+			res.write = tools.IsWriteTool(p.toolName)
 			if res.rejected {
 				cancel()
 			}
 			ch <- res
-		}(idx, call, toolName, toolInput)
+		}(idx, p)
 	}
 
 	wg.Wait()
@@ -386,6 +479,7 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 
 	var toolSteps []Step
 	var toolHistory []provider.ConversationItem
+	var writeKeys []string
 	rejected := false
 	rejection := ""
 	for _, res := range orderedResults {
@@ -395,19 +489,57 @@ func (a *Agent) executeTools(ctx context.Context, pending []provider.ToolInvocat
 			rejected = true
 			rejection = res.rejection
 		}
+		if res.write && res.succeeded {
+			writeKeys = append(writeKeys, res.key)
+		}
 	}
+	resetSeenAfterWrites(seenToolCalls, writeKeys)
 	return toolSteps, toolHistory, rejected, rejection, nil
+}
+
+// resetSeenAfterWrites clears the repeat-detection state once a write tool
+// has completed successfully: the workspace may have changed, so re-running
+// earlier calls (e.g. tests after a patch) is legitimate. The write calls
+// themselves stay recorded so an identical write repeated back-to-back is
+// still detected.
+func resetSeenAfterWrites(seenToolCalls map[string]int, writeKeys []string) {
+	if len(writeKeys) == 0 {
+		return
+	}
+	clear(seenToolCalls)
+	for _, key := range writeKeys {
+		seenToolCalls[key] = 1
+	}
+}
+
+// skippedToolResult answers a repeated tool call without executing it.
+func skippedToolResult(idx int, p plannedCall, onEvent func(StreamEvent) error, mu *sync.Mutex) toolResult {
+	mu.Lock()
+	if onEvent != nil {
+		_ = onEvent(StreamEvent{Kind: stepToolKind, Title: p.toolName, Content: p.toolInput})
+		_ = onEvent(StreamEvent{Kind: stepErrorKind, Title: p.toolName, Content: p.nudge})
+	}
+	mu.Unlock()
+	return toolResult{
+		idx: idx,
+		key: p.key,
+		steps: []Step{
+			{Kind: stepToolKind, Title: p.toolName, Content: p.toolInput},
+			{Kind: stepErrorKind, Title: p.toolName, Content: p.nudge},
+		},
+		historyItem: provider.ToolResultForInvocation(p.call, p.nudge),
+	}
 }
 
 // runTool executes a single tool invocation in a worker goroutine and
 // produces the ordered result and history item for it.
 func (a *Agent) runTool(ctx context.Context, idx int, call provider.ToolInvocation, toolName, toolInput string, onEvent func(StreamEvent) error, mu *sync.Mutex) toolResult {
 	var subSteps []Step
-	subSteps = append(subSteps, Step{Kind: "tool", Title: toolName, Content: toolInput})
+	subSteps = append(subSteps, Step{Kind: stepToolKind, Title: toolName, Content: toolInput})
 
 	mu.Lock()
 	if onEvent != nil {
-		_ = onEvent(StreamEvent{Kind: "tool", Title: toolName, Content: toolInput})
+		_ = onEvent(StreamEvent{Kind: stepToolKind, Title: toolName, Content: toolInput})
 	}
 	mu.Unlock()
 
@@ -445,6 +577,7 @@ func (a *Agent) runTool(ctx context.Context, idx int, call provider.ToolInvocati
 	return toolResult{
 		idx:         idx,
 		steps:       subSteps,
+		succeeded:   true,
 		historyItem: provider.ToolResultForInvocation(call, toolOutput),
 	}
 }

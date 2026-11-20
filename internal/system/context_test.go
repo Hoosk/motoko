@@ -119,3 +119,34 @@ func TestGetGitInfo(t *testing.T) {
 		t.Error("expected non-empty GitBranch when HasGit is true")
 	}
 }
+
+func TestApplySemanticSummaryInlinesSmallSummary(t *testing.T) {
+	var info ContextInfo
+	summary := strings.Repeat("a", SemanticSummaryInlineLimit)
+	if !info.ApplySemanticSummary(summary) {
+		t.Fatal("expected summary at the limit to be inlined")
+	}
+	if info.SemanticSummary != summary {
+		t.Fatalf("unexpected semantic summary %q", info.SemanticSummary)
+	}
+	if info.SemanticOnDemand() {
+		t.Fatal("small summary must not be on demand")
+	}
+}
+
+func TestApplySemanticSummaryShardsHeavySummary(t *testing.T) {
+	var info ContextInfo
+	summary := strings.Repeat("a", SemanticSummaryInlineLimit+1)
+	if info.ApplySemanticSummary(summary) {
+		t.Fatal("expected heavy summary not to be inlined")
+	}
+	if info.SemanticSummary != SemanticSummaryPlaceholder {
+		t.Fatalf("expected placeholder, got %q", info.SemanticSummary)
+	}
+	if !info.SemanticOnDemand() {
+		t.Fatal("expected semantic worker to be advertised on demand")
+	}
+	if info.OnDemandSignals[SemanticWorkerName] != SemanticOnDemandHint {
+		t.Fatalf("unexpected on-demand hint %q", info.OnDemandSignals[SemanticWorkerName])
+	}
+}

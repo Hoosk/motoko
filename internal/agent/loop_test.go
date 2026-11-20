@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,8 +25,11 @@ func (f *fakeLoopTool) Run(ctx context.Context, args string) (tools.Result, erro
 
 func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	registry := tools.NewRegistry()
-	registry.Register(&fakeLoopTool{})
+	tool := &countingTool{name: "looptool"}
+	registry.Register(tool)
+	completions := 0
 	a := New(&fakeProviderClient{summary: "fake:loop", models: []provider.ModelInfo{{ID: "loop"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		completions++
 		return provider.Response{PendingCalls: []provider.ToolInvocation{{Kind: provider.InvokeCustomTool, Name: "looptool", Input: "same"}}}, nil
 	}}, registry)
 	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
@@ -34,6 +38,223 @@ func TestRunDetectsRepeatedToolLoop(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tool cycle detected") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if completions != toolRepeatAbortThreshold {
+		t.Fatalf("expected abort on completion %d, got %d", toolRepeatAbortThreshold, completions)
+	}
+	if got := tool.runs.Load(); got != 1 {
+		t.Fatalf("expected the repeated tool to run once, got %d", got)
+	}
+}
+
+// countingTool records how many times it was executed.
+type countingTool struct {
+	name string
+	runs atomic.Int32
+}
+
+func (c *countingTool) Spec() tools.Spec {
+	return tools.Spec{Name: c.name, Summary: "counting tool", Usage: c.name + " <arg>"}
+}
+
+func (c *countingTool) Run(context.Context, string) (tools.Result, error) {
+	c.runs.Add(1)
+	return tools.Result{Spec: c.Spec(), Summary: "ok", Output: "ok"}, nil
+}
+
+// scriptedProvider returns the scripted responses in order and a final
+// answer once the script is exhausted.
+func scriptedProvider(responses ...[]provider.ToolInvocation) *fakeProviderClient {
+	step := 0
+	return &fakeProviderClient{summary: "fake:script", completeFn: func(context.Context, string, []provider.ConversationItem, provider.ToolSet) (provider.Response, error) {
+		if step < len(responses) {
+			calls := responses[step]
+			step++
+			return provider.Response{PendingCalls: calls}, nil
+		}
+		return provider.Response{FinalText: "done", OutputItems: []provider.ConversationItem{provider.AssistantText("done")}}, nil
+	}}
+}
+
+func toolCall(name, callID, input string) provider.ToolInvocation {
+	return provider.ToolInvocation{Kind: provider.InvokeCustomTool, Name: name, CallID: callID, Input: input}
+}
+
+func toolResultFor(history []provider.ConversationItem, callID string) (provider.ConversationItem, bool) {
+	for _, item := range history {
+		if item.Role == provider.RoleTool && item.ToolCallID == callID {
+			return item, true
+		}
+	}
+	return provider.ConversationItem{}, false
+}
+
+func TestRunNudgesFirstRepeatInsteadOfAborting(t *testing.T) {
+	registry := tools.NewRegistry()
+	tool := &countingTool{name: "looptool"}
+	registry.Register(tool)
+	// Distinct provider call IDs and differently formatted but equivalent
+	// JSON arguments must still be detected as the same call.
+	a := New(scriptedProvider(
+		[]provider.ToolInvocation{toolCall("looptool", "call-1", `{"path": "a.go", "limit": 10}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "call-2", `{"limit":10,"path":"a.go"}`)},
+	), registry)
+
+	var events []StreamEvent
+	result, err := a.RunStream(context.Background(), system.ContextInfo{}, "haz algo", nil, func(ev StreamEvent) error {
+		events = append(events, ev)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected repeat to be nudged, not aborted: %v", err)
+	}
+	if result.Assistant != "done" {
+		t.Fatalf("expected the run to finish normally, got %q", result.Assistant)
+	}
+	if got := tool.runs.Load(); got != 1 {
+		t.Fatalf("expected the repeated call not to be executed, got %d runs", got)
+	}
+	nudge, ok := toolResultFor(result.History, "call-2")
+	if !ok {
+		t.Fatalf("expected a tool result for the repeated call, history %#v", result.History)
+	}
+	if !strings.Contains(nudge.Content, "already ran looptool with these exact arguments") {
+		t.Fatalf("unexpected nudge content %q", nudge.Content)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Kind == stepErrorKind && ev.Title == "looptool" && strings.Contains(ev.Content, "Not executed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a stream event for the skipped call, got %#v", events)
+	}
+}
+
+func TestRunAbortsAtRepeatThreshold(t *testing.T) {
+	registry := tools.NewRegistry()
+	tool := &countingTool{name: "looptool"}
+	registry.Register(tool)
+	a := New(scriptedProvider(
+		[]provider.ToolInvocation{toolCall("looptool", "call-1", `{"q":"x"}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "call-2", `{"q":"x"}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "call-3", `{ "q" : "x" }`)},
+	), registry)
+
+	_, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err == nil || !strings.Contains(err.Error(), "tool cycle detected") {
+		t.Fatalf("expected tool cycle error at threshold, got %v", err)
+	}
+	if got := tool.runs.Load(); got != 1 {
+		t.Fatalf("expected a single execution before the abort, got %d", got)
+	}
+}
+
+func TestRunResetsRepeatDetectionAfterWriteTool(t *testing.T) {
+	registry := tools.NewRegistry()
+	tool := &countingTool{name: "looptool"}
+	patch := &countingTool{name: "patch"}
+	registry.Register(tool)
+	registry.Register(patch)
+	a := New(scriptedProvider(
+		[]provider.ToolInvocation{toolCall("looptool", "1", `{"cmd":"go test"}`)},
+		[]provider.ToolInvocation{toolCall("patch", "2", `{"diff":"..."}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "3", `{"cmd":"go test"}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "4", `{"cmd":"go test"}`)},
+		[]provider.ToolInvocation{toolCall("patch", "5", `{"diff":"other"}`)},
+		[]provider.ToolInvocation{toolCall("looptool", "6", `{"cmd":"go test"}`)},
+	), registry)
+
+	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err != nil {
+		t.Fatalf("expected repeats separated by writes to be allowed: %v", err)
+	}
+	if got := tool.runs.Load(); got != 3 {
+		t.Fatalf("expected looptool to run after each write (3 runs), got %d", got)
+	}
+	if got := patch.runs.Load(); got != 2 {
+		t.Fatalf("expected both patches to run, got %d", got)
+	}
+	nudge, ok := toolResultFor(result.History, "4")
+	if !ok || !strings.Contains(nudge.Content, "Not executed") {
+		t.Fatalf("expected back-to-back repeat without a write to be nudged, got %#v", nudge)
+	}
+}
+
+func TestRunWriteToolRepeatedBackToBackIsDetected(t *testing.T) {
+	registry := tools.NewRegistry()
+	patch := &countingTool{name: "patch"}
+	registry.Register(patch)
+	a := New(scriptedProvider(
+		[]provider.ToolInvocation{toolCall("patch", "1", `{"diff":"same"}`)},
+		[]provider.ToolInvocation{toolCall("patch", "2", `{"diff":"same"}`)},
+	), registry)
+
+	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := patch.runs.Load(); got != 1 {
+		t.Fatalf("expected identical write not to run twice, got %d", got)
+	}
+	if nudge, ok := toolResultFor(result.History, "2"); !ok || !strings.Contains(nudge.Content, "Not executed") {
+		t.Fatalf("expected repeated write to be nudged, got %#v", nudge)
+	}
+}
+
+func TestRunBatchDuplicatesAreNudgedNotAborted(t *testing.T) {
+	registry := tools.NewRegistry()
+	tool := &countingTool{name: "looptool"}
+	registry.Register(tool)
+	a := New(scriptedProvider(
+		[]provider.ToolInvocation{
+			toolCall("looptool", "a", `{"q":"x"}`),
+			toolCall("looptool", "b", `{"q":"x"}`),
+			toolCall("looptool", "c", `{"q":"x"}`),
+			toolCall("looptool", "d", `{"q":"y"}`),
+		},
+	), registry)
+
+	result, err := a.Run(context.Background(), system.ContextInfo{}, "haz algo", nil)
+	if err != nil {
+		t.Fatalf("expected in-batch duplicates not to abort: %v", err)
+	}
+	if got := tool.runs.Load(); got != 2 {
+		t.Fatalf("expected one run per distinct call (2), got %d", got)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		if _, ok := toolResultFor(result.History, id); !ok {
+			t.Fatalf("expected a tool result for call %s", id)
+		}
+	}
+	for _, id := range []string{"b", "c"} {
+		item, _ := toolResultFor(result.History, id)
+		if !strings.Contains(item.Content, "same batch") {
+			t.Fatalf("expected batch duplicate nudge for %s, got %q", id, item.Content)
+		}
+	}
+}
+
+func TestToolCallKeyCanonicalizesJSON(t *testing.T) {
+	cases := []struct {
+		a, b string
+		same bool
+	}{
+		{`{"a":1,"b":[1,2]}`, "{ \"b\": [1, 2],\n \"a\": 1 }", true},
+		{`{"a":1}`, `{"a":2}`, false},
+		{"not json", "  not json  ", true},
+		{"not json", "not  json", false},
+		{`{"a":1}`, `{"a":1} trailing`, false},
+	}
+	for _, tc := range cases {
+		got := toolCallKey("Tool", tc.a) == toolCallKey("tool", tc.b)
+		if got != tc.same {
+			t.Errorf("toolCallKey(%q) == toolCallKey(%q) = %t, want %t", tc.a, tc.b, got, tc.same)
+		}
+	}
+	if toolCallKey("read", `{"a":1}`) == toolCallKey("grep", `{"a":1}`) {
+		t.Error("different tools must not share a key")
 	}
 }
 

@@ -114,15 +114,10 @@ func (m *Manager) GetContextInfo() system.ContextInfo {
 				info.OnDemandSignals[update.Name] = "Recent changes mapped to functions/symbols are available."
 				info.Signals[update.Name] = update.Status
 			}
-		case "CodeTachikoma":
+		case system.SemanticWorkerName:
 			if snapshot, ok := update.Payload.(*semantic.Snapshot); ok && snapshot != nil {
 				// Sharding: Don't put the full summary in the prompt if it's too large.
-				fullSummary := snapshot.Summary()
-				if len(fullSummary) > 500 {
-					info.OnDemandSignals[update.Name] = "Detailed semantic index of the codebase is ready."
-					info.SemanticSummary = "Codebase indexed (heavy). Use 'inspect CodeTachikoma' for details."
-				} else {
-					info.SemanticSummary = fullSummary
+				if info.ApplySemanticSummary(snapshot.Summary()) {
 					info.Signals[update.Name] = update.Status
 				}
 

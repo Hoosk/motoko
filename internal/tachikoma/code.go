@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Hoosk/motoko/internal/semantic"
+	"github.com/Hoosk/motoko/internal/system"
 )
 
 // backgroundRefreshTimeout bounds a full re-index run by CodeTachikoma.
@@ -20,7 +21,7 @@ func NewCodeTachikoma(index *semantic.Index, interval time.Duration) *CodeTachik
 }
 
 func (c *CodeTachikoma) Name() string {
-	return "CodeTachikoma"
+	return system.SemanticWorkerName
 }
 
 func (c *CodeTachikoma) Run(ctx context.Context, publish func(Update) bool) error {

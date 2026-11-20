@@ -632,7 +632,7 @@ func (o *Orchestrator) enrichSemantic(ctx context.Context, input string, info *s
 			info.Signals["semantic_error"] = err.Error()
 			return
 		}
-		info.SemanticSummary = snapshot.Summary()
+		info.ApplySemanticSummary(snapshot.Summary())
 	} else {
 		snapshot = sem.LatestSnapshot()
 	}
@@ -652,10 +652,14 @@ func (o *Orchestrator) enrichSemantic(ctx context.Context, input string, info *s
 	for _, snippet := range snippets {
 		info.RelevantSnippets = append(info.RelevantSnippets, snippet.Descriptor())
 	}
-	if info.Signals == nil {
-		info.Signals = make(map[string]string)
+	// Respect the sharding decision: a heavy summary is served on demand via
+	// inspect, so it must not be re-injected as a background signal.
+	if summary := snapshot.Summary(); !info.SemanticOnDemand() && !system.SemanticSummaryIsHeavy(summary) {
+		if info.Signals == nil {
+			info.Signals = make(map[string]string)
+		}
+		info.Signals["semantic"] = summary
 	}
-	info.Signals["semantic"] = snapshot.Summary()
 	for _, path := range o.mentionedFiles {
 		for _, file := range snapshot.Files {
 			if file.Path != path {
