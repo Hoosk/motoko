@@ -171,18 +171,8 @@ func (m *Model) updateGlobal(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		return m.onMouse(msg, cmds)
 	case tea.WindowSizeMsg:
 		return m.onWindowSize(msg, cmds)
-	case CopySelectionMsg:
-		return m.onCopySelection(msg, cmds)
-	case NotificationMsg:
-		return m.onNotification(msg, cmds)
-	case UpdateAvailableMsg:
-		return m.onUpdateAvailable(msg, cmds)
-	case hideNotificationMsg:
-		return m.onHideNotification(msg, cmds)
-	case ErrorMsg:
-		return m.onError(msg, cmds)
-	case TachikomaStatusMsg:
-		return m.onTachikomaStatus(msg, cmds)
+	case CopySelectionMsg, NotificationMsg, UpdateAvailableMsg, hideNotificationMsg, ErrorMsg, TachikomaStatusMsg, WorkspaceTrustedMsg:
+		return m.updateStatus(msg, cmds)
 	case SubmitPromptMsg:
 		return m.onSubmitPrompt(msg, cmds)
 	case AgentStreamBatchMsg:
@@ -226,6 +216,29 @@ func (m *Model) updateGlobal(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			return m.onQueueKey(msg, cmds)
 		}
 		return m.onGlobalKey(msg, cmds)
+	}
+	return cmds, false
+}
+
+// updateStatus handles notifications and background status messages.
+func (m *Model) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case CopySelectionMsg:
+		return m.onCopySelection(msg, cmds)
+	case NotificationMsg:
+		return m.onNotification(msg, cmds)
+	case UpdateAvailableMsg:
+		return m.onUpdateAvailable(msg, cmds)
+	case hideNotificationMsg:
+		return m.onHideNotification(msg, cmds)
+	case ErrorMsg:
+		return m.onError(msg, cmds)
+	case TachikomaStatusMsg:
+		return m.onTachikomaStatus(msg, cmds)
+	case WorkspaceTrustedMsg:
+		m.runtime.ApplyPendingWorkspace()
+		m.sidebar.dirty = true
+		cmds = append(cmds, m.showNotification("Project config loaded"))
 	}
 	return cmds, false
 }

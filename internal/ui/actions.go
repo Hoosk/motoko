@@ -168,6 +168,17 @@ func (m Model) waitDialog() tea.Cmd {
 	}
 }
 
+// askWorkspaceTrust asks once at startup whether to load untrusted project
+// config; the answer arrives through the regular question popup.
+func (m Model) askWorkspaceTrust() tea.Cmd {
+	return func() tea.Msg {
+		if !m.runtime.AskWorkspaceTrust(m.runtime.BackgroundContext()) {
+			return nil
+		}
+		return WorkspaceTrustedMsg{}
+	}
+}
+
 func (m Model) waitScheduleEvent() tea.Cmd {
 	return func() tea.Msg {
 		res := m.runtime.NextScheduleEvent(m.runtime.BackgroundContext())

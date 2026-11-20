@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -236,29 +237,91 @@ func (o *Orchestrator) feedContextWindow(cw int) {
 }
 
 func (o *Orchestrator) buildAgentFromDef(client provider.Client, aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) *agent.Agent {
-	sysPrompt := aDef.System
-	if hasOverride && override.SystemPrompt != "" {
-		sysPrompt = override.SystemPrompt
-	}
+	return o.buildAgent(client, resolvePolicy(aDef, override, hasOverride), systemPromptFor(aDef, override, hasOverride))
+}
 
-	allowedTools := aDef.Permissions.AllowedTools
-	if hasOverride && len(override.ToolFilter) > 0 {
-		allowedTools = override.ToolFilter
-	}
-
-	deniedTools := aDef.Permissions.DeniedTools
-	if hasOverride && len(override.ExcludeTools) > 0 {
-		deniedTools = override.ExcludeTools
-	}
-
-	toolsRegistry := o.toolsFn().Filter(func(t tools.Tool) bool {
-		return toolAllowedForAgent(t, aDef, allowedTools, deniedTools)
-	})
-
-	newAgent := agent.New(client, toolsRegistry)
+func (o *Orchestrator) buildAgent(client provider.Client, policy toolPolicy, sysPrompt string) *agent.Agent {
+	newAgent := agent.New(client, o.toolsFn().Filter(policy.allows))
 	newAgent.SetDebug(o.debug)
 	newAgent.SetAgentOverride(sysPrompt)
 	return newAgent
+}
+
+func systemPromptFor(aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) string {
+	if hasOverride && override.SystemPrompt != "" {
+		return override.SystemPrompt
+	}
+	return aDef.System
+}
+
+// toolPolicy is the effective tool access of an agent: its permission flags
+// plus the resolved allow and deny lists.
+type toolPolicy struct {
+	allowed []string
+	denied  []string
+	def     agent.AgentDef
+}
+
+// resolvePolicy applies a user's config override to an agent definition. An
+// override's tool_filter/exclude_tools replace the definition's lists: they
+// come from the user's own configuration.
+func resolvePolicy(aDef agent.AgentDef, override config.AgentOverride, hasOverride bool) toolPolicy {
+	p := toolPolicy{def: aDef, allowed: aDef.Permissions.AllowedTools, denied: aDef.Permissions.DeniedTools}
+	if hasOverride && len(override.ToolFilter) > 0 {
+		p.allowed = override.ToolFilter
+	}
+	if hasOverride && len(override.ExcludeTools) > 0 {
+		p.denied = override.ExcludeTools
+	}
+	return p
+}
+
+func (p toolPolicy) allows(t tools.Tool) bool {
+	return toolAllowedForAgent(t, p.def, p.allowed, p.denied)
+}
+
+// narrowedTo restricts p so it grants nothing that caller lacks: every
+// capability flag must be held by both, the allow lists intersect and the
+// deny lists add up. A read-only agent therefore cannot regain write access
+// by delegating to a writing agent.
+func (p toolPolicy) narrowedTo(caller toolPolicy) toolPolicy {
+	perms := p.def.Permissions
+	callerPerms := caller.def.Permissions
+	perms.AllowWrite = perms.AllowWrite && callerPerms.AllowWrite
+	perms.AllowQuestion = perms.AllowQuestion && callerPerms.AllowQuestion
+	perms.AllowDelegate = perms.AllowDelegate && callerPerms.AllowDelegate
+	perms.AllowTask = perms.AllowTask && callerPerms.AllowTask
+	perms.AllowBrainWrite = perms.AllowBrainWrite && callerPerms.AllowBrainWrite
+	perms.AllowWebAccess = perms.AllowWebAccess && callerPerms.AllowWebAccess
+
+	narrowed := p
+	narrowed.def.Permissions = perms
+	narrowed.allowed = intersectToolLists(p.allowed, caller.allowed)
+	narrowed.denied = config.UniqueSortedKeep(p.denied, caller.denied...)
+	return narrowed
+}
+
+// intersectToolLists combines two allow lists, where an empty list means
+// "no restriction".
+func intersectToolLists(a, b []string) []string {
+	switch {
+	case len(a) == 0:
+		return slices.Clone(b)
+	case len(b) == 0:
+		return slices.Clone(a)
+	}
+	var out []string
+	for _, name := range a {
+		if slices.ContainsFunc(b, func(other string) bool { return strings.EqualFold(name, other) }) {
+			out = append(out, name)
+		}
+	}
+	if out == nil {
+		// Disjoint lists allow nothing; keep the list non-empty so it is not
+		// read as "no restriction".
+		out = []string{""}
+	}
+	return out
 }
 
 // toolAllowedForAgent applies the permission model for a single tool:
@@ -319,11 +382,42 @@ func toolAllowedForAgent(t tools.Tool, aDef agent.AgentDef, allowedTools, denied
 	return true
 }
 
-func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig) (*agent.Agent, error) {
+// agentDef returns the definition named name, falling back to "build" like
+// RefreshAgent does for the active agent.
+func (o *Orchestrator) agentDef(name string) (agent.AgentDef, bool) {
+	var fallback agent.AgentDef
+	hasFallback := false
+	for _, a := range o.AvailableAgents() {
+		if strings.EqualFold(a.Name, name) {
+			return a, true
+		}
+		if strings.EqualFold(a.Name, "build") {
+			fallback, hasFallback = a, true
+		}
+	}
+	return fallback, hasFallback
+}
+
+// callerPolicy returns the tool policy of whoever is delegating: the parent
+// subagent when nested, otherwise the active top-level agent.
+func (o *Orchestrator) callerPolicy(ctx context.Context) toolPolicy {
+	if p, ok := ctx.Value(callerPolicyKey{}).(toolPolicy); ok {
+		return p
+	}
+	aDef, _ := o.agentDef(o.currentAgentName)
+	var override config.AgentOverride
+	hasOverride := false
+	if c := o.configFn(); c != nil {
+		override, hasOverride = c.Agents[aDef.Name]
+	}
+	return resolvePolicy(aDef, override, hasOverride)
+}
+
+func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig, caller toolPolicy) (*agent.Agent, toolPolicy, error) {
 	c := o.configFn()
 	active, ok := c.Active()
 	if !ok {
-		return nil, fmt.Errorf("no active provider configured")
+		return nil, toolPolicy{}, fmt.Errorf("no active provider configured")
 	}
 
 	var aDef agent.AgentDef
@@ -336,21 +430,18 @@ func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig) (*a
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("unknown agent: %s", name)
+		return nil, toolPolicy{}, fmt.Errorf("unknown agent: %s", name)
 	}
 
-	override := c.Agents[aDef.Name]
-
-	hasOverride := true
-	if len(cfg.ToolFilter) > 0 {
-		override.ToolFilter = append(override.ToolFilter, cfg.ToolFilter...)
-	}
+	override, hasOverride := c.Agents[aDef.Name]
+	policy := resolvePolicy(aDef, override, hasOverride)
+	// The delegate call can only narrow the subagent further: its
+	// tool_filter intersects, and nested delegation must be opted into.
+	policy.allowed = intersectToolLists(policy.allowed, cfg.ToolFilter)
 	if !cfg.AllowDelegate {
-		override.ExcludeTools = append(override.ExcludeTools, "delegate")
+		policy.def.Permissions.AllowDelegate = false
 	}
-	if cfg.MaxIterations > 0 {
-		override.MaxIterations = &cfg.MaxIterations
-	}
+	policy = policy.narrowedTo(caller)
 
 	if hasOverride && override.Provider != "" {
 		if p, ok := c.Provider(override.Provider); ok {
@@ -364,11 +455,15 @@ func (o *Orchestrator) createSubagent(name string, cfg tools.SubagentConfig) (*a
 	providerFn := o.providerClientFn()
 	client, err := providerFn(active)
 	if err != nil {
-		return nil, err
+		return nil, toolPolicy{}, err
 	}
 
-	return o.buildAgentFromDef(client, aDef, override, hasOverride), nil
+	return o.buildAgent(client, policy, systemPromptFor(aDef, override, hasOverride)), policy, nil
 }
+
+// callerPolicyKey carries the delegating agent's toolPolicy into the
+// subagent's context so nested delegation keeps narrowing.
+type callerPolicyKey struct{}
 
 type subagentDepthKey struct{}
 
@@ -421,7 +516,7 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 		}
 	}
 
-	sub, err := o.createSubagent(cfg.Mode, cfg)
+	sub, subPolicy, err := o.createSubagent(cfg.Mode, cfg, o.callerPolicy(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -431,6 +526,7 @@ func (o *Orchestrator) RunSubagent(ctx context.Context, cfg tools.SubagentConfig
 	subCtx = tools.WithConfig(subCtx, o.configFn())
 	subCtx = tools.WithMaxOutputSize(subCtx, system.MaxToolOutputBytes(o.contextWindowFn()))
 	subCtx = context.WithValue(subCtx, subagentDepthKey{}, currentDepth+1)
+	subCtx = context.WithValue(subCtx, callerPolicyKey{}, subPolicy)
 	reqID := fmt.Sprintf("subreq-%d", time.Now().UnixNano())
 	subCtx = provider.WithTelemetry(subCtx, subSessionID, reqID)
 

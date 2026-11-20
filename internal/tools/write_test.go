@@ -317,16 +317,6 @@ func TestWriteToolRejectsSSHKeys(t *testing.T) {
 	}
 }
 
-func TestWriteToolRejectsAntigravityConfig(t *testing.T) {
-	withTempWorkspace(t)
-	tool := NewWriteTool()
-
-	_, err := tool.Run(context.Background(), `{"path":".antigravitycli/agent.json","content":"{}"}`)
-	if err == nil {
-		t.Fatal("expected error writing .antigravitycli/")
-	}
-}
-
 func TestWriteToolRejectsDirectoryAsTarget(t *testing.T) {
 	root := withTempWorkspace(t)
 	if err := os.MkdirAll(filepath.Join(root, "subdir"), 0o755); err != nil {

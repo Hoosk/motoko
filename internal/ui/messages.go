@@ -34,6 +34,9 @@ type NotificationMsg struct {
 	Text string
 }
 
+// WorkspaceTrustedMsg reports that the user trusted the project config.
+type WorkspaceTrustedMsg struct{}
+
 type ErrorMsg struct {
 	Err error
 }

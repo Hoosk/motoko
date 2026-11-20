@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	workspaceignore "github.com/Hoosk/motoko/internal/ignore"
+	patchtool "github.com/Hoosk/motoko/internal/tools/patch"
 )
 
 func parseJSONArgs(args string) map[string]any {
@@ -109,33 +110,7 @@ func jsonStringList(m map[string]any, keys ...string) ([]string, bool) {
 }
 
 func resolveWorkspacePath(target string) (string, string, error) {
-	workspace, err := os.Getwd()
-	if err != nil {
-		return "", "", err
-	}
-
-	if target == "" {
-		return workspace, ".", nil
-	}
-
-	path := target
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(workspace, path)
-	}
-	path = filepath.Clean(path)
-
-	rel, err := filepath.Rel(workspace, path)
-	if err != nil {
-		return "", "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("path outside workspace: %s", target)
-	}
-	if rel == "." {
-		return path, rel, nil
-	}
-
-	return path, filepath.ToSlash(rel), nil
+	return patchtool.ResolveWorkspacePath(target)
 }
 
 func walkWorkspace(ctx context.Context, fn func(relPath, absPath string, entry fs.DirEntry) error) error {
@@ -184,6 +159,14 @@ func walkWorkspace(ctx context.Context, fn func(relPath, absPath string, entry f
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
+				return nil
+			}
+		}
+
+		// WalkDir does not descend into linked directories, but grep would
+		// still open a linked file: skip links that leave the workspace.
+		if entry.Type()&fs.ModeSymlink != 0 {
+			if _, _, err := resolveWorkspacePath(path); err != nil {
 				return nil
 			}
 		}

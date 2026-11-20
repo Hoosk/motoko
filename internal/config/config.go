@@ -68,16 +68,23 @@ type AgentOverride struct {
 }
 
 type AppConfig struct {
-	Agents            map[string]AgentOverride `json:"agents,omitempty"`
-	Providers         []ProviderConfig         `json:"providers"`
-	MCPServers        []MCPServerConfig        `json:"mcp_servers,omitempty"`
-	ActiveProvider    string                   `json:"active_provider"`
-	EditApproval      string                   `json:"edit_approval,omitempty"`
-	Theme             string                   `json:"theme,omitempty"`
-	Density           string                   `json:"density,omitempty"`
-	ThinkingVerbosity string                   `json:"thinking_verbosity,omitempty"`
-	Search            SearchConfig             `json:"search"`
-	MaxIterations     int                      `json:"max_iterations,omitempty"`
+	Agents map[string]AgentOverride `json:"agents,omitempty"`
+	// pendingWorkspace is untrusted project configuration held back by Load.
+	pendingWorkspace *WorkspaceLayer
+	// userLayer and mergedLayer snapshot the configuration before and after
+	// ApplyWorkspace so Save never persists project values.
+	userLayer   *AppConfig
+	mergedLayer *AppConfig
+
+	Providers         []ProviderConfig  `json:"providers"`
+	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
+	ActiveProvider    string            `json:"active_provider"`
+	EditApproval      string            `json:"edit_approval,omitempty"`
+	Theme             string            `json:"theme,omitempty"`
+	Density           string            `json:"density,omitempty"`
+	ThinkingVerbosity string            `json:"thinking_verbosity,omitempty"`
+	Search            SearchConfig      `json:"search"`
+	MaxIterations     int               `json:"max_iterations,omitempty"`
 }
 
 // MCPServerConfig describes a single MCP server. Both stdio and HTTP
@@ -211,20 +218,15 @@ func Load(workspacePath ...string) (*AppConfig, error) {
 	}
 	cfg.EditApproval = NormalizeEditApproval(cfg.EditApproval)
 
-	// Load project-scoped config if exists
+	// Project config (.agents/config.json and .agents/mcp.json) is applied
+	// only once the user has trusted its exact content.
 	if len(workspacePath) > 0 && workspacePath[0] != "" {
-		localPath := filepath.Join(workspacePath[0], ".agents", "config.json")
-		if localData, err := os.ReadFile(localPath); err == nil {
-			var localCfg AppConfig
-			if err := json.Unmarshal(localData, &localCfg); err == nil {
-				cfg.Merge(&localCfg)
+		if layer := loadWorkspaceLayer(workspacePath[0]); layer != nil {
+			if layer.Trusted() {
+				cfg.ApplyWorkspace(layer)
+			} else {
+				cfg.pendingWorkspace = layer
 			}
-		}
-
-		// Dedicated MCP file (`.agents/mcp.json`) merged on top.
-		mcpPath := filepath.Join(workspacePath[0], ".agents", "mcp.json")
-		if extra, err := LoadMCPFile(mcpPath); err == nil && len(extra) > 0 {
-			cfg.MCPServers = mergeMCPServers(cfg.MCPServers, extra)
 		}
 	}
 
@@ -248,20 +250,21 @@ func (c *AppConfig) Save() error {
 		return mkdirErr
 	}
 	c.sortProviders()
+	own := c.persistable()
 
 	// Create a copy of config with encrypted API keys
 	var encryptedCfg AppConfig
-	encryptedCfg.ActiveProvider = c.ActiveProvider
-	encryptedCfg.EditApproval = NormalizeEditApproval(c.EditApproval)
-	encryptedCfg.Search = c.Search
-	encryptedCfg.Agents = c.Agents
-	encryptedCfg.Theme = c.Theme
-	encryptedCfg.Density = c.Density
-	encryptedCfg.ThinkingVerbosity = c.ThinkingVerbosity
-	encryptedCfg.MaxIterations = c.MaxIterations
-	encryptedCfg.MCPServers = c.MCPServers
-	encryptedCfg.Providers = make([]ProviderConfig, len(c.Providers))
-	for i, p := range c.Providers {
+	encryptedCfg.ActiveProvider = own.ActiveProvider
+	encryptedCfg.EditApproval = NormalizeEditApproval(own.EditApproval)
+	encryptedCfg.Search = own.Search
+	encryptedCfg.Agents = own.Agents
+	encryptedCfg.Theme = own.Theme
+	encryptedCfg.Density = own.Density
+	encryptedCfg.ThinkingVerbosity = own.ThinkingVerbosity
+	encryptedCfg.MaxIterations = own.MaxIterations
+	encryptedCfg.MCPServers = own.MCPServers
+	encryptedCfg.Providers = make([]ProviderConfig, len(own.Providers))
+	for i, p := range own.Providers {
 		encryptedCfg.Providers[i] = p
 		if p.APIKey != "" && !strings.HasPrefix(p.APIKey, "enc:") {
 			encKey, encErr := Encrypt(p.APIKey)
