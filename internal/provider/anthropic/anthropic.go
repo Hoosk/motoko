@@ -312,6 +312,7 @@ func buildSDKMessages[MsgT any, RoleT any, BlockT any](
 	buildMessage func(role RoleT, blocks []BlockT) MsgT,
 ) []MsgT {
 	result := make([]MsgT, 0, len(messages))
+	breakpoints := messageCacheBreakpoints(messages)
 	for i, msg := range messages {
 		role, blocks := parseConversationItem(msg)
 		if role == "" {
@@ -330,7 +331,7 @@ func buildSDKMessages[MsgT any, RoleT any, BlockT any](
 			sdkBlocks[j] = buildBlock(b)
 		}
 
-		if i == len(messages)-2 && len(sdkBlocks) > 0 {
+		if breakpoints[i] && len(sdkBlocks) > 0 {
 			setCacheControl(&sdkBlocks[len(sdkBlocks)-1])
 		}
 
@@ -339,26 +340,68 @@ func buildSDKMessages[MsgT any, RoleT any, BlockT any](
 	return result
 }
 
-func buildSDKTools[T any](tools provider.ToolSet, buildFn func(t provider.LocalToolDefinition, isLast bool) T) []T {
+// messageCacheBreakpoints marks which messages get a cache_control breakpoint
+// on their last block. Anthropic allows 4 breakpoints per request; one is
+// spent on the system prompt (tools render before system, so it caches the
+// tool definitions too), leaving at most 3 for messages:
+//
+//   - the last message, so each agent-loop iteration reads the prefix written
+//     by the previous one and writes its own increment;
+//   - the message right before the current turn's user message, i.e. the end
+//     of the history that the next turn will resend unchanged;
+//   - the message right before the previous turn's user message, which is the
+//     entry written one turn earlier and so the read point for this turn.
+//
+// The two turn-boundary marks matter because the agent merges per-turn
+// dynamic context into the turn's user message and drops it from history
+// afterwards: the next turn's prefix diverges at that message, so it can only
+// reuse a cache entry that ends exactly before it. An explicit mark avoids
+// depending on the 20-position lookback, which a long tool loop overruns.
+func messageCacheBreakpoints(messages []provider.ConversationItem) []bool {
+	marks := make([]bool, len(messages))
+	if len(messages) == 0 {
+		return marks
+	}
+	marks[len(messages)-1] = true
+	turnStarts := 0
+	for i := len(messages) - 1; i > 0 && turnStarts < 2; i-- {
+		if isTurnStart(messages[i]) {
+			marks[i-1] = true
+			turnStarts++
+		}
+	}
+	return marks
+}
+
+// isTurnStart reports whether msg is a plain user message (not a tool result
+// and not an assistant tool call), which is how a new conversational turn
+// begins.
+func isTurnStart(msg provider.ConversationItem) bool {
+	return msg.Role != provider.RoleTool &&
+		len(msg.ToolCalls) == 0 &&
+		provider.NormalizeConversationRole(msg.Role) == provider.RoleUser
+}
+
+func buildSDKTools[T any](tools provider.ToolSet, buildFn func(t provider.LocalToolDefinition) T) []T {
 	if len(tools.Local) == 0 {
 		return nil
 	}
 	result := make([]T, 0, len(tools.Local))
-	for i, tool := range tools.Local {
-		result = append(result, buildFn(tool, i == len(tools.Local)-1))
+	for _, tool := range tools.Local {
+		result = append(result, buildFn(tool))
 	}
 	return result
 }
 
+// toSDKTools converts the tool catalog. Tools carry no cache_control of their
+// own: tools render before the system prompt, whose breakpoint already caches
+// them, and the breakpoint budget is needed for messages.
 func toSDKTools(tools provider.ToolSet) []sdk.ToolUnionParam {
-	return buildSDKTools(tools, func(t provider.LocalToolDefinition, isLast bool) sdk.ToolUnionParam {
+	return buildSDKTools(tools, func(t provider.LocalToolDefinition) sdk.ToolUnionParam {
 		tParam := sdk.ToolParam{
 			Name:        t.Name,
 			Description: sdk.String(strings.TrimSpace(t.Description)),
 			InputSchema: schemaParam(t),
-		}
-		if isLast {
-			tParam.CacheControl = sdk.NewCacheControlEphemeralParam()
 		}
 		return sdk.ToolUnionParam{OfTool: &tParam}
 	})
@@ -508,14 +551,11 @@ func toSDKBetaMessages(messages []provider.ConversationItem) []sdk.BetaMessagePa
 }
 
 func toSDKBetaTools(tools provider.ToolSet) []sdk.BetaToolUnionParam {
-	return buildSDKTools(tools, func(t provider.LocalToolDefinition, isLast bool) sdk.BetaToolUnionParam {
+	return buildSDKTools(tools, func(t provider.LocalToolDefinition) sdk.BetaToolUnionParam {
 		tParam := sdk.BetaToolParam{
 			Name:        t.Name,
 			Description: sdk.String(strings.TrimSpace(t.Description)),
 			InputSchema: betaSchemaParam(t),
-		}
-		if isLast {
-			tParam.CacheControl = sdk.NewBetaCacheControlEphemeralParam()
 		}
 		return sdk.BetaToolUnionParam{OfTool: &tParam}
 	})

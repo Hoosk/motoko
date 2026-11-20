@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
@@ -146,5 +148,95 @@ func TestRunStopsAfterRejectedChange(t *testing.T) {
 	}
 	if len(result.History) < 3 {
 		t.Fatalf("expected tool call, tool result, and cancellation in history, got %#v", result.History)
+	}
+}
+
+// TestRunKeepsDynamicContextInStablePrefix records the messages sent on every
+// iteration of one turn and checks that the request is append-only: everything
+// up to and including the turn's user message (which carries the dynamic
+// block) is byte-identical across iterations, and tool traffic only follows it.
+func TestRunKeepsDynamicContextInStablePrefix(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(&fakeLoopTool{})
+	var sent [][]provider.ConversationItem
+	a := New(&fakeProviderClient{summary: "fake:prefix", models: []provider.ModelInfo{{ID: "prefix"}}, completeFn: func(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (provider.Response, error) {
+		sent = append(sent, append([]provider.ConversationItem(nil), messages...))
+		switch len(sent) {
+		case 1, 2:
+			call := provider.ToolInvocation{Kind: provider.InvokeCustomTool, Name: "looptool", CallID: strings.Repeat("c", len(sent)), Input: strings.Repeat("x", len(sent))}
+			return provider.Response{
+				PendingCalls: []provider.ToolInvocation{call},
+				OutputItems:  []provider.ConversationItem{provider.AssistantTurn("", "", []provider.ToolInvocation{call})},
+			}, nil
+		default:
+			return provider.Response{FinalText: "done", OutputItems: []provider.ConversationItem{provider.AssistantText("done")}}, nil
+		}
+	}}, registry)
+
+	info := system.ContextInfo{
+		Workspace:       "motoko",
+		Path:            "/tmp/motoko",
+		Signals:         map[string]string{"GitTachikoma": "main", "CodeTachikoma": "ok", "DiffTachikoma": "2", "SearchTachikoma": "3"},
+		OnDemandSignals: map[string]string{"DependencyTachikoma": "deps", "ZetaTachikoma": "z"},
+	}
+	prior := []provider.ConversationItem{provider.UserText("earlier question"), provider.AssistantText("earlier answer")}
+
+	result, err := a.Run(context.Background(), info, "current question", prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 3 {
+		t.Fatalf("expected 3 iterations, got %d", len(sent))
+	}
+
+	const turnIdx = 2
+	first := sent[0]
+	if len(first) != turnIdx+1 {
+		t.Fatalf("expected prior history + turn message on first iteration, got %#v", first)
+	}
+	turnMsg := first[turnIdx]
+	if turnMsg.Role != provider.RoleUser || !strings.HasPrefix(turnMsg.Content, "<environment>") || !strings.HasSuffix(turnMsg.Content, "\n\ncurrent question") {
+		t.Fatalf("expected dynamic block merged ahead of the user input, got %#v", turnMsg)
+	}
+
+	for i := 1; i < len(sent); i++ {
+		prev, cur := sent[i-1], sent[i]
+		if len(cur) <= len(prev) {
+			t.Fatalf("iteration %d: expected request to grow, got %d <= %d", i+1, len(cur), len(prev))
+		}
+		for j := range prev {
+			if !reflect.DeepEqual(prev[j], cur[j]) {
+				t.Fatalf("iteration %d: message %d changed between iterations\nprev: %#v\ncur:  %#v", i+1, j, prev[j], cur[j])
+			}
+		}
+		for j := turnIdx + 1; j < len(cur); j++ {
+			if strings.Contains(cur[j].Content, "<environment>") {
+				t.Fatalf("iteration %d: dynamic block repeated after the turn message at %d", i+1, j)
+			}
+		}
+		if last := cur[len(cur)-1]; last.Role != provider.RoleTool {
+			t.Fatalf("iteration %d: expected tool result to be the tail, got %#v", i+1, last)
+		}
+	}
+
+	for idx, item := range result.History {
+		if strings.Contains(item.Content, "<environment>") || strings.Contains(item.Content, "<context>") {
+			t.Fatalf("dynamic block leaked into returned history at %d: %q", idx, item.Content)
+		}
+	}
+	if got := result.History[turnIdx].Content; got != "current question" {
+		t.Fatalf("expected raw user input in history, got %q", got)
+	}
+}
+
+func TestNewRunStateFreezesDynamicPromptTime(t *testing.T) {
+	a := New(&fakeProviderClient{}, tools.NewRegistry())
+	state := a.newRunState(system.ContextInfo{Workspace: "motoko"}, "hi", nil, 3)
+	want := "Current Time: " + state.startedAt.Format(time.RFC3339)
+	if !strings.Contains(state.dynamicPrompt, want) {
+		t.Fatalf("expected dynamic prompt to use the run start time %q, got %q", want, state.dynamicPrompt)
+	}
+	if state.turnIndex != 0 || state.history[state.turnIndex].Content != "hi" {
+		t.Fatalf("expected turn index to point at the user message, got %d %#v", state.turnIndex, state.history)
 	}
 }

@@ -35,6 +35,44 @@ func TestContextInfoSummaries(t *testing.T) {
 	}
 }
 
+func TestSignalSummariesAreSortedAndDeterministic(t *testing.T) {
+	info := ContextInfo{
+		Signals: map[string]string{
+			"GitTachikoma":    "branch main",
+			"CodeTachikoma":   "indexed",
+			"SearchTachikoma": "3 snippets",
+			"DiffTachikoma":   "2 symbols",
+		},
+		OnDemandSignals: map[string]string{
+			"ZetaTachikoma":       "zeta",
+			"DependencyTachikoma": "deps",
+		},
+	}
+
+	wantFlat := "CodeTachikoma: indexed | DiffTachikoma: 2 symbols | GitTachikoma: branch main | SearchTachikoma: 3 snippets | " +
+		"DependencyTachikoma (available on-demand): deps | ZetaTachikoma (available on-demand): zeta"
+	wantCategorized := "[Background Signals]\n" +
+		"- CodeTachikoma: indexed\n" +
+		"- DiffTachikoma: 2 symbols\n" +
+		"- GitTachikoma: branch main\n" +
+		"- SearchTachikoma: 3 snippets\n" +
+		"\n" +
+		"[On-Demand Signals]\n" +
+		"- DependencyTachikoma: deps\n" +
+		"- ZetaTachikoma: zeta"
+
+	// Map iteration order is randomized per range loop, so repeat enough times
+	// that an unsorted implementation would almost certainly diverge.
+	for range 50 {
+		if got := info.SignalSummary(); got != wantFlat {
+			t.Fatalf("unexpected signal summary:\n got: %q\nwant: %q", got, wantFlat)
+		}
+		if got := info.CategorizedSignalSummary(); got != wantCategorized {
+			t.Fatalf("unexpected categorized summary:\n got: %q\nwant: %q", got, wantCategorized)
+		}
+	}
+}
+
 func TestContextInfoFallbackSummaries(t *testing.T) {
 	info := ContextInfo{}
 	if got := info.GitSummary(); got != "no git repository" {

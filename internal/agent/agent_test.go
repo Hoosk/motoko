@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoosk/motoko/internal/provider"
 	"github.com/Hoosk/motoko/internal/system"
@@ -19,7 +20,7 @@ func TestBuildSystemPromptIncludesRelevantSnippets(t *testing.T) {
 		RelevantSnippets: []string{"FILE internal/app/runtime.go\nLINES 10-20\nREASON symbol match: RunAgent\nfunc RunAgent() error {\n\treturn nil\n}"},
 	}
 	prompt := buildSystemPrompt("default", info, []tools.Spec{{Name: "read", Summary: "Lee archivos", Usage: "read <ruta>"}}, "")
-	dynamicPrompt := buildDynamicPrompt("default", info)
+	dynamicPrompt := buildDynamicPrompt("default", info, time.Now())
 	if strings.Contains(prompt, "[Pre-extracted Relevant Snippets]:") {
 		t.Fatalf("static prompt should not contain dynamic snippets section: %s", prompt)
 	}
@@ -62,7 +63,7 @@ func TestBuildSystemPromptIncludesAgentsAndDesign(t *testing.T) {
 	}
 }
 
-func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
+func TestRunMergesDynamicPromptIntoTurnUserMessage(t *testing.T) {
 	var capturedMessages []provider.ConversationItem
 	var capturedSystemPrompt string
 	var capturedTools provider.ToolSet
@@ -73,27 +74,31 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 		return provider.Response{FinalText: "ok", OutputItems: []provider.ConversationItem{provider.AssistantText("ok")}}, nil
 	}}
 	a := New(p, tools.NewRegistry())
-	messages := []provider.ConversationItem{provider.UserText("haz algo")}
 	info := system.ContextInfo{Workspace: "motoko", Path: "/tmp/motoko", ActiveMode: "plan"}
 	specs := a.tools.Specs(buildToolContext(info))
 
-	if _, err := a.complete(context.Background(), info, messages, nil, specs); err != nil {
+	result, err := a.Run(context.Background(), info, "haz algo", nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(capturedMessages) != 2 {
-		t.Fatalf("expected original message plus dynamic tail, got %#v", capturedMessages)
+	if len(capturedMessages) != 1 {
+		t.Fatalf("expected the dynamic block merged into the single user message, got %#v", capturedMessages)
 	}
-	if capturedMessages[0].Content != "haz algo" {
-		t.Fatalf("expected original user message untouched, got %#v", capturedMessages[0])
+	got := capturedMessages[0]
+	if got.Role != provider.RoleUser {
+		t.Fatalf("expected a user message, got %#v", got)
 	}
-	if capturedMessages[1].Role != provider.RoleUser {
-		t.Fatalf("expected dynamic tail to be a user message, got %#v", capturedMessages[1])
+	if !strings.HasPrefix(got.Content, "<environment>") {
+		t.Fatalf("expected dynamic block first in the user message, got %q", got.Content)
 	}
-	if !strings.Contains(capturedMessages[1].Content, "<environment>") {
-		t.Fatalf("expected dynamic tail to include environment context, got %q", capturedMessages[1].Content)
+	if !strings.HasSuffix(got.Content, "</context>\n\nhaz algo") {
+		t.Fatalf("expected user input after the dynamic block, got %q", got.Content)
 	}
-	if strings.Contains(capturedMessages[1].Content, "PLAN MODE") {
-		t.Fatalf("mode fragment should not be in the dynamic tail, got %q", capturedMessages[1].Content)
+	if strings.Contains(got.Content, "PLAN MODE") {
+		t.Fatalf("mode fragment should not be in the dynamic block, got %q", got.Content)
+	}
+	if result.History[0].Content != "haz algo" {
+		t.Fatalf("expected returned history to keep the raw user input, got %q", result.History[0].Content)
 	}
 	if !strings.Contains(capturedSystemPrompt, "PLAN MODE") {
 		t.Fatalf("expected system prompt to include active mode fragment, got %q", capturedSystemPrompt)
@@ -104,8 +109,34 @@ func TestCompleteAppendsDynamicPromptAsSeparateMessage(t *testing.T) {
 	if len(capturedTools.Local) != len(specs) {
 		t.Fatalf("expected captured tool set to match computed specs")
 	}
-	if messages[0].Content != "haz algo" {
-		t.Fatalf("expected input slice to remain unmodified, got %#v", messages)
+}
+
+func TestWithDynamicContextDoesNotMutateHistory(t *testing.T) {
+	history := []provider.ConversationItem{
+		provider.UserText("previous"),
+		provider.AssistantText("previous answer"),
+		provider.UserText("current"),
+	}
+	out := withDynamicContext(history, 2, "<dyn>")
+	if history[2].Content != "current" {
+		t.Fatalf("expected input history untouched, got %#v", history)
+	}
+	if len(out) != 3 || out[2].Content != "<dyn>\n\ncurrent" {
+		t.Fatalf("expected dynamic block merged into turn message, got %#v", out)
+	}
+	if out[0].Content != "previous" || out[1].Content != "previous answer" {
+		t.Fatalf("expected prior history unchanged in outgoing copy, got %#v", out)
+	}
+
+	// Defensive fallback: an index that doesn't point at a user message must
+	// not drop the context.
+	fallback := withDynamicContext(history, 1, "<dyn>")
+	if len(fallback) != 4 || fallback[3].Content != "<dyn>" || fallback[1].Content != "previous answer" {
+		t.Fatalf("expected trailing dynamic message fallback, got %#v", fallback)
+	}
+
+	if empty := withDynamicContext(history, 2, ""); len(empty) != 3 || empty[2].Content != "current" {
+		t.Fatalf("expected no change for empty dynamic prompt, got %#v", empty)
 	}
 }
 
@@ -232,7 +263,7 @@ func TestBuildDynamicPromptOnDemandSignalUsesInspect(t *testing.T) {
 		Path:            "/tmp/motoko",
 		OnDemandSignals: map[string]string{"DiffTachikoma": "changes available"},
 	}
-	prompt := buildDynamicPrompt("default", info)
+	prompt := buildDynamicPrompt("default", info, time.Now())
 
 	if !strings.Contains(prompt, "use the 'inspect' tool with the worker name") {
 		t.Fatalf("dynamic prompt should instruct use of inspect for on-demand signals: %s", prompt)

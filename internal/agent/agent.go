@@ -97,7 +97,7 @@ func (a *Agent) SystemPrompt(info system.ContextInfo) string {
 		return ""
 	}
 	staticPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, a.tools.Specs(buildToolContext(info)), a.agentSystem)
-	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
+	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info, time.Now())
 	if dynamicPrompt == "" {
 		return staticPrompt
 	}
@@ -117,16 +117,23 @@ type runState struct {
 	startedAt      time.Time
 	seenToolCalls  map[string]struct{}
 	context        ContextSnapshot
+	dynamicPrompt  string
 	history        []provider.ConversationItem
 	steps          []Step
 	iterations     []provider.Usage
 	availableTools []string
 	specs          []tools.Spec
 	totalUsage     provider.Usage
+	// turnIndex is the position in history of this turn's user message. The
+	// dynamic context block is merged into that message on the outgoing copy
+	// only, so it stays in the cached prefix for every iteration of the turn
+	// without being persisted into history.
+	turnIndex int
 }
 
 func (a *Agent) newRunState(info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, maxIterations int) runState {
 	history := append([]provider.ConversationItem{}, priorHistory...)
+	turnIndex := len(history)
 	history = append(history, provider.UserText(userInput))
 	tCtx := buildToolContext(info)
 	specs := a.tools.Specs(tCtx)
@@ -134,8 +141,11 @@ func (a *Agent) newRunState(info system.ContextInfo, userInput string, priorHist
 	for _, s := range specs {
 		availableTools = append(availableTools, s.Name)
 	}
+	startedAt := time.Now()
 	return runState{
 		history:        history,
+		turnIndex:      turnIndex,
+		dynamicPrompt:  buildDynamicPrompt(a.provider.ProviderKind(), info, startedAt),
 		steps:          []Step{{Kind: "user", Title: "prompt", Content: userInput}},
 		iterations:     make([]provider.Usage, 0, max(1, maxIterations)),
 		seenToolCalls:  make(map[string]struct{}),
@@ -147,8 +157,28 @@ func (a *Agent) newRunState(info system.ContextInfo, userInput string, priorHist
 			RelevantFiles:    info.RelevantFilesSummary(),
 			RelevantSnippets: info.RelevantSnippetsSummary(),
 		},
-		startedAt: time.Now(),
+		startedAt: startedAt,
 	}
+}
+
+// withDynamicContext returns the outgoing copy of history with the per-turn
+// dynamic block prepended to the turn's user message (dynamic first, then the
+// user's input). Merging into the existing user message, rather than adding a
+// separate one, keeps strict role alternation intact for every provider and
+// places the block inside the stable prefix of the turn. history is not
+// modified. If turnIndex does not point at a user message the block falls back
+// to a trailing user message so the context is never dropped.
+func withDynamicContext(history []provider.ConversationItem, turnIndex int, dynamicPrompt string) []provider.ConversationItem {
+	out := make([]provider.ConversationItem, len(history), len(history)+1)
+	copy(out, history)
+	if dynamicPrompt == "" {
+		return out
+	}
+	if turnIndex < 0 || turnIndex >= len(out) || out[turnIndex].Role != provider.RoleUser {
+		return append(out, provider.UserText(dynamicPrompt))
+	}
+	out[turnIndex].Content = dynamicPrompt + "\n\n" + out[turnIndex].Content
+	return out
 }
 
 func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput string, priorHistory []provider.ConversationItem, onEvent func(StreamEvent) error) (Result, error) {
@@ -176,16 +206,18 @@ func (a *Agent) run(ctx context.Context, info system.ContextInfo, userInput stri
 // agent loop. It returns (result, true, nil) when the agent produced a final
 // answer, and (zero, false, nil) when another iteration is required.
 func (a *Agent) runIteration(ctx context.Context, info system.ContextInfo, i, maxIterations int, state *runState, onEvent func(StreamEvent) error) (Result, bool, error) {
-	currentHistory := make([]provider.ConversationItem, len(state.history))
-	copy(currentHistory, state.history)
+	currentHistory := withDynamicContext(state.history, state.turnIndex, state.dynamicPrompt)
 
 	if i >= maxIterations-2 {
 		if frag := system.LoadFragment("max_steps"); frag != "" {
-			currentHistory = append(currentHistory, provider.AssistantText(frag))
+			// Sent as a user message: with the dynamic block no longer trailing,
+			// an assistant message here would be the last entry and act as a
+			// prefill, which newer Anthropic models reject.
+			currentHistory = append(currentHistory, provider.UserText(frag))
 		}
 	}
 
-	resp, err := a.complete(ctx, info, currentHistory, onEvent, state.specs)
+	resp, err := a.complete(ctx, info, currentHistory, state.dynamicPrompt, onEvent, state.specs)
 	if err != nil {
 		tracelog.Logf("agent completion error=%v", err)
 		return Result{}, false, err
@@ -432,14 +464,12 @@ func maxToolIterations(ctx context.Context) int {
 	return iterations
 }
 
-func (a *Agent) complete(ctx context.Context, info system.ContextInfo, messages []provider.ConversationItem, onEvent func(StreamEvent) error, specs []tools.Spec) (provider.Response, error) {
+// complete sends one completion request. providerMessages must already carry
+// the dynamic context block (see withDynamicContext); dynamicPrompt is only
+// used for the usage breakdown.
+func (a *Agent) complete(ctx context.Context, info system.ContextInfo, providerMessages []provider.ConversationItem, dynamicPrompt string, onEvent func(StreamEvent) error, specs []tools.Spec) (provider.Response, error) {
 	toolSet := toolSet(specs)
 	systemPrompt := buildSystemPrompt(a.provider.ProviderKind(), info, specs, a.agentSystem)
-	dynamicPrompt := buildDynamicPrompt(a.provider.ProviderKind(), info)
-	providerMessages := append([]provider.ConversationItem(nil), messages...)
-	if dynamicPrompt != "" {
-		providerMessages = append(providerMessages, provider.UserText(dynamicPrompt))
-	}
 
 	var resp provider.Response
 	var err error
