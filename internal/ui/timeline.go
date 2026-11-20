@@ -202,11 +202,27 @@ func (m *TimelineModel) onMouse(msg tea.MouseMsg) (tea.Cmd, bool) {
 
 // onKey handles timeline-specific keys. The boolean reports whether the key
 // was fully handled; unhandled keys fall through to the viewport update.
+// ownsKey reports whether a key press is meant for the timeline (message
+// selection, copying, paging) rather than for the composer. Every key goes to
+// exactly one of the two.
+func (m *TimelineModel) ownsKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case keyAltUp, keyAltDown, "pgup", "pgdown":
+		return true
+	case keyAltC:
+		if _, ok := m.model.SelectedText(); ok {
+			return true
+		}
+		return m.model.SelectedMessage >= 0 && m.model.SelectedMessage < len(m.model.Messages)
+	}
+	return false
+}
+
 func (m *TimelineModel) onKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case keyUp, keyDown:
 		return nil, true
-	case "alt+up":
+	case keyAltUp:
 		if len(m.model.Messages) > 0 {
 			if m.model.SelectedMessage < 0 {
 				m.model.SelectedMessage = len(m.model.Messages) - 1
@@ -216,7 +232,7 @@ func (m *TimelineModel) onKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			m.renderMessages()
 		}
 		return nil, true
-	case "alt+down":
+	case keyAltDown:
 		if len(m.model.Messages) > 0 {
 			if m.model.SelectedMessage < 0 {
 				m.model.SelectedMessage = 0
@@ -226,7 +242,7 @@ func (m *TimelineModel) onKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			m.renderMessages()
 		}
 		return nil, true
-	case "alt+c":
+	case keyAltC:
 		if text, ok := m.model.SelectedText(); ok {
 			return copySelection(text), true
 		}

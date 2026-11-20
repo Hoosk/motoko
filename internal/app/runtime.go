@@ -589,14 +589,8 @@ func (r *Runtime) ReplaceTrailingMention(input, mention string) string {
 	if idx == -1 {
 		return input
 	}
-	replacement := mention
-	if strings.HasPrefix(mention, "@") && r.isAgentMention(mention) {
-		replacement += " "
-	}
-	if strings.HasPrefix(mention, "@") && !r.isAgentMention(mention) {
-		replacement += " "
-	}
-	return input[:idx] + replacement
+	// The trailing space completes the mention so the dropdown closes.
+	return input[:idx] + mention + " "
 }
 
 func (r *Runtime) isAgentMention(mention string) bool {

@@ -131,14 +131,14 @@ func commandPaletteItems(ctx paletteContext) []FilterableItem {
 func actionPaletteItems(ctx paletteContext) []FilterableItem {
 	var items []FilterableItem
 	if ctx.Thinking {
-		items = append(items, newPaletteItem("Actions", "Cancel current request", "Stop the active agent response", "", false, "cancel-request", "cancel stop request thinking"))
+		items = append(items, newPaletteItem("Actions", "Cancel current request", "Stop the active agent response", "", false, keyCancelRequest, "cancel stop request thinking"))
 	}
 	if ctx.QueueLen > 0 {
-		items = append(items, newPaletteItem("Actions", fmt.Sprintf("Manage queue (%d prompts)", ctx.QueueLen), "Open queue focus mode", "", false, "ctrl+q", "queue manage queued prompts"))
+		items = append(items, newPaletteItem("Actions", fmt.Sprintf("Manage queue (%d prompts)", ctx.QueueLen), "Open queue focus mode", "", false, keyCtrlQ, "queue manage queued prompts"))
 	}
 	items = append(items,
-		newPaletteItem("Actions", "Toggle reasoning", "Show or hide reasoning output", "", false, "ctrl+r", "reasoning thinking toggle"),
-		newPaletteItem("Actions", "Toggle sidebar", "Show or hide the context sidebar", "", false, "ctrl+s", "sidebar toggle context"),
+		newPaletteItem("Actions", "Toggle reasoning", "Show or hide reasoning output", "", false, keyCtrlR, "reasoning thinking toggle"),
+		newPaletteItem("Actions", "Toggle sidebar", "Show or hide the context sidebar", "", false, keyCtrlS, "sidebar toggle context"),
 	)
 	return items
 }
@@ -228,11 +228,11 @@ func commandDefinitionItems(defs []commands.Definition) []FilterableItem {
 
 func shortcutPaletteItems() []FilterableItem {
 	shortcuts := []paletteItem{
-		{category: categoryShortcuts, title: "Ctrl+M", summary: "Open model selector", shortcut: keyCtrlM, searchKey: "ctrl+m models model selector"},
+		{category: categoryShortcuts, title: "Ctrl+L", summary: "Open model selector", shortcut: keyCtrlL, searchKey: "ctrl+l models model selector"},
 		{category: categoryShortcuts, title: "Ctrl+P", summary: "Open provider form", shortcut: keyCtrlP, searchKey: "ctrl+p provider form"},
 		{category: categoryShortcuts, title: "Ctrl+O", summary: "Open session picker", shortcut: keyCtrlO, searchKey: "ctrl+o sessions"},
 		{category: categoryShortcuts, title: "Ctrl+A", summary: "Open agent mode selector", shortcut: keyCtrlA, searchKey: "ctrl+a agent mode"},
-		{category: categoryShortcuts, title: "Ctrl+H", summary: "Open help overlay", shortcut: keyCtrlH, searchKey: "ctrl+h help"},
+		{category: categoryShortcuts, title: "Ctrl+G / F1", summary: "Open help overlay", shortcut: keyCtrlG, searchKey: "ctrl+g f1 help"},
 		{category: categoryShortcuts, title: "Ctrl+T", summary: "Open tool catalog", shortcut: keyCtrlT, searchKey: "ctrl+t tools"},
 	}
 	items := make([]FilterableItem, 0, len(shortcuts))

@@ -140,7 +140,7 @@ func (fl *FilterList) Update(msg tea.Msg) (FilterableItem, bool, bool) {
 
 		case keyBackspace:
 			if len(fl.SearchQuery) > 0 {
-				fl.Filter(fl.SearchQuery[:len(fl.SearchQuery)-1])
+				fl.Filter(trimLastRune(fl.SearchQuery))
 			}
 			return nil, false, false
 

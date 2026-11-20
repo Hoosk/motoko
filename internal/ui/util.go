@@ -27,14 +27,27 @@ const (
 	keyDown  = "down"
 	keyRight = "right"
 
-	keyBackspace      = "backspace"
-	keyLeft           = "left"
-	keyShiftTab       = "shift+tab"
-	keyCtrlM          = "ctrl+m"
-	keyCtrlO          = "ctrl+o"
-	keyCtrlA          = "ctrl+a"
-	keyCtrlH          = "ctrl+h"
-	keyCtrlT          = "ctrl+t"
+	keyBackspace = "backspace"
+	keyLeft      = "left"
+	keyShiftTab  = "shift+tab"
+	keyCtrlO     = "ctrl+o"
+	keyCtrlA     = "ctrl+a"
+	keyCtrlT     = "ctrl+t"
+	keyCtrlK     = "ctrl+k"
+	keyCtrlQ     = "ctrl+q"
+	keyCtrlR     = "ctrl+r"
+	keyCtrlS     = "ctrl+s"
+	keyAltS      = "alt+s"
+	keyF1        = "f1"
+	keyAltUp     = "alt+up"
+	keyAltDown   = "alt+down"
+	keyAltC      = "alt+c"
+	// Ctrl+M and Ctrl+H cannot be told apart from Enter and (on many
+	// terminals) Backspace, so the model selector and help use these.
+	keyCtrlL = "ctrl+l"
+	keyCtrlG = "ctrl+g"
+	// keyCancelRequest is a palette-only pseudo shortcut.
+	keyCancelRequest  = "cancel-request"
 	modePlan          = "plan"
 	categoryShortcuts = "Shortcuts"
 	assistantDelta    = "assistant_delta"
@@ -331,12 +344,15 @@ func stripANSI(value string) string {
 	return ansiPattern.ReplaceAllString(value, "")
 }
 
+// truncate shortens s to maxLen terminal columns, ending in "…". It measures
+// display width and never cuts through a multi-byte character or an ANSI
+// escape sequence, so it is safe on styled text.
 func truncate(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return ""
 	}
-	if len(s) <= maxLen {
+	if lipgloss.Width(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	return truncateANSI(s, maxLen-1) + "…"
 }
