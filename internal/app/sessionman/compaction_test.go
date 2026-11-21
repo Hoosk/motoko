@@ -246,3 +246,10 @@ func TestDoCompactDoesNotSplitToolPairs(t *testing.T) {
 		}
 	}
 }
+
+func TestMessageCharsCountsToolCallArguments(t *testing.T) {
+	msg := provider.AssistantTurn("", "", []provider.ToolInvocation{{Name: "write", Arguments: []byte(strings.Repeat("x", 1000))}})
+	if got := messageChars(msg); got < 1000 {
+		t.Fatalf("messageChars = %d, want >= 1000", got)
+	}
+}

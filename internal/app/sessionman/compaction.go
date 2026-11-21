@@ -11,6 +11,16 @@ import (
 	"github.com/Hoosk/motoko/internal/system"
 )
 
+// messageChars estimates the size of a history item, including tool call
+// names and arguments.
+func messageChars(msg provider.ConversationItem) int {
+	n := len(msg.Content)
+	for _, call := range msg.ToolCalls {
+		n += len(call.Name) + len(call.Input) + len(call.Arguments)
+	}
+	return n
+}
+
 // safeSplitIndex moves split earlier until history[:split] has every tool call
 // answered and history[split:] does not start with a tool result.
 func safeSplitIndex(history []provider.ConversationItem, split int) int {
@@ -61,7 +71,7 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 
 	for i := len(m.currentSession.History) - 1; i >= 0; i-- {
 		msg := m.currentSession.History[i]
-		currentChars += len(msg.Content)
+		currentChars += messageChars(msg)
 		if currentChars > charBudget {
 			break
 		}
