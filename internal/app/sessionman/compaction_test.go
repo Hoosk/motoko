@@ -188,3 +188,61 @@ func TestDoCompactWritesBrainAfterSuccessfulSave(t *testing.T) {
 		t.Fatalf("expected LastInputTokens reset, got %d", s.LastInputTokens)
 	}
 }
+
+type captureCompactClient struct {
+	fakeCompactClient
+	got []provider.ConversationItem
+}
+
+func (c *captureCompactClient) Complete(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, toolSet provider.ToolSet) (provider.Response, error) {
+	c.got = messages
+	return provider.Response{FinalText: "resumen"}, nil
+}
+
+func toolPairHistory() []provider.ConversationItem {
+	calls := []provider.ToolInvocation{{Name: "a", CallID: "1"}, {Name: "b", CallID: "2"}, {Name: "c", CallID: "3"}}
+	h := []provider.ConversationItem{
+		provider.UserText(strings.Repeat("U", 100)),
+		provider.AssistantTurn("", "", calls),
+	}
+	for _, c := range calls {
+		h = append(h, provider.ToolResultForInvocation(c, strings.Repeat("R", 100)))
+	}
+	return h
+}
+
+func TestSafeSplitIndexKeepsToolPairsTogether(t *testing.T) {
+	h := toolPairHistory() // U, A(x3), T1, T2, T3
+	for split, want := range map[int]int{5: 5, 4: 1, 3: 1, 2: 1, 1: 1} {
+		if got := safeSplitIndex(h, split); got != want {
+			t.Errorf("safeSplitIndex(%d) = %d, want %d", split, got, want)
+		}
+	}
+	if got := safeSplitIndex(h[1:], 1); got != 0 {
+		t.Errorf("expected 0 when no safe boundary, got %d", got)
+	}
+}
+
+func TestDoCompactDoesNotSplitToolPairs(t *testing.T) {
+	withSessionBaseDirSessionman(t)
+	m := NewManager("ws")
+	s := session.New("ws", "/workspace")
+	m.SetCurrentSession(s)
+	h := toolPairHistory()
+	h[2].Content = strings.Repeat("R", 40000)
+	h[3].Content = strings.Repeat("R", 40000)
+	h[4].Content = strings.Repeat("R", 40000)
+	s.History = append(h, provider.AssistantText("done"))
+	cl := &captureCompactClient{}
+	if err := m.doCompact(context.Background(), compactTestConfig(), compactTestProviderFn(t, cl), 100000); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.History) > 1 && s.History[1].Role == provider.RoleTool {
+		t.Fatalf("history starts with orphan tool result after summary: %+v", s.History)
+	}
+	for _, msg := range cl.got {
+		if len(msg.ToolCalls) > 0 {
+			t.Fatalf("summarised part must not contain unanswered tool calls")
+		}
+	}
+}

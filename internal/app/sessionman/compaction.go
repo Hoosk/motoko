@@ -11,6 +11,33 @@ import (
 	"github.com/Hoosk/motoko/internal/system"
 )
 
+// safeSplitIndex moves split earlier until history[:split] has every tool call
+// answered and history[split:] does not start with a tool result.
+func safeSplitIndex(history []provider.ConversationItem, split int) int {
+	if split > len(history) {
+		split = len(history)
+	}
+	pending := 0
+	for _, msg := range history[:split] {
+		pending += len(msg.ToolCalls)
+		if msg.Role == provider.RoleTool {
+			pending--
+		}
+	}
+	for split > 0 {
+		if pending <= 0 && (split == len(history) || history[split].Role != provider.RoleTool) {
+			return split
+		}
+		split--
+		msg := history[split]
+		pending -= len(msg.ToolCalls)
+		if msg.Role == provider.RoleTool {
+			pending++
+		}
+	}
+	return 0
+}
+
 func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, providerFn func(config.ProviderConfig) (provider.Client, error), cw int) error {
 	if m.currentSession == nil || len(m.currentSession.History) == 0 {
 		return nil
@@ -41,6 +68,7 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 		splitIdx = i
 	}
 
+	splitIdx = safeSplitIndex(m.currentSession.History, splitIdx)
 	if splitIdx <= 0 {
 		return nil
 	}
