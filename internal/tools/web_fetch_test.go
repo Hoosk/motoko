@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWebFetchToolRun(t *testing.T) {
@@ -66,5 +67,47 @@ func TestWebFetchToolRunInvalidURL(t *testing.T) {
 	_, err := tool.Run(context.Background(), `{"url":"   "}`)
 	if err == nil {
 		t.Fatal("expected error on empty URL")
+	}
+}
+
+func TestStripBlockTagInvalidUTF8DoesNotPanic(t *testing.T) {
+	in := strings.Repeat("\xe9", 20) + "<script>x</script>after"
+	got := stripBlockTag(in, "script")
+	want := strings.Repeat("\xe9", 20) + " after"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestStripBlockTagLatin1KeepsContent(t *testing.T) {
+	in := "caf\xe9 \xe9\xe9\xe9 <style>p{}</style><p>ok</p>"
+	got := stripBlockTag(in, "style")
+	want := "caf\xe9 \xe9\xe9\xe9  <p>ok</p>"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestStripBlockTagKelvinSignBeforeTag(t *testing.T) {
+	in := strings.Repeat("\u212a", 5) + "<SCRIPT>secret()</SCRIPT>tail"
+	got := stripBlockTag(in, "script")
+	if strings.Contains(got, "secret") {
+		t.Fatalf("script body leaked: %q", got)
+	}
+	if got != strings.Repeat("\u212a", 5)+" tail" {
+		t.Fatalf("unexpected output %q", got)
+	}
+}
+
+func TestStripBlockTagManyTagsIsFast(t *testing.T) {
+	for _, in := range []string{
+		strings.Repeat("<script></script>", 20000) + strings.Repeat("x", 2<<20),
+		strings.Repeat("<script>", 20000) + strings.Repeat("x", 2<<20),
+	} {
+		start := time.Now()
+		_ = stripBlockTag(in, "script")
+		if d := time.Since(start); d > 3*time.Second {
+			t.Fatalf("stripBlockTag too slow: %v", d)
+		}
 	}
 }

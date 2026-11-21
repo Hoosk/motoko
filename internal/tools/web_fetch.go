@@ -175,34 +175,67 @@ func cleanHTML(html string, baseURL *url.URL) string {
 	return strings.Join(cleanedLines, "\n")
 }
 
+// indexFold returns the index of the first occurrence of substr (which must be
+// lowercase ASCII) in s, comparing ASCII letters case-insensitively. Unlike
+// strings.ToLower, it never changes byte offsets, so indices are valid in s.
+func indexFold(s, substr string) int {
+	n := len(substr)
+	for i := 0; i+n <= len(s); i++ {
+		j := 0
+		for ; j < n; j++ {
+			c := s[i+j]
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != substr[j] {
+				break
+			}
+		}
+		if j == n {
+			return i
+		}
+	}
+	return -1
+}
+
 func stripBlockTag(html string, tag string) string {
 	startTag := "<" + tag
 	endTag := "</" + tag + ">"
 
-	current := html
+	var out strings.Builder
+	pos := 0
+	noEnd := false
 	for {
-		lower := strings.ToLower(current)
-		startIdx := strings.Index(lower, startTag)
-		if startIdx == -1 {
+		rel := indexFold(html[pos:], startTag)
+		if rel == -1 {
 			break
 		}
+		startIdx := pos + rel
 
-		tagCloseIdx := strings.Index(current[startIdx:], ">")
-		if tagCloseIdx == -1 {
+		closeRel := strings.IndexByte(html[startIdx:], '>')
+		if closeRel == -1 {
 			break
 		}
-		tagCloseIdx += startIdx
+		tagCloseIdx := startIdx + closeRel
 
-		endIdx := strings.Index(lower[tagCloseIdx:], endTag)
-		if endIdx == -1 {
-			current = current[:startIdx] + current[tagCloseIdx+1:]
+		endRel := -1
+		if !noEnd {
+			endRel = indexFold(html[tagCloseIdx:], endTag)
+			// No closing tag after this point means none after any later one.
+			noEnd = endRel == -1
+		}
+		if endRel == -1 {
+			out.WriteString(html[pos:startIdx])
+			pos = tagCloseIdx + 1
 			continue
 		}
-		endIdx += tagCloseIdx
 
-		current = current[:startIdx] + " " + current[endIdx+len(endTag):]
+		out.WriteString(html[pos:startIdx])
+		out.WriteByte(' ')
+		pos = tagCloseIdx + endRel + len(endTag)
 	}
-	return current
+	out.WriteString(html[pos:])
+	return out.String()
 }
 
 func collapseSpaces(s string) string {
