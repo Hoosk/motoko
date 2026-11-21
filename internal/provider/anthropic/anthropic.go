@@ -26,6 +26,9 @@ const (
 	// maxNonStreamingTokens is the largest max_tokens the SDK allows without
 	// streaming: 1h * max_tokens / 128000 must not exceed 10 minutes.
 	maxNonStreamingTokens = 21333
+	// maxStreamingTokens caps max_tokens for streaming requests, whatever
+	// output limit the model advertises (some report 128K).
+	maxStreamingTokens = 64000
 )
 
 func init() {
@@ -93,26 +96,32 @@ func (c *anthropicClient) loadModelCapabilities(ctx context.Context) (adaptive b
 }
 
 // resolveMaxOutputTokens returns the max_tokens to request and whether it is
-// the model's known output limit. Order: the models API, the models catalog,
+// the model's known output limit, capped at maxStreamingTokens. Order: the models API, the models catalog,
 // then defaultMaxOutputTokens.
 func (c *anthropicClient) resolveMaxOutputTokens(ctx context.Context) (int, bool) {
 	if _, n := c.loadModelCapabilities(ctx); n > 0 {
-		return n, true
+		return min(n, maxStreamingTokens), true
 	}
 	if info, ok := provider.LookupModel("anthropic", c.Model()); ok && info.MaxOutputTokens > 0 {
-		return info.MaxOutputTokens, true
+		return min(info.MaxOutputTokens, maxStreamingTokens), true
 	}
 	return defaultMaxOutputTokens, false
+}
+
+// nonStreamingLimit is the largest max_tokens accepted without streaming.
+func nonStreamingLimit(model string) int {
+	limit := maxNonStreamingTokens
+	if modelLimit, ok := constant.ModelNonStreamingTokens[model]; ok && modelLimit < limit {
+		limit = modelLimit
+	}
+	return limit
 }
 
 // capNonStreaming limits max_tokens so the SDK's non-streaming guard
 // (CalculateNonStreamingTimeout) accepts the request, keeping an enabled
 // thinking budget below the reduced cap.
 func capNonStreaming(params *sdk.MessageNewParams) {
-	limit := maxNonStreamingTokens
-	if modelLimit, ok := constant.ModelNonStreamingTokens[string(params.Model)]; ok && modelLimit < limit {
-		limit = modelLimit
-	}
+	limit := nonStreamingLimit(string(params.Model))
 	if params.MaxTokens > int64(limit) {
 		params.MaxTokens = int64(limit)
 	}
@@ -249,10 +258,12 @@ func (c *anthropicClient) GetModel(ctx context.Context, model string) (provider.
 // CreateBatch implements BatchClient
 func (c *anthropicClient) CreateBatch(ctx context.Context, requests []provider.BatchRequestItem) (provider.BatchResponse, error) {
 	sdkReqs := make([]sdk.BetaMessageBatchNewParamsRequest, 0, len(requests))
+	maxTokens, _ := c.resolveMaxOutputTokens(ctx)
+	maxTokens = min(maxTokens, nonStreamingLimit(c.Model()))
 	for _, req := range requests {
 		params := sdk.BetaMessageBatchNewParamsRequestParams{
 			Model:     sdk.Model(c.Model()),
-			MaxTokens: 4096,
+			MaxTokens: int64(maxTokens),
 			System:    buildAnthropicBetaSystemBlocks(req.SystemPrompt),
 			Messages:  toSDKBetaMessages(req.Messages),
 		}

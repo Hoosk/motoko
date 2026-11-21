@@ -277,3 +277,39 @@ func TestResponseFromSDKCountsCachedTokensInInput(t *testing.T) {
 		t.Fatalf("unexpected usage: %#v", u)
 	}
 }
+
+func TestBuildMessageParamsCapsStreamingMaxTokens(t *testing.T) {
+	c := newLimitsTestClient(t, 100000, modelJSON(128000, false), noHandler, nil)
+	params, _ := c.buildMessageParams(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{})
+	if params.MaxTokens != maxStreamingTokens {
+		t.Fatalf("expected max_tokens capped at %d, got %d", maxStreamingTokens, params.MaxTokens)
+	}
+	if params.Thinking.OfEnabled == nil || params.Thinking.OfEnabled.BudgetTokens >= params.MaxTokens {
+		t.Fatalf("thinking budget must stay below the capped max_tokens, got %#v", params.Thinking.OfEnabled)
+	}
+}
+
+func TestCreateBatchUsesResolvedMaxTokensCappedNonStreaming(t *testing.T) {
+	var bodies []string
+	handler := func() (string, string) {
+		return "application/json", `{"id":"b1","type":"message_batch","processing_status":"in_progress"}`
+	}
+	items := []provider.BatchRequestItem{{CustomID: "a", Messages: []provider.ConversationItem{provider.UserText("hi")}}}
+	c := newLimitsTestClient(t, 0, modelJSON(128000, true), handler, &bodies)
+	if _, err := c.CreateBatch(context.Background(), items); err != nil {
+		t.Fatal(err)
+	}
+	want := `"max_tokens":` + itoa(maxNonStreamingTokens)
+	if len(bodies) != 1 || !strings.Contains(bodies[0], want) {
+		t.Fatalf("expected %s in batch body, got %v", want, bodies)
+	}
+
+	bodies = nil
+	c = newLimitsTestClient(t, 0, modelJSON(8192, true), handler, &bodies)
+	if _, err := c.CreateBatch(context.Background(), items); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"max_tokens":8192`) {
+		t.Fatalf("expected max_tokens 8192 in batch body, got %v", bodies)
+	}
+}
