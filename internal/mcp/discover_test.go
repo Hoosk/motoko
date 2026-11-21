@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -501,4 +502,87 @@ func TestMRTRExceedsIterations(t *testing.T) {
 		t.Errorf("expected budget error, got %v", err)
 	}
 	_ = client.Close()
+}
+
+// serveLegacyNegotiation answers server/discover with probeCode and
+// initialize with a classic result, or with an error when initOK is false.
+func serveLegacyNegotiation(serverReader io.Reader, serverWriter io.WriteCloser, probeCode int, initOK bool) {
+	defer serverWriter.Close()
+	br := bufio.NewReader(serverReader)
+	for {
+		line, err := br.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+		var env RPCEnvelope
+		if err := json.Unmarshal(trimNewline(line), &env); err != nil || !env.IsRequest() {
+			continue
+		}
+		switch {
+		case env.Method == "server/discover":
+			writeRaw(serverWriter, env, nil, &RPCError{Code: probeCode, Message: "probe rejected"})
+		case env.Method == "initialize" && initOK:
+			writeRaw(serverWriter, env, InitializeResult{
+				ProtocolVersion: ProtocolVersion,
+				ServerInfo:      Implementation{Name: "legacy", Version: "1"},
+			}, nil)
+		default:
+			writeRaw(serverWriter, env, nil, &RPCError{Code: ErrCodeInternalError, Message: "init rejected"})
+		}
+	}
+}
+
+func TestNegotiateFallsBackOnAnyProbeError(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	_, client, cancel := newPipeClientTransport(t, serverWriter, clientWriter, clientReader)
+	defer cancel()
+	defer closeClient(client)
+	go serveLegacyNegotiation(serverReader, serverWriter, ErrCodeInvalidParams, true)
+
+	if err := client.Negotiate(context.Background()); err != nil {
+		t.Fatalf("negotiate: %v", err)
+	}
+	if got := client.NegotiatedProtocol(); got != ProtocolVersion {
+		t.Errorf("expected legacy %s, got %q", ProtocolVersion, got)
+	}
+}
+
+func TestNegotiateReportsBothFailures(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	_, client, cancel := newPipeClientTransport(t, serverWriter, clientWriter, clientReader)
+	defer cancel()
+	defer closeClient(client)
+	go serveLegacyNegotiation(serverReader, serverWriter, ErrCodeInvalidParams, false)
+
+	err := client.Negotiate(context.Background())
+	if err == nil {
+		t.Fatal("expected negotiate error")
+	}
+	for _, want := range []string{"probe rejected", "init rejected"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestNegotiateDoesNotFallBackOnCancel(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	_, client, cancel := newPipeClientTransport(t, serverWriter, clientWriter, clientReader)
+	defer cancel()
+	defer closeClient(client)
+	defer serverWriter.Close()                               // lets the client read loop see EOF before closeClient
+	go func() { _, _ = io.Copy(io.Discard, serverReader) }() // never answers
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer ctxCancel()
+	err := client.Negotiate(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "initialize") {
+		t.Errorf("unexpected initialize fallback: %v", err)
+	}
 }

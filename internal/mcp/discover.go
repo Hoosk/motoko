@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -51,28 +52,16 @@ const (
 	metaClientCapabilities = "io.modelcontextprotocol/clientCapabilities"
 )
 
-// isUnsupportedProtocolVersion reports whether an RPC error signals that the
-// server does not understand the requested protocol version (either the
-// classic MethodNotFound from a legacy server probing server/discover, or
-// the dedicated error code used by 2026-07-28 servers).
-func isUnsupportedProtocolVersion(err error) bool {
-	if err == nil {
-		return false
-	}
-	if rpcErr, ok := err.(*RPCError); ok {
-		return rpcErr.Code == ErrCodeMethodNotFound
-	}
-	return false
-}
-
 // Negotiate performs protocol negotiation for a fresh connection:
 //
 //  1. Try `server/discover`. A modern server answers with its supported
 //     protocol versions; we pick the highest mutual version and record the
 //     server identity + capabilities.
-//  2. If discover is not understood (MethodNotFound, transport failure,
-//     malformed result), fall back to the classic `initialize` handshake
-//     used by protocol revisions up to 2025-11-25.
+//  2. If the probe fails for any reason other than context cancellation or
+//     deadline (MethodNotFound, InvalidParams, another RPC error, an HTTP
+//     error, transport failure), fall back to the classic `initialize`
+//     handshake used by protocol revisions up to 2025-11-25. If that fails
+//     too, the returned error mentions both failures.
 //
 // After Negotiate returns, callers can query NegotiatedProtocol to learn
 // which mode the connection is running in.
@@ -100,17 +89,18 @@ func (c *Client) Negotiate(ctx context.Context) error {
 		}
 		return nil
 
-	case isUnsupportedProtocolVersion(err):
-		// Legacy server: it does not know server/discover. Fall through to
-		// the classic handshake.
-		tracelog.Logf("MCP: server/discover not supported, falling back to initialize (%v)", err)
-		_, initErr := c.Initialize(ctx)
-		return initErr
+	case ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("mcp: server/discover probe failed: %w", err)
 
 	default:
-		// Transport-level or malformed-response errors are not a version
-		// problem; surface them so the manager can retry with backoff.
-		return fmt.Errorf("mcp: server/discover probe failed: %w", err)
+		// Legacy servers reject the unknown pre-initialize method in many
+		// ways (-32601, -32602, other RPC errors, HTTP 400). Try the classic
+		// handshake instead of giving up.
+		tracelog.Logf("MCP: server/discover probe failed, falling back to initialize (%v)", err)
+		if _, initErr := c.Initialize(ctx); initErr != nil {
+			return fmt.Errorf("mcp: server/discover probe failed: %v; initialize fallback failed: %w", err, initErr)
+		}
+		return nil
 	}
 }
 
