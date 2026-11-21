@@ -311,6 +311,7 @@ func (m *TimelineModel) resetMessages() {
 	m.model.Entries = nil
 	m.model.SelectedMessage = -1
 	m.model.AutoScroll = true
+	m.model.CancelSelection()
 	if m.model.Viewport.Width > 0 {
 		m.renderMessages()
 	}

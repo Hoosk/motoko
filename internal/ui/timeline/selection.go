@@ -94,8 +94,11 @@ func (m *Model) SelectedText() (string, bool) {
 	if !ok {
 		return "", false
 	}
+	if start.Line < 0 || start.Line >= len(m.RenderLines) {
+		return "", false
+	}
 	var parts []string
-	for lineIdx := start.Line; lineIdx <= end.Line; lineIdx++ {
+	for lineIdx := start.Line; lineIdx <= end.Line && lineIdx < len(m.RenderLines); lineIdx++ {
 		line := m.RenderLines[lineIdx]
 		if !line.Selectable {
 			continue

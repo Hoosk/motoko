@@ -506,6 +506,24 @@ func TestAgentResultErrorDoesNotRetryGoal(t *testing.T) {
 	}
 }
 
+func TestResetMessagesClearsSelection(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.width = 80
+	m.height = 24
+	m.SyncLayout()
+	m.timeline.model.SelectionAnchor = timeline.TextPos{Line: 200}
+	m.timeline.model.SelectionFocus = timeline.TextPos{Line: 213, Column: 4}
+
+	m.timeline.resetMessages()
+
+	if m.timeline.model.HasSelectionRange() {
+		t.Fatal("expected selection to be cleared on reset")
+	}
+	if _, ok := m.timeline.model.SelectedText(); ok {
+		t.Fatal("expected no selected text after reset")
+	}
+}
+
 func TestModelMouseDragSelectionCopiesText(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 80

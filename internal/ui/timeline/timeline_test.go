@@ -93,6 +93,20 @@ func TestRenderAssistantMarkdownAlwaysInterpretsCommonSyntax(t *testing.T) {
 	}
 }
 
+func TestSelectedTextIgnoresStaleSelection(t *testing.T) {
+	m := New(80, 10)
+	m.AppendRenderedBlock("a", []RenderLine{{Plain: "a", Content: "a", Selectable: true}}, false)
+	m.SelectionAnchor = TextPos{Line: 200}
+	m.SelectionFocus = TextPos{Line: 213, Column: 3}
+	if _, ok := m.SelectedText(); ok {
+		t.Fatal("expected stale selection to yield no text")
+	}
+	m.SelectionAnchor = TextPos{Line: 0}
+	if text, ok := m.SelectedText(); !ok || text != "a" {
+		t.Fatalf("expected clamped selection to yield %q, got %q ok=%v", "a", text, ok)
+	}
+}
+
 func TestAppendRenderedBlockPreservesEmptySelectableContent(t *testing.T) {
 	m := New(80, 10)
 	m.AppendRenderedBlock("\x1b[1m▎ \x1b[0m", []RenderLine{{
