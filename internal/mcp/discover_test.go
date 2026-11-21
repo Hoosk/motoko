@@ -586,3 +586,82 @@ func TestNegotiateDoesNotFallBackOnCancel(t *testing.T) {
 		t.Errorf("unexpected initialize fallback: %v", err)
 	}
 }
+
+// TestMRTRKeepsOriginalParamsOnEveryRound verifies that every retry, not only
+// the first, carries the original request params.
+func TestMRTRKeepsOriginalParamsOnEveryRound(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var (
+		mu    sync.Mutex
+		names []string
+	)
+	go func() {
+		defer serverWriter.Close()
+		br := bufio.NewReader(serverReader)
+		calls := 0
+		for {
+			line, err := br.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			var env RPCEnvelope
+			if err := json.Unmarshal(trimNewline(line), &env); err != nil || !env.IsRequest() {
+				continue
+			}
+			switch env.Method {
+			case "server/discover":
+				writeRaw(serverWriter, env, DiscoverResult{ProtocolVersions: []string{ProtocolVersionModern}}, nil)
+			case "tools/call":
+				var p struct {
+					Name string `json:"name"`
+				}
+				_ = json.Unmarshal(env.Params, &p)
+				mu.Lock()
+				names = append(names, p.Name)
+				calls++
+				n := calls
+				mu.Unlock()
+				if n < 3 {
+					writeRaw(serverWriter, env, map[string]any{"resultType": "input_required", "requestState": fmt.Sprintf("s%d", n)}, nil)
+					continue
+				}
+				writeRaw(serverWriter, env, map[string]any{"resultType": "complete", "content": []map[string]any{{"type": "text", "text": "done"}}}, nil)
+			default:
+				writeRaw(serverWriter, env, nil, &RPCError{Code: ErrCodeMethodNotFound, Message: "no"})
+			}
+		}
+	}()
+
+	transport := newPipeTransport(bufio.NewReader(clientReader), clientWriter, clientWriter)
+	client := NewClient(ClientConfig{
+		Transport:  transport,
+		ClientInfo: Implementation{Name: "t"},
+		OnInputRequests: func(_ context.Context, _ map[string]InputRequest) (map[string]json.RawMessage, error) {
+			return nil, nil
+		},
+	})
+	client.Start(ctx)
+	defer client.Close()
+
+	if err := client.Negotiate(ctx); err != nil {
+		t.Fatalf("negotiate: %v", err)
+	}
+	if err := client.Request(ctx, "tools/call", CallToolParams{Name: "gh", Arguments: json.RawMessage(`{}`)}, nil); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(names) != 3 {
+		t.Fatalf("expected 3 tools/call requests, got %v", names)
+	}
+	for i, n := range names {
+		if n != "gh" {
+			t.Errorf("request %d lost its name param: %q", i, n)
+		}
+	}
+}

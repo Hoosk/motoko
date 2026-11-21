@@ -304,9 +304,8 @@ func (c *Client) Request(ctx context.Context, method string, params, out any) er
 // between round trips, up to maxMRTRIterations.
 func (c *Client) mrtrLoop(ctx context.Context, method string, originalParams json.RawMessage, first InputRequiredResult) (json.RawMessage, error) {
 	current := first
-	params := originalParams
 	for i := 0; i < maxMRTRIterations; i++ {
-		final, err := c.handleInputRequired(ctx, method, params, current)
+		final, err := c.handleInputRequired(ctx, method, originalParams, current)
 		if err != nil {
 			return nil, err
 		}
@@ -318,7 +317,6 @@ func (c *Client) mrtrLoop(ctx context.Context, method string, originalParams jso
 			return nil, fmt.Errorf("mcp: decode input_required result for %s: %w", method, err)
 		}
 		current = next
-		params = nil // the retry already carried inputResponses/requestState
 	}
 	return nil, fmt.Errorf("mcp: request %q exceeded %d MRTR round trips", method, maxMRTRIterations)
 }
