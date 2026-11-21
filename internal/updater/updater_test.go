@@ -221,3 +221,36 @@ func TestCheckVersion(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckVersionStableIgnoresMislabeledPrerelease(t *testing.T) {
+	// An alpha tag published with the GitHub prerelease flag unset must not be offered on stable.
+	mockReleases := []githubRelease{
+		{
+			TagName:    "v0.2.0-alpha",
+			Prerelease: false,
+			Assets: []struct {
+				Name               string `json:"name"`
+				BrowserDownloadURL string `json:"browser_download_url"`
+			}{
+				{Name: "motoko_linux_amd64.tar.gz", BrowserDownloadURL: "https://example.com/motoko_linux_amd64.tar.gz"},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockReleases)
+	}))
+	defer server.Close()
+
+	upd := NewUpdater(Config{CurrentVersion: "v0.1.8", GOOS: "linux", GOARCH: "amd64"})
+	upd.releasesURL = server.URL
+
+	info, err := upd.CheckVersion(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.IsNewer {
+		t.Errorf("stable channel offered prerelease tag %q", info.NewVersion)
+	}
+}

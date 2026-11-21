@@ -61,7 +61,9 @@ func (u *Updater) CheckVersion(ctx context.Context) (*VersionInfo, error) {
 
 	for _, rel := range releases {
 		// Filter by channel. Stable channel ignores prereleases.
-		if u.channel == "stable" && rel.Prerelease {
+		// The GitHub flag is not trusted alone: some alpha tags were published
+		// as normal releases, so a prerelease tag component also counts.
+		if u.channel == "stable" && (rel.Prerelease || hasPrereleaseTag(rel.TagName)) {
 			continue
 		}
 
@@ -102,4 +104,10 @@ func (u *Updater) CheckVersion(ctx context.Context) (*VersionInfo, error) {
 		CurrentVersion: u.currentVersion,
 		IsNewer:        false,
 	}, nil
+}
+
+// hasPrereleaseTag reports whether the tag parses as a version with a prerelease component.
+func hasPrereleaseTag(tag string) bool {
+	_, _, _, pre, err := ParseVersion(tag)
+	return err == nil && pre != ""
 }
