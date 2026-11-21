@@ -637,16 +637,32 @@ func responseFromSDK(decoded *sdk.Message) (provider.Response, error) {
 	}
 
 	finalText := strings.TrimSpace(strings.Join(textParts, "\n"))
-	usage := provider.Usage{
-		InputTokens:           int(decoded.Usage.InputTokens),
-		OutputTokens:          int(decoded.Usage.OutputTokens),
-		TotalTokens:           int(decoded.Usage.InputTokens + decoded.Usage.OutputTokens),
-		ReasoningTokens:       int(decoded.Usage.OutputTokensDetails.ThinkingTokens),
-		CacheReadInputTokens:  int(decoded.Usage.CacheReadInputTokens),
-		CacheWriteInputTokens: int(decoded.Usage.CacheCreationInputTokens),
-	}
+	usage := anthropicUsage(
+		int(decoded.Usage.InputTokens),
+		int(decoded.Usage.OutputTokens),
+		int(decoded.Usage.OutputTokensDetails.ThinkingTokens),
+		int(decoded.Usage.CacheReadInputTokens),
+		int(decoded.Usage.CacheCreationInputTokens),
+	)
 
 	return provider.FinalizeResponse(finalText, "", pendingCalls, usage), nil
+}
+
+// anthropicUsage builds a provider.Usage whose InputTokens is the full prompt
+// size. Anthropic reports input_tokens as only the uncached remainder, so the
+// cache read/write counts are added back, matching the inclusive InputTokens
+// that the OpenAI and Gemini providers report. The cache counts stay populated
+// as a breakdown of InputTokens.
+func anthropicUsage(uncachedInput, output, reasoning, cacheRead, cacheWrite int) provider.Usage {
+	input := uncachedInput + cacheRead + cacheWrite
+	return provider.Usage{
+		InputTokens:           input,
+		OutputTokens:          output,
+		TotalTokens:           input + output,
+		ReasoningTokens:       reasoning,
+		CacheReadInputTokens:  cacheRead,
+		CacheWriteInputTokens: cacheWrite,
+	}
 }
 
 // checkTruncatedToolCalls fails when the model hit max_tokens while a tool call

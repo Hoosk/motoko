@@ -20,7 +20,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	defer func() { _ = stream.Close() }()
 
 	var raw strings.Builder
-	usage := provider.Usage{}
+	var uncachedInput, cacheRead, cacheWrite, outputTokens, reasoningTokens int
 	var stopReason sdk.StopReason
 
 	type streamedToolCall struct {
@@ -35,9 +35,9 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		switch event.Type {
 		case "message_start":
 			msgEvent := event.AsMessageStart()
-			usage.InputTokens = int(msgEvent.Message.Usage.InputTokens)
-			usage.CacheReadInputTokens = int(msgEvent.Message.Usage.CacheReadInputTokens)
-			usage.CacheWriteInputTokens = int(msgEvent.Message.Usage.CacheCreationInputTokens)
+			uncachedInput = int(msgEvent.Message.Usage.InputTokens)
+			cacheRead = int(msgEvent.Message.Usage.CacheReadInputTokens)
+			cacheWrite = int(msgEvent.Message.Usage.CacheCreationInputTokens)
 
 		case "content_block_start":
 			blockEvent := event.AsContentBlockStart()
@@ -80,11 +80,16 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 				stopReason = msgDelta.Delta.StopReason
 			}
 			if msgDelta.Usage.OutputTokens > 0 {
-				usage.OutputTokens = int(msgDelta.Usage.OutputTokens)
-				usage.ReasoningTokens = int(msgDelta.Usage.OutputTokensDetails.ThinkingTokens)
-				usage.CacheReadInputTokens = int(msgDelta.Usage.CacheReadInputTokens)
-				usage.CacheWriteInputTokens = int(msgDelta.Usage.CacheCreationInputTokens)
-				usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+				outputTokens = int(msgDelta.Usage.OutputTokens)
+				reasoningTokens = int(msgDelta.Usage.OutputTokensDetails.ThinkingTokens)
+				// The delta's cache counts are cumulative but may be absent;
+				// never let a missing value erase what message_start reported.
+				if v := int(msgDelta.Usage.CacheReadInputTokens); v > 0 {
+					cacheRead = v
+				}
+				if v := int(msgDelta.Usage.CacheCreationInputTokens); v > 0 {
+					cacheWrite = v
+				}
 			}
 		}
 	}
@@ -93,9 +98,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		return provider.Response{}, err
 	}
 
-	if usage.TotalTokens == 0 {
-		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-	}
+	usage := anthropicUsage(uncachedInput, outputTokens, reasoningTokens, cacheRead, cacheWrite)
 
 	keys := make([]int, 0, len(toolCalls))
 	for k := range toolCalls {

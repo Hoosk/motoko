@@ -181,3 +181,32 @@ func TestStreamCompleteRejectsTruncatedToolCall(t *testing.T) {
 		t.Fatalf("expected truncation error naming the tool, got %v", err)
 	}
 }
+
+func TestStreamCompleteCountsCachedTokensInInput(t *testing.T) {
+	body := streamBody("tool_use", `{"path":"a.go"}`)
+	c := newLimitsTestClient(t, 0, "", func() (string, string) { return "text/event-stream", body }, nil)
+	resp, err := c.StreamComplete(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := resp.Usage
+	if u.InputTokens != 1210 || u.CacheReadInputTokens != 1000 || u.CacheWriteInputTokens != 200 || u.OutputTokens != 50 || u.TotalTokens != 1260 {
+		t.Fatalf("unexpected usage: %#v", u)
+	}
+}
+
+func TestResponseFromSDKCountsCachedTokensInInput(t *testing.T) {
+	msg := &sdk.Message{Content: []sdk.ContentBlockUnion{{Type: "text", Text: "ok"}}}
+	msg.Usage.InputTokens = 10
+	msg.Usage.CacheReadInputTokens = 1000
+	msg.Usage.CacheCreationInputTokens = 200
+	msg.Usage.OutputTokens = 50
+	resp, err := responseFromSDK(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := resp.Usage
+	if u.InputTokens != 1210 || u.CacheReadInputTokens != 1000 || u.CacheWriteInputTokens != 200 || u.TotalTokens != 1260 {
+		t.Fatalf("unexpected usage: %#v", u)
+	}
+}
