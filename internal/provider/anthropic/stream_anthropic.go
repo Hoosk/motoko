@@ -21,6 +21,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 
 	var raw strings.Builder
 	usage := provider.Usage{}
+	var stopReason sdk.StopReason
 
 	type streamedToolCall struct {
 		id           string
@@ -75,6 +76,9 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 
 		case "message_delta":
 			msgDelta := event.AsMessageDelta()
+			if msgDelta.Delta.StopReason != "" {
+				stopReason = msgDelta.Delta.StopReason
+			}
 			if msgDelta.Usage.OutputTokens > 0 {
 				usage.OutputTokens = int(msgDelta.Usage.OutputTokens)
 				usage.ReasoningTokens = int(msgDelta.Usage.OutputTokensDetails.ThinkingTokens)
@@ -119,6 +123,10 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 			Arguments: json.RawMessage(rawInput),
 			CallID:    strings.TrimSpace(tc.id),
 		})
+	}
+
+	if err := checkTruncatedToolCalls(stopReason, pendingCalls); err != nil {
+		return provider.Response{}, err
 	}
 
 	finalText := strings.TrimSpace(raw.String())

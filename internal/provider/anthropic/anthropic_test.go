@@ -47,7 +47,10 @@ func TestResponseFromSDKJoinsTextParts(t *testing.T) {
 			{Type: "text", Text: "dos"},
 		},
 	}
-	resp := responseFromSDK(sdkMsg)
+	resp, err := responseFromSDK(sdkMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.FinalText != "" {
 		t.Fatalf("expected empty final text since tool use is present, got %q", resp.FinalText)
 	}
@@ -57,7 +60,10 @@ func TestResponseFromSDKJoinsTextParts(t *testing.T) {
 			{Type: "text", Text: "dos"},
 		},
 	}
-	respText := responseFromSDK(sdkMsgTextOnly)
+	respText, err := responseFromSDK(sdkMsgTextOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if respText.FinalText != "uno\ndos" {
 		t.Fatalf("unexpected anthropic text %q", respText.FinalText)
 	}
@@ -196,7 +202,10 @@ func TestResponseFromSDKToolUse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp := responseFromSDK(&sdkMsg)
+	resp, err := responseFromSDK(&sdkMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.FinalText != "" {
 		t.Fatalf("expected empty final text since tool use is present, got %q", resp.FinalText)
 	}

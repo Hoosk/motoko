@@ -131,3 +131,53 @@ func TestCompleteCapsMaxTokensForNonStreamingGuard(t *testing.T) {
 		t.Fatalf("expected max_tokens capped at 21333, got %v", bodies)
 	}
 }
+
+func TestResponseFromSDKRejectsTruncatedToolCall(t *testing.T) {
+	// A tool_use cut off by max_tokens decodes to partial JSON; it must not be returned.
+	msg := &sdk.Message{
+		StopReason: sdk.StopReasonMaxTokens,
+		Content: []sdk.ContentBlockUnion{
+			{Type: "tool_use", ID: "call_1", Name: "write", Input: []byte(`{"path":"a.go","content":"pack`)},
+		},
+	}
+	_, err := responseFromSDK(msg)
+	if err == nil || !strings.Contains(err.Error(), `"write"`) {
+		t.Fatalf("expected truncation error naming the tool, got %v", err)
+	}
+
+	msg.Content[0].Input = []byte(`{"path":"a.go"}`)
+	if _, err := responseFromSDK(msg); err != nil {
+		t.Fatalf("complete tool call at max_tokens must be accepted: %v", err)
+	}
+}
+
+func streamBody(stopReason, partialJSON string) string {
+	events := []string{
+		`{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"x","usage":{"input_tokens":10,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"write","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":` + quote(partialJSON) + `}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"` + stopReason + `"},"usage":{"input_tokens":10,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200,"output_tokens":50}}`,
+		`{"type":"message_stop"}`,
+	}
+	var sb strings.Builder
+	for _, e := range events {
+		typ := e[len(`{"type":"`):]
+		typ = typ[:strings.Index(typ, `"`)]
+		sb.WriteString("event: " + typ + "\ndata: " + e + "\n\n")
+	}
+	return sb.String()
+}
+
+func quote(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+func TestStreamCompleteRejectsTruncatedToolCall(t *testing.T) {
+	body := streamBody("max_tokens", `{"path":"a.go","content":"pack`)
+	c := newLimitsTestClient(t, 0, "", func() (string, string) { return "text/event-stream", body }, nil)
+	_, err := c.StreamComplete(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{}, nil)
+	if err == nil || !strings.Contains(err.Error(), `"write"`) {
+		t.Fatalf("expected truncation error naming the tool, got %v", err)
+	}
+}

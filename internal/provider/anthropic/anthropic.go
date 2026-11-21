@@ -200,7 +200,7 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 		return provider.Response{}, err
 	}
 
-	return responseFromSDK(resp), nil
+	return responseFromSDK(resp)
 }
 
 func (c *anthropicClient) ListModels(ctx context.Context) ([]provider.ModelInfo, error) {
@@ -599,7 +599,7 @@ func betaSchemaParam(t provider.LocalToolDefinition) sdk.BetaToolInputSchemaPara
 	return p
 }
 
-func responseFromSDK(decoded *sdk.Message) provider.Response {
+func responseFromSDK(decoded *sdk.Message) (provider.Response, error) {
 	var textParts []string
 	var pendingCalls []provider.ToolInvocation
 
@@ -632,6 +632,10 @@ func responseFromSDK(decoded *sdk.Message) provider.Response {
 		}
 	}
 
+	if err := checkTruncatedToolCalls(decoded.StopReason, pendingCalls); err != nil {
+		return provider.Response{}, err
+	}
+
 	finalText := strings.TrimSpace(strings.Join(textParts, "\n"))
 	usage := provider.Usage{
 		InputTokens:           int(decoded.Usage.InputTokens),
@@ -642,5 +646,20 @@ func responseFromSDK(decoded *sdk.Message) provider.Response {
 		CacheWriteInputTokens: int(decoded.Usage.CacheCreationInputTokens),
 	}
 
-	return provider.FinalizeResponse(finalText, "", pendingCalls, usage)
+	return provider.FinalizeResponse(finalText, "", pendingCalls, usage), nil
+}
+
+// checkTruncatedToolCalls fails when the model hit max_tokens while a tool call
+// was still being generated, so truncated (invalid JSON) arguments are never
+// returned or executed.
+func checkTruncatedToolCalls(stopReason sdk.StopReason, calls []provider.ToolInvocation) error {
+	if stopReason != sdk.StopReasonMaxTokens {
+		return nil
+	}
+	for _, call := range calls {
+		if !json.Valid(call.Arguments) {
+			return fmt.Errorf("anthropic: response hit max_tokens while generating arguments for tool %q; the call was truncated and not executed", call.Name)
+		}
+	}
+	return nil
 }
