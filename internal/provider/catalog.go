@@ -208,6 +208,7 @@ func modelInfoFromCatalogModel(m CatalogModel) ModelInfo {
 	info := ModelInfo{
 		ID:               m.ID,
 		ContextWindow:    m.Limit.Context,
+		MaxOutputTokens:  m.Limit.Output,
 		SupportsThinking: m.Reasoning,
 	}
 	applyReasoningOptions(&info, m.ReasoningOptions)
@@ -250,6 +251,9 @@ func mergeCatalogModelInfo(key string, model CatalogModel) {
 	}
 	if merged.ContextWindow == 0 {
 		merged.ContextWindow = model.Limit.Context
+	}
+	if merged.MaxOutputTokens == 0 {
+		merged.MaxOutputTokens = model.Limit.Output
 	}
 	merged.SupportsThinking = merged.SupportsThinking || model.Reasoning
 	catalogCache[key] = merged
@@ -431,6 +435,9 @@ func EnrichModelInfo(providerName string, info ModelInfo) ModelInfo {
 	}
 	if info.ContextWindow == 0 {
 		info.ContextWindow = cached.ContextWindow
+	}
+	if info.MaxOutputTokens == 0 {
+		info.MaxOutputTokens = cached.MaxOutputTokens
 	}
 	info.SupportsThinking = info.SupportsThinking || cached.SupportsThinking
 	if len(info.EffortPresets) == 0 && len(cached.EffortPresets) > 0 {

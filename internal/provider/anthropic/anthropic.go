@@ -12,9 +12,21 @@ import (
 	"github.com/Hoosk/motoko/internal/provider"
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 )
 
 const keyInput = "input"
+
+const (
+	// defaultMaxOutputTokens is used when the model's output limit is unknown;
+	// 8192 is accepted by every Claude model still served (Claude 3.5 onwards).
+	defaultMaxOutputTokens = 8192
+	// thinkingHeadroom is the room kept above the thinking budget for the answer.
+	thinkingHeadroom = 1024
+	// maxNonStreamingTokens is the largest max_tokens the SDK allows without
+	// streaming: 1h * max_tokens / 128000 must not exceed 10 minutes.
+	maxNonStreamingTokens = 21333
+)
 
 func init() {
 	provider.Register(config.ProviderKindAnthropic, NewClient)
@@ -24,6 +36,7 @@ type anthropicClient struct {
 	sdkClient *sdk.Client
 	provider.BaseClient
 	thinkingBudget     int
+	maxOutputTokens    int
 	mu                 sync.Mutex
 	capabilitiesLoaded bool
 	isAdaptive         bool
@@ -46,30 +59,66 @@ func NewClient(cfg config.ProviderConfig) provider.Client {
 	return c
 }
 func (c *anthropicClient) checkAdaptiveThinking(ctx context.Context) bool {
+	adaptive, _ := c.loadModelCapabilities(ctx)
+	return adaptive
+}
+
+// loadModelCapabilities fetches (once, on success) whether the model supports
+// adaptive thinking and its maximum output tokens (0 when unknown).
+func (c *anthropicClient) loadModelCapabilities(ctx context.Context) (adaptive bool, maxOutput int) {
 	c.mu.Lock()
 	if c.capabilitiesLoaded {
-		res := c.isAdaptive
+		adaptive, maxOutput = c.isAdaptive, c.maxOutputTokens
 		c.mu.Unlock()
-		return res
+		return adaptive, maxOutput
 	}
 	c.mu.Unlock()
 
 	fallback := true
 	if !c.ListReady() {
-		return fallback
+		return fallback, 0
 	}
 
 	modelInfo, err := c.sdkClient.Models.Get(ctx, c.Model(), sdk.ModelGetParams{})
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err == nil {
-		c.isAdaptive = modelInfo.Capabilities.Thinking.Types.Adaptive.Supported
-		c.capabilitiesLoaded = true
-	} else {
-		return fallback
+	if err != nil {
+		return fallback, 0
 	}
-	return c.isAdaptive
+	c.isAdaptive = modelInfo.Capabilities.Thinking.Types.Adaptive.Supported
+	c.maxOutputTokens = int(modelInfo.MaxTokens)
+	c.capabilitiesLoaded = true
+	return c.isAdaptive, c.maxOutputTokens
+}
+
+// resolveMaxOutputTokens returns the max_tokens to request and whether it is
+// the model's known output limit. Order: the models API, the models catalog,
+// then defaultMaxOutputTokens.
+func (c *anthropicClient) resolveMaxOutputTokens(ctx context.Context) (int, bool) {
+	if _, n := c.loadModelCapabilities(ctx); n > 0 {
+		return n, true
+	}
+	if info, ok := provider.LookupModel("anthropic", c.Model()); ok && info.MaxOutputTokens > 0 {
+		return info.MaxOutputTokens, true
+	}
+	return defaultMaxOutputTokens, false
+}
+
+// capNonStreaming limits max_tokens so the SDK's non-streaming guard
+// (CalculateNonStreamingTimeout) accepts the request, keeping an enabled
+// thinking budget below the reduced cap.
+func capNonStreaming(params *sdk.MessageNewParams) {
+	limit := maxNonStreamingTokens
+	if modelLimit, ok := constant.ModelNonStreamingTokens[string(params.Model)]; ok && modelLimit < limit {
+		limit = modelLimit
+	}
+	if params.MaxTokens > int64(limit) {
+		params.MaxTokens = int64(limit)
+	}
+	if th := params.Thinking.OfEnabled; th != nil && th.BudgetTokens >= params.MaxTokens {
+		th.BudgetTokens = max(params.MaxTokens-thinkingHeadroom, 0)
+	}
 }
 
 func buildAnthropicSystemBlocks(systemPrompt string) []sdk.TextBlockParam {
@@ -91,9 +140,14 @@ func buildAnthropicBetaSystemBlocks(systemPrompt string) []sdk.BetaTextBlockPara
 }
 
 func (c *anthropicClient) buildMessageParams(ctx context.Context, systemPrompt string, messages []provider.ConversationItem, tools provider.ToolSet) (sdk.MessageNewParams, []option.RequestOption) {
-	maxTokens := 4096
-	if c.thinkingBudget > 0 && c.thinkingBudget >= maxTokens {
-		maxTokens = c.thinkingBudget + 1024
+	maxTokens, known := c.resolveMaxOutputTokens(ctx)
+	thinkingBudget := c.thinkingBudget
+	if thinkingBudget > 0 && thinkingBudget >= maxTokens-thinkingHeadroom {
+		if known {
+			thinkingBudget = max(maxTokens-thinkingHeadroom, 0)
+		} else {
+			maxTokens = thinkingBudget + thinkingHeadroom
+		}
 	}
 
 	params := sdk.MessageNewParams{
@@ -116,7 +170,7 @@ func (c *anthropicClient) buildMessageParams(ctx context.Context, systemPrompt s
 				},
 			}
 		} else {
-			params.Thinking = sdk.ThinkingConfigParamOfEnabled(int64(c.thinkingBudget))
+			params.Thinking = sdk.ThinkingConfigParamOfEnabled(int64(thinkingBudget))
 		}
 	}
 
@@ -139,6 +193,7 @@ func (c *anthropicClient) Complete(ctx context.Context, systemPrompt string, mes
 	}
 
 	params, reqOpts := c.buildMessageParams(ctx, systemPrompt, messages, tools)
+	capNonStreaming(&params)
 
 	resp, err := c.sdkClient.Messages.New(ctx, params, reqOpts...)
 	if err != nil {
@@ -164,6 +219,7 @@ func (c *anthropicClient) ListModels(ctx context.Context) ([]provider.ModelInfo,
 		result = append(result, provider.ModelInfo{
 			ID:               id,
 			ContextWindow:    int(modelInfo.MaxInputTokens),
+			MaxOutputTokens:  int(modelInfo.MaxTokens),
 			SupportsThinking: modelInfo.Capabilities.Thinking.Supported,
 		})
 	}
@@ -185,6 +241,7 @@ func (c *anthropicClient) GetModel(ctx context.Context, model string) (provider.
 	return provider.ModelInfo{
 		ID:               modelInfo.ID,
 		ContextWindow:    int(modelInfo.MaxInputTokens),
+		MaxOutputTokens:  int(modelInfo.MaxTokens),
 		SupportsThinking: modelInfo.Capabilities.Thinking.Supported,
 	}, nil
 }

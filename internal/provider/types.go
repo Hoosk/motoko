@@ -109,6 +109,7 @@ type ModelInfo struct {
 	ID               string   `json:"id"`
 	EffortPresets    []string `json:"effort_presets,omitempty"`
 	ContextWindow    int      `json:"context_window,omitempty"`
+	MaxOutputTokens  int      `json:"max_output_tokens,omitempty"`
 	BudgetMin        int      `json:"budget_min,omitempty"`
 	BudgetMax        int      `json:"budget_max,omitempty"`
 	SupportsThinking bool     `json:"supports_thinking,omitempty"`
