@@ -54,7 +54,7 @@ jobs:
         with:
           files: motoko_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
           draft: false
-          prerelease: contains(github.ref, 'alpha') || contains(github.ref, 'beta')
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
