@@ -414,6 +414,41 @@ func TestQuestionPopupKeepsThinkingTickAlive(t *testing.T) {
 	}
 }
 
+func TestOverlayLetsNonInputMessagesThrough(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.requestID = 3
+	m.agentStream = make(chan app.AgentStreamEvent, 1)
+	m.timeline.SetThinking(true)
+	m.helpOverlay.active = true
+
+	updated, cmd := m.Update(AgentStreamBatchMsg{
+		RequestID: 3,
+		Events:    []app.AgentStreamEvent{{Kind: "assistant_delta", Content: "hi"}},
+	})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected waitAgentStream to be re-armed while help overlay is open")
+	}
+
+	updated, _ = m.Update(AgentResultMsg{RequestID: 3, Assistant: "done"})
+	m = updated.(Model)
+	if m.timeline.model.Thinking {
+		t.Fatal("expected AgentResultMsg to clear thinking while help overlay is open")
+	}
+	if !m.helpOverlay.active {
+		t.Fatal("expected help overlay to remain open")
+	}
+}
+
+func TestOverlayStillCapturesKeys(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.helpOverlay.active = true
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated.(Model).helpOverlay.active {
+		t.Fatal("expected esc to close help overlay")
+	}
+}
+
 func TestModelMouseDragSelectionCopiesText(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 80

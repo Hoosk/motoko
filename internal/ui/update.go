@@ -94,21 +94,15 @@ func (m *Model) updatePopups(msg tea.Msg, cmds []tea.Cmd) (bool, tea.Cmd) {
 		m.sidebar.dirty = true
 		return true, tea.Batch(cmds...)
 	}
+	// Overlays only act on input. Every other message (stream batches, agent
+	// results, task events, ticks...) must keep flowing to the normal handlers
+	// or their self-re-arming wait chains die.
+	switch msg.(type) {
+	case tea.KeyMsg, tea.MouseMsg:
+	default:
+		return false, nil
+	}
 	if m.approvalBar.active || m.questionPopup.active {
-		if size, ok := msg.(tea.WindowSizeMsg); ok {
-			m.width = size.Width
-			m.height = size.Height
-			m.SyncLayout()
-			return true, tea.Batch(cmds...)
-		}
-		switch msg := msg.(type) {
-		case AgentStreamBatchMsg:
-			cmds = m.onAgentStreamBatch(msg, cmds)
-			return true, tea.Batch(cmds...)
-		case ThinkingTickMsg:
-			cmds = m.onThinkingTick(msg, cmds)
-			return true, tea.Batch(cmds...)
-		}
 		if m.approvalBar.active {
 			if key, ok := msg.(tea.KeyMsg); ok {
 				switch key.String() {
@@ -258,6 +252,7 @@ func (m *Model) onMouse(msg tea.MouseMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 func (m *Model) onWindowSize(msg tea.WindowSizeMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	m.width = msg.Width
 	m.height = msg.Height
+	m.helpOverlay.Update(msg)
 	m.SyncLayout()
 	return cmds, false
 }
