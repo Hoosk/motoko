@@ -128,8 +128,8 @@ func (idx *Index) RefreshDir(ctx context.Context, root string) (*Snapshot, error
 		if readErr != nil {
 			return nil
 		}
-		lang, langName := languageForPath(rel)
-		symbols, imports, exports := extractSymbolsAndDeps(fileContent, lang, langName)
+		extractor, langName := languageForPath(rel)
+		symbols, imports, exports := extractSymbolsAndDeps(fileContent, extractor, langName)
 		summary := FileSummary{
 			Path:     rel,
 			Language: langName,

@@ -14,23 +14,19 @@ func isSupported(path string) bool {
 	return ok
 }
 
-func languageForPath(path string) (*sitter.Language, string) {
+func languageForPath(path string) (languages.Extractor, string) {
 	ext := filepath.Ext(path)
 	if extractor, ok := languages.GetExtractor(ext); ok {
-		return extractor.SitterLanguage(), extractor.LanguageID()
+		return extractor, extractor.LanguageID()
 	}
 	return nil, ""
 }
 
-func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language string) ([]Symbol, []string, []string) {
-	if lang == nil {
+func extractSymbolsAndDeps(content []byte, extractor languages.Extractor, language string) ([]Symbol, []string, []string) {
+	if extractor == nil {
 		return nil, nil, nil
 	}
-
-	extractor, ok := languages.GetExtractor("." + language)
-	if !ok {
-		extractor, _ = languages.GetExtractor(language)
-	}
+	lang := extractor.SitterLanguage()
 
 	// Parse with an explicit parser so the C-allocated tree is released as soon
 	// as extraction finishes instead of waiting for finalizers; the whole
@@ -55,7 +51,7 @@ func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language strin
 	seenImports := make(map[string]struct{})
 
 	languages.WalkNamed(root, func(node *sitter.Node) {
-		if extractor != nil && extractor.IsImportNode(node) {
+		if extractor.IsImportNode(node) {
 			path := extractor.ExtractImportPath(node, content)
 			if path != "" {
 				if _, exists := seenImports[path]; !exists {
@@ -70,22 +66,22 @@ func extractSymbolsAndDeps(content []byte, lang *sitter.Language, language strin
 			return
 		}
 
-		if extractor != nil {
-			symbol, ok := extractor.ClassifySymbol(node, content)
-			if ok && symbol.Name != "" {
-				key := symbol.Kind + ":" + symbol.Name
-				if _, exists := seenSymbols[key]; !exists {
-					seenSymbols[key] = struct{}{}
-					symbols = append(symbols, symbol)
+		symbol, ok := extractor.ClassifySymbol(node, content)
+		if !ok || symbol.Name == "" {
+			return
+		}
+		key := symbol.Kind + ":" + symbol.Name
+		if _, exists := seenSymbols[key]; exists {
+			return
+		}
+		seenSymbols[key] = struct{}{}
+		symbols = append(symbols, symbol)
 
-					if language == "go" && len(symbol.Name) > 0 && unicode.IsUpper(rune(symbol.Name[0])) {
-						exports = append(exports, symbol.Name)
-					}
-					if extractor.IsChildOfExport(node) {
-						exports = append(exports, symbol.Name)
-					}
-				}
-			}
+		if language == "go" && len(symbol.Name) > 0 && unicode.IsUpper(rune(symbol.Name[0])) {
+			exports = append(exports, symbol.Name)
+		}
+		if extractor.IsChildOfExport(node) {
+			exports = append(exports, symbol.Name)
 		}
 	})
 	return symbols, imports, exports

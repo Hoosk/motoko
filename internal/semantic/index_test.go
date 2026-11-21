@@ -247,3 +247,47 @@ func TestSemanticGraphExpansion(t *testing.T) {
 		t.Fatalf("expected config.go to be ranked second due to semantic connection, got %q", relevant[1].Path)
 	}
 }
+
+func indexSingleFile(t *testing.T, name, content string) FileSummary {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := BuildSnapshot(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Files) != 1 {
+		t.Fatalf("expected 1 indexed file, got %d", len(snapshot.Files))
+	}
+	return snapshot.Files[0]
+}
+
+func symbolNames(file FileSummary) string {
+	names := make([]string, 0, len(file.Symbols))
+	for _, s := range file.Symbols {
+		names = append(names, s.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestBuildSnapshotExtractsPythonSymbolsAndImports(t *testing.T) {
+	file := indexSingleFile(t, "app.py", "import os\n\nclass Service:\n    pass\n\ndef run():\n    pass\n")
+	if got := symbolNames(file); got != "Service,run" {
+		t.Fatalf("unexpected python symbols: %q", got)
+	}
+	if len(file.Imports) != 1 || file.Imports[0] != "os" {
+		t.Fatalf("unexpected python imports: %#v", file.Imports)
+	}
+}
+
+func TestBuildSnapshotExtractsRustSymbolsAndImports(t *testing.T) {
+	file := indexSingleFile(t, "lib.rs", "use std::fmt;\n\nstruct Config {}\n\nfn run() {}\n")
+	if got := symbolNames(file); got != "Config,run" {
+		t.Fatalf("unexpected rust symbols: %q", got)
+	}
+	if len(file.Imports) != 1 {
+		t.Fatalf("expected one rust import, got %#v", file.Imports)
+	}
+}
