@@ -3,12 +3,16 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
+
+// maxSearchBodyBytes caps how much of a search-engine response is read.
+const maxSearchBodyBytes = 2 << 20
 
 type SearchResponseItem struct {
 	URL     string
@@ -98,9 +102,12 @@ func (t *WebSearchTool) fetchHTML(ctx context.Context, searchURL string) (string
 		return "", fmt.Errorf("status code %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, truncated, err := readCapped(resp.Body, maxSearchBodyBytes)
 	if err != nil {
 		return "", err
+	}
+	if truncated {
+		tracelog.Logf("web_search: response from %s exceeded %d bytes and was truncated", searchURL, maxSearchBodyBytes)
 	}
 
 	return string(bodyBytes), nil

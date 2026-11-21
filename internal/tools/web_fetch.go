@@ -10,6 +10,22 @@ import (
 	"time"
 )
 
+// maxFetchBodyBytes caps how much of a response body web_fetch reads.
+const maxFetchBodyBytes = 5 << 20
+
+// readCapped reads at most limit bytes from r and reports whether more data
+// was available (i.e. the body was truncated).
+func readCapped(r io.Reader, limit int64) ([]byte, bool, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return data[:limit], true, nil
+	}
+	return data, false, nil
+}
+
 type WebFetchTool struct {
 	httpClient *http.Client
 }
@@ -60,16 +76,21 @@ func (t *WebFetchTool) Run(ctx context.Context, args string) (Result, error) {
 		return Result{}, fmt.Errorf("server responded with status code: %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, truncated, err := readCapped(resp.Body, maxFetchBodyBytes)
 	if err != nil {
 		return Result{}, fmt.Errorf("error reading page content: %w", err)
 	}
 
 	baseURL, _ := url.Parse(targetURL)
 	cleanedText := cleanHTML(string(bodyBytes), baseURL)
+	summary := fmt.Sprintf("URL %s fetched successfully (%d characters extracted).", targetURL, len(cleanedText))
+	if truncated {
+		summary += fmt.Sprintf(" Page exceeded %d bytes; only the first %d bytes were processed.", maxFetchBodyBytes, maxFetchBodyBytes)
+		cleanedText += "\n\n[Page truncated: response body exceeded the size limit]"
+	}
 	return Result{
 		Spec:    t.Spec(),
-		Summary: fmt.Sprintf("URL %s fetched successfully (%d characters extracted).", targetURL, len(cleanedText)),
+		Summary: summary,
 		Output:  cleanedText,
 	}, nil
 }

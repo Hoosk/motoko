@@ -111,3 +111,36 @@ func TestStripBlockTagManyTagsIsFast(t *testing.T) {
 		}
 	}
 }
+
+func TestWebFetchTruncatesHugeBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("a", maxFetchBodyBytes+1000)))
+	}))
+	defer srv.Close()
+
+	res, err := NewWebFetchTool().Run(context.Background(), `{"url": "`+srv.URL+`"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Output) > maxFetchBodyBytes+200 {
+		t.Fatalf("output not capped: %d bytes", len(res.Output))
+	}
+	if !strings.Contains(res.Output, "Page truncated") || !strings.Contains(res.Summary, "only the first") {
+		t.Fatalf("truncation not visible: %q", res.Summary)
+	}
+}
+
+func TestWebSearchFetchHTMLCapsBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("a", maxSearchBodyBytes+1000)))
+	}))
+	defer srv.Close()
+
+	body, err := NewWebSearchTool().fetchHTML(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != maxSearchBodyBytes {
+		t.Fatalf("expected body capped at %d, got %d", maxSearchBodyBytes, len(body))
+	}
+}
