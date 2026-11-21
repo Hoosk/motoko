@@ -599,9 +599,13 @@ func betaSchemaParam(t provider.LocalToolDefinition) sdk.BetaToolInputSchemaPara
 	return p
 }
 
+// blockTypeToolUse is the content block type of a tool call.
+const blockTypeToolUse = "tool_use"
+
 func responseFromSDK(decoded *sdk.Message) (provider.Response, error) {
 	var textParts []string
 	var pendingCalls []provider.ToolInvocation
+	lastBlockIsToolUse := len(decoded.Content) > 0 && decoded.Content[len(decoded.Content)-1].Type == blockTypeToolUse
 
 	for _, block := range decoded.Content {
 		switch block.Type {
@@ -610,7 +614,7 @@ func responseFromSDK(decoded *sdk.Message) (provider.Response, error) {
 			if text != "" {
 				textParts = append(textParts, text)
 			}
-		case "tool_use":
+		case blockTypeToolUse:
 			toolUse := block.AsToolUse()
 			var parsed struct {
 				Input string `json:"input"`
@@ -632,7 +636,7 @@ func responseFromSDK(decoded *sdk.Message) (provider.Response, error) {
 		}
 	}
 
-	if err := checkTruncatedToolCalls(decoded.StopReason, pendingCalls); err != nil {
+	if err := checkTruncatedToolCalls(decoded.StopReason, pendingCalls, lastBlockIsToolUse); err != nil {
 		return provider.Response{}, err
 	}
 
@@ -665,17 +669,34 @@ func anthropicUsage(uncachedInput, output, reasoning, cacheRead, cacheWrite int)
 	}
 }
 
-// checkTruncatedToolCalls fails when the model hit max_tokens while a tool call
-// was still being generated, so truncated (invalid JSON) arguments are never
-// returned or executed.
-func checkTruncatedToolCalls(stopReason sdk.StopReason, calls []provider.ToolInvocation) error {
-	if stopReason != sdk.StopReasonMaxTokens {
-		return nil
-	}
-	for _, call := range calls {
-		if !json.Valid(call.Arguments) {
-			return fmt.Errorf("anthropic: response hit max_tokens while generating arguments for tool %q; the call was truncated and not executed", call.Name)
+// checkTruncatedToolCalls rejects turns whose tool calls must not be executed.
+// A tool_use cut off by max_tokens usually still parses as a valid partial
+// object, so json.Valid alone cannot detect it: when the stop reason is
+// max_tokens and the last content block is a tool_use (or any arguments are
+// invalid JSON) the calls are dropped. A complete call followed by truncated
+// text is accepted. Tools of a refused turn are never executed either.
+func checkTruncatedToolCalls(stopReason sdk.StopReason, calls []provider.ToolInvocation, lastBlockIsToolUse bool) error {
+	switch stopReason {
+	case sdk.StopReasonRefusal:
+		if len(calls) > 0 {
+			return fmt.Errorf("anthropic: the model refused the request and returned %d tool call(s); they were not executed", len(calls))
+		}
+	case sdk.StopReasonMaxTokens:
+		if len(calls) == 0 {
+			return nil
+		}
+		for _, call := range calls {
+			if !json.Valid(call.Arguments) {
+				return truncatedToolCallError(call.Name)
+			}
+		}
+		if lastBlockIsToolUse {
+			return truncatedToolCallError(calls[len(calls)-1].Name)
 		}
 	}
 	return nil
+}
+
+func truncatedToolCallError(name string) error {
+	return fmt.Errorf("anthropic: response hit max_tokens while generating arguments for tool %q; the call was truncated and not executed", name)
 }

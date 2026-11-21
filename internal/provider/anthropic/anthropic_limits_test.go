@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -98,11 +99,11 @@ func TestBuildMessageParamsFallsBackWhenModelLimitUnknown(t *testing.T) {
 }
 
 func TestBuildMessageParamsKeepsMaxTokensAboveThinkingBudget(t *testing.T) {
-	// Unknown limit: max_tokens grows past the budget.
+	// Unknown limit: max_tokens grows past the configured budget.
 	c := newLimitsTestClient(t, 20000, "", noHandler, nil)
 	params, _ := c.buildMessageParams(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{})
-	if params.Thinking.OfEnabled == nil || params.MaxTokens <= params.Thinking.OfEnabled.BudgetTokens {
-		t.Fatalf("max_tokens %d must exceed thinking budget %#v", params.MaxTokens, params.Thinking.OfEnabled)
+	if params.MaxTokens <= 20000 {
+		t.Fatalf("max_tokens %d must exceed the configured thinking budget 20000", params.MaxTokens)
 	}
 
 	// Known small limit: the budget is clamped below max_tokens.
@@ -132,22 +133,51 @@ func TestCompleteCapsMaxTokensForNonStreamingGuard(t *testing.T) {
 	}
 }
 
-func TestResponseFromSDKRejectsTruncatedToolCall(t *testing.T) {
-	// A tool_use cut off by max_tokens decodes to partial JSON; it must not be returned.
-	msg := &sdk.Message{
-		StopReason: sdk.StopReasonMaxTokens,
-		Content: []sdk.ContentBlockUnion{
-			{Type: "tool_use", ID: "call_1", Name: "write", Input: []byte(`{"path":"a.go","content":"pack`)},
-		},
+func messageWithBlocks(t *testing.T, stopReason string, blocks ...string) *sdk.Message {
+	t.Helper()
+	raw := `{"id":"m","type":"message","role":"assistant","model":"x","stop_reason":"` + stopReason + `","content":[` + strings.Join(blocks, ",") + `],"usage":{"input_tokens":1,"output_tokens":1}}`
+	var msg sdk.Message
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatal(err)
 	}
-	_, err := responseFromSDK(msg)
+	return &msg
+}
+
+const (
+	toolUseBlock = `{"type":"tool_use","id":"call_1","name":"write","input":{"path":"a.go"}}`
+	textBlock    = `{"type":"text","text":"cut off mid-sent"}`
+)
+
+func TestResponseFromSDKRejectsTruncatedToolCall(t *testing.T) {
+	// A tool_use that is the last block at max_tokens is rejected even though
+	// its (partial) input parses as valid JSON.
+	_, err := responseFromSDK(messageWithBlocks(t, "max_tokens", textBlock, toolUseBlock))
 	if err == nil || !strings.Contains(err.Error(), `"write"`) {
 		t.Fatalf("expected truncation error naming the tool, got %v", err)
 	}
 
-	msg.Content[0].Input = []byte(`{"path":"a.go"}`)
-	if _, err := responseFromSDK(msg); err != nil {
-		t.Fatalf("complete tool call at max_tokens must be accepted: %v", err)
+	// A complete tool call followed by truncated text is accepted.
+	resp, err := responseFromSDK(messageWithBlocks(t, "max_tokens", toolUseBlock, textBlock))
+	if err != nil {
+		t.Fatalf("tool_use followed by text at max_tokens must be accepted: %v", err)
+	}
+	if len(resp.PendingCalls) != 1 {
+		t.Fatalf("expected 1 pending call, got %d", len(resp.PendingCalls))
+	}
+
+	// The same call at a normal tool_use stop is accepted.
+	if _, err := responseFromSDK(messageWithBlocks(t, "tool_use", toolUseBlock)); err != nil {
+		t.Fatalf("tool_use stop must be accepted: %v", err)
+	}
+}
+
+func TestResponseFromSDKRejectsToolCallsOfRefusal(t *testing.T) {
+	_, err := responseFromSDK(messageWithBlocks(t, "refusal", textBlock, toolUseBlock))
+	if err == nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("expected refusal error, got %v", err)
+	}
+	if _, err := responseFromSDK(messageWithBlocks(t, "refusal", textBlock)); err != nil {
+		t.Fatalf("refusal without tool calls must be accepted: %v", err)
 	}
 }
 
@@ -179,6 +209,43 @@ func TestStreamCompleteRejectsTruncatedToolCall(t *testing.T) {
 	_, err := c.StreamComplete(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{}, nil)
 	if err == nil || !strings.Contains(err.Error(), `"write"`) {
 		t.Fatalf("expected truncation error naming the tool, got %v", err)
+	}
+}
+
+func TestStreamCompleteRejectsCompleteLookingToolCallAtMaxTokens(t *testing.T) {
+	body := streamBody("max_tokens", `{"path":"a.go"}`)
+	c := newLimitsTestClient(t, 0, "", func() (string, string) { return "text/event-stream", body }, nil)
+	_, err := c.StreamComplete(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{}, nil)
+	if err == nil || !strings.Contains(err.Error(), `"write"`) {
+		t.Fatalf("expected truncation error naming the tool, got %v", err)
+	}
+}
+
+func TestStreamCompleteAcceptsToolCallFollowedByTextAtMaxTokens(t *testing.T) {
+	events := []string{
+		`{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"x","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"write","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a.go\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"cut"}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":50}}`,
+		`{"type":"message_stop"}`,
+	}
+	var sb strings.Builder
+	for _, e := range events {
+		typ := e[len(`{"type":"`):]
+		typ = typ[:strings.Index(typ, `"`)]
+		sb.WriteString("event: " + typ + "\ndata: " + e + "\n\n")
+	}
+	body := sb.String()
+	c := newLimitsTestClient(t, 0, "", func() (string, string) { return "text/event-stream", body }, nil)
+	resp, err := c.StreamComplete(context.Background(), "sys", []provider.ConversationItem{provider.UserText("hi")}, provider.ToolSet{}, nil)
+	if err != nil {
+		t.Fatalf("complete tool call followed by text must be accepted: %v", err)
+	}
+	if len(resp.PendingCalls) != 1 {
+		t.Fatalf("expected 1 pending call, got %d", len(resp.PendingCalls))
 	}
 }
 

@@ -3,7 +3,8 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/Hoosk/motoko/internal/provider"
@@ -22,6 +23,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 	var raw strings.Builder
 	var uncachedInput, cacheRead, cacheWrite, outputTokens, reasoningTokens int
 	var stopReason sdk.StopReason
+	var lastBlockIsToolUse bool
 
 	type streamedToolCall struct {
 		id           string
@@ -41,7 +43,8 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 
 		case "content_block_start":
 			blockEvent := event.AsContentBlockStart()
-			if blockEvent.ContentBlock.Type == "tool_use" {
+			lastBlockIsToolUse = blockEvent.ContentBlock.Type == blockTypeToolUse
+			if lastBlockIsToolUse {
 				toolCalls[int(blockEvent.Index)] = &streamedToolCall{
 					id:   blockEvent.ContentBlock.ID,
 					name: blockEvent.ContentBlock.Name,
@@ -100,11 +103,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 
 	usage := anthropicUsage(uncachedInput, outputTokens, reasoningTokens, cacheRead, cacheWrite)
 
-	keys := make([]int, 0, len(toolCalls))
-	for k := range toolCalls {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
+	keys := slices.Sorted(maps.Keys(toolCalls))
 
 	var pendingCalls []provider.ToolInvocation
 	for _, k := range keys {
@@ -128,7 +127,7 @@ func (c *anthropicClient) StreamComplete(ctx context.Context, systemPrompt strin
 		})
 	}
 
-	if err := checkTruncatedToolCalls(stopReason, pendingCalls); err != nil {
+	if err := checkTruncatedToolCalls(stopReason, pendingCalls, lastBlockIsToolUse); err != nil {
 		return provider.Response{}, err
 	}
 
