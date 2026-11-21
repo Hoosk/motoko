@@ -229,9 +229,9 @@ func TestDoCompactDoesNotSplitToolPairs(t *testing.T) {
 	s := session.New("ws", "/workspace")
 	m.SetCurrentSession(s)
 	h := toolPairHistory()
-	h[2].Content = strings.Repeat("R", 40000)
-	h[3].Content = strings.Repeat("R", 40000)
-	h[4].Content = strings.Repeat("R", 40000)
+	h[2].Content = strings.Repeat("R", 12000)
+	h[3].Content = strings.Repeat("R", 12000)
+	h[4].Content = strings.Repeat("R", 12000)
 	s.History = append(h, provider.AssistantText("done"))
 	cl := &captureCompactClient{}
 	if err := m.doCompact(context.Background(), compactTestConfig(), compactTestProviderFn(t, cl), 100000); err != nil {
