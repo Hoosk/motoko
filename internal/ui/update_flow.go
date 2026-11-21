@@ -130,7 +130,16 @@ func (m *Model) onAgentResult(msg AgentResultMsg, cmds []tea.Cmd) ([]tea.Cmd, bo
 		m.timeline.renderMessages()
 	}
 	cmds = append(cmds, m.updateContextStats())
-	if next, ok := m.nextPromptAfterAgent(); ok {
+	var next string
+	var ok bool
+	if msg.Err != nil {
+		// Cancelled or failed turns must not auto-continue the goal, but
+		// prompts the user explicitly queued still run.
+		next, ok = m.dequeuePrompt()
+	} else {
+		next, ok = m.nextPromptAfterAgent()
+	}
+	if ok {
 		cmds = append(cmds, func() tea.Msg {
 			return SubmitPromptMsg{Prompt: next}
 		})

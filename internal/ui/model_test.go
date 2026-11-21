@@ -465,6 +465,47 @@ func TestDialogRequestClosesOpenOverlay(t *testing.T) {
 	}
 }
 
+func submittedPrompts(cmds []tea.Cmd) []string {
+	var prompts []string
+	for _, c := range cmds {
+		if c == nil {
+			continue
+		}
+		if sp, ok := c().(SubmitPromptMsg); ok {
+			prompts = append(prompts, sp.Prompt)
+		}
+	}
+	return prompts
+}
+
+func TestAgentResultCancelledDoesNotAutoContinueGoal(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	if err := m.runtime.GetBrain().Write("goal", "# Goal\nDo the thing"); err != nil {
+		t.Fatal(err)
+	}
+	m.requestID = 1
+	m.promptQueue = []string{"/goal clear"}
+
+	cmds, _ := (&m).onAgentResult(AgentResultMsg{RequestID: 1, Err: context.Canceled}, nil)
+	prompts := submittedPrompts(cmds)
+	if len(prompts) != 1 || prompts[0] != "/goal clear" {
+		t.Fatalf("expected only the queued prompt to run, got %#v", prompts)
+	}
+}
+
+func TestAgentResultErrorDoesNotRetryGoal(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	if err := m.runtime.GetBrain().Write("goal", "# Goal\nDo the thing"); err != nil {
+		t.Fatal(err)
+	}
+	m.requestID = 1
+
+	cmds, _ := (&m).onAgentResult(AgentResultMsg{RequestID: 1, Err: errors.New("401")}, nil)
+	if prompts := submittedPrompts(cmds); len(prompts) != 0 {
+		t.Fatalf("expected no auto-continue after a provider error, got %#v", prompts)
+	}
+}
+
 func TestModelMouseDragSelectionCopiesText(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 80
