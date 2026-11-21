@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -272,8 +273,17 @@ func (m *Manager) startOne(parent context.Context, cfg ServerConfig) {
 	go m.runServer(serverCtx, entry)
 }
 
+// Reconnect pacing for runServer. A connection must stay up for
+// stableConnection before the backoff returns to initialBackoff, so a server
+// that exits right after the handshake backs off up to maxBackoff.
+const (
+	initialBackoff   = 1 * time.Second
+	maxBackoff       = 30 * time.Second
+	stableConnection = 30 * time.Second
+)
+
 func (m *Manager) runServer(ctx context.Context, s *managedServer) {
-	backoff := 1 * time.Second
+	backoff := initialBackoff
 	for {
 		select {
 		case <-ctx.Done():
@@ -330,8 +340,7 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 		s.err = nil
 		m.mu.Unlock()
 
-		// Reset backoff on successful connection
-		backoff = 1 * time.Second
+		connectedAt := time.Now()
 
 		caps := client.ServerCapabilities()
 		if err := m.refreshTools(ctx, s); err != nil && caps.Tools != nil {
@@ -372,13 +381,24 @@ func (m *Manager) runServer(ctx context.Context, s *managedServer) {
 			}
 			return
 		case <-client.doneCh:
+			_ = client.Close()
 			if cleanup != nil {
 				cleanup()
 			}
 			m.mu.Lock()
 			s.client = nil
+			s.err = errors.New("disconnected: server connection closed")
 			m.unregisterServerTools(s)
 			m.mu.Unlock()
+			if time.Since(connectedAt) >= stableConnection {
+				backoff = initialBackoff
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+				backoff = min(backoff*2, maxBackoff)
+			}
 		}
 	}
 }

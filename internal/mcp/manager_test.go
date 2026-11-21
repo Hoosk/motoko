@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -255,5 +257,72 @@ func TestRemoteToolHandlesServerError(t *testing.T) {
 	var rpcErr *RPCError
 	if !errors.As(err, &rpcErr) {
 		t.Fatalf("expected *RPCError, got %T", err)
+	}
+}
+
+const (
+	envExitAfterHandshake = "MOTOKO_TEST_EXIT_AFTER_HANDSHAKE"
+	envSpawnLog           = "MOTOKO_TEST_SPAWN_LOG"
+)
+
+// TestHelperExitAfterHandshake is not a real test: it is the stdio server
+// process used by TestRunServerBacksOffAfterDisconnect. It records its spawn,
+// answers server/discover, then exits.
+func TestHelperExitAfterHandshake(_ *testing.T) {
+	if os.Getenv(envExitAfterHandshake) != "1" {
+		return
+	}
+	if f, err := os.OpenFile(os.Getenv(envSpawnLog), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		_, _ = f.WriteString("spawn\n")
+		_ = f.Close()
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
+	if err == nil {
+		var env RPCEnvelope
+		if json.Unmarshal(line, &env) == nil && env.ID != nil {
+			writeRaw(os.Stdout, env, DiscoverResult{
+				ProtocolVersions: []string{ProtocolVersionModern},
+				ServerInfo:       Implementation{Name: "flaky", Version: "1"},
+			}, nil)
+		}
+	}
+	os.Exit(0)
+}
+
+func TestRunServerBacksOffAfterDisconnect(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawnLog := filepath.Join(t.TempDir(), "spawns")
+	m := NewManager(ManagerConfig{
+		Registry: ToolRegistrar{Register: func(ToolAdapter) {}, Unregister: func(string) bool { return true }},
+		Timeout:  2 * time.Second,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.Start(ctx, []ServerConfig{{
+		Name:      "flaky",
+		Transport: "stdio",
+		Command:   exe,
+		Args:      []string{"-test.run=^TestHelperExitAfterHandshake$"},
+		Env:       []string{envExitAfterHandshake + "=1", envSpawnLog + "=" + spawnLog},
+	}})
+	defer m.Stop()
+
+	time.Sleep(1500 * time.Millisecond)
+
+	data, _ := os.ReadFile(spawnLog)
+	if n := strings.Count(string(data), "spawn"); n < 1 || n > 2 {
+		t.Errorf("expected 1-2 spawns in 1.5s with backoff, got %d", n)
+	}
+	var sawReason bool
+	for _, st := range m.Servers() {
+		if st.Name == "flaky" && st.Err != nil && strings.Contains(st.Err.Error(), "disconnected") {
+			sawReason = true
+		}
+	}
+	if !sawReason {
+		t.Errorf("expected a disconnect reason in server status, got %+v", m.Servers())
 	}
 }
