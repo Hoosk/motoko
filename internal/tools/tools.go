@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/Hoosk/motoko/internal/brain"
 	"github.com/Hoosk/motoko/internal/config"
 	dialogpkg "github.com/Hoosk/motoko/internal/tools/dialog"
+	"github.com/Hoosk/motoko/internal/tracelog"
 )
 
 const maxToolOutputBytes = 12_000
@@ -156,7 +158,7 @@ func (r *Registry) Suggestions(ctx ToolContext, prefix string) []Spec {
 	return matches
 }
 
-func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
+func (r *Registry) Run(ctx context.Context, name, args string) (result Result, err error) {
 	r.mu.RLock()
 	tool, ok := r.tools[strings.ToLower(name)]
 	r.mu.RUnlock()
@@ -170,7 +172,15 @@ func (r *Registry) Run(ctx context.Context, name, args string) (Result, error) {
 		cleaned = strings.TrimSpace(cleaned[len(prefix):])
 	}
 
-	result, err := tool.Run(ctx, cleaned)
+	defer func() {
+		if rec := recover(); rec != nil {
+			tracelog.Logf("tool %s panicked: %v\n%s", name, rec, debug.Stack())
+			result = Result{}
+			err = fmt.Errorf("tool %s crashed unexpectedly (panic: %v)", name, rec)
+		}
+	}()
+
+	result, err = tool.Run(ctx, cleaned)
 	if err != nil {
 		return Result{}, err
 	}

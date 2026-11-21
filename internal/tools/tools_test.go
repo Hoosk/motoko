@@ -434,3 +434,29 @@ func TestTruncateToolOutput(t *testing.T) {
 		t.Fatalf("expected output truncated to ~1000 bytes, got %d", len(truncatedCustom))
 	}
 }
+
+type panicTool struct{}
+
+func (panicTool) Spec() Spec { return Spec{Name: "boom"} }
+
+func (panicTool) Run(context.Context, string) (Result, error) {
+	panic("kaboom")
+}
+
+func TestRegistryRunRecoversFromToolPanic(t *testing.T) {
+	r := &Registry{tools: map[string]Tool{}}
+	r.Register(panicTool{})
+	result, err := r.Run(context.Background(), "boom", "")
+	if err == nil {
+		t.Fatal("expected error from panicking tool")
+	}
+	if !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "kaboom") {
+		t.Fatalf("error should name the tool and panic value, got %v", err)
+	}
+	if strings.Contains(err.Error(), "goroutine") {
+		t.Fatalf("error must not contain a stack trace: %v", err)
+	}
+	if result.Output != "" {
+		t.Fatalf("expected empty result, got %#v", result)
+	}
+}
