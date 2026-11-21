@@ -253,3 +253,21 @@ func TestMessageCharsCountsToolCallArguments(t *testing.T) {
 		t.Fatalf("messageChars = %d, want >= 1000", got)
 	}
 }
+
+func TestDoCompactSummaryRequestEndsWithUserMessage(t *testing.T) {
+	withSessionBaseDirSessionman(t)
+	m := NewManager("ws")
+	s := session.New("ws", "/workspace")
+	m.SetCurrentSession(s)
+	s.History = []provider.ConversationItem{
+		provider.UserText(strings.Repeat("A", 90000)),
+		provider.AssistantText("respuesta"),
+	}
+	cl := &captureCompactClient{}
+	if err := m.doCompact(context.Background(), compactTestConfig(), compactTestProviderFn(t, cl), 100000); err != nil {
+		t.Fatal(err)
+	}
+	if len(cl.got) == 0 || cl.got[len(cl.got)-1].Role != provider.RoleUser {
+		t.Fatalf("summary request must end with a user message, got %+v", cl.got)
+	}
+}

@@ -11,6 +11,11 @@ import (
 	"github.com/Hoosk/motoko/internal/system"
 )
 
+const (
+	compactionSystemPrompt = "You are the memory compaction engine. Summarize the following older portion of the conversation. Extract key context, important decisions, and completed tasks. Keep a structured format (e.g., bulleted Markdown) and be very concise."
+	compactionInstruction  = "Summarize the conversation above now, following the instructions given."
+)
+
 // messageChars estimates the size of a history item, including tool call
 // names and arguments.
 func messageChars(msg provider.ConversationItem) int {
@@ -99,8 +104,10 @@ func (m *Manager) doCompact(ctx context.Context, cfg *config.AppConfig, provider
 	reqID := fmt.Sprintf("req-%d", time.Now().UnixNano())
 	ctx = provider.WithTelemetry(ctx, m.currentSession.ID, reqID)
 
+	prunedOldHistory = append(prunedOldHistory, provider.UserText(compactionInstruction))
+
 	resp, err := client.Complete(ctx,
-		"You are the memory compaction engine. Summarize the following older portion of the conversation. Extract key context, important decisions, and completed tasks. Keep a structured format (e.g., bulleted Markdown) and be very concise.",
+		compactionSystemPrompt,
 		prunedOldHistory,
 		provider.ToolSet{},
 	)
