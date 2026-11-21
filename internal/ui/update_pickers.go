@@ -53,8 +53,10 @@ func (m *Model) onDialogRequested(msg DialogRequestedMsg, cmds []tea.Cmd) ([]tea
 	m.approvalBar.Clear()
 	switch msg.Pending.Kind {
 	case tools.DialogQuestion:
+		m.closeOverlays()
 		m.questionPopup.Open(msg.Pending)
 	case tools.DialogFileChange, tools.DialogShellCommand:
+		m.closeOverlays()
 		m.appendApprovalContent(msg.Pending)
 		m.approvalBar.Open(msg.Pending)
 	default:
@@ -62,6 +64,21 @@ func (m *Model) onDialogRequested(msg DialogRequestedMsg, cmds []tea.Cmd) ([]tea
 		cmds = append(cmds, m.waitDialog())
 	}
 	return cmds, false
+}
+
+// closeOverlays dismisses every open modal overlay so that a dialog request
+// is the only thing drawn and the only thing receiving keys.
+func (m *Model) closeOverlays() {
+	m.providerForm.active = false
+	m.mcpForm.active = false
+	m.modelPicker.active = false
+	m.thinkingPicker.active = false
+	m.sessionPicker.active = false
+	m.sessionPicker.loading = false
+	m.modePopup.active = false
+	m.commandPalette.active = false
+	m.helpOverlay.active = false
+	m.settingsPopup.active = false
 }
 
 func (m *Model) onSessions(msg SessionsMsg, cmds []tea.Cmd) ([]tea.Cmd, bool) {

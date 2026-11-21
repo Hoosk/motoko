@@ -449,6 +449,22 @@ func TestOverlayStillCapturesKeys(t *testing.T) {
 	}
 }
 
+func TestDialogRequestClosesOpenOverlay(t *testing.T) {
+	m := NewModel(app.NewRuntime())
+	m.commandPalette.active = true
+	m.helpOverlay.active = true
+	pending := &tools.Pending{Request: tools.DialogRequest{Kind: tools.DialogShellCommand}}
+
+	updated, _ := m.Update(DialogRequestedMsg{Pending: pending})
+	m = updated.(Model)
+	if m.commandPalette.active || m.helpOverlay.active {
+		t.Fatal("expected overlays to close when a dialog is requested")
+	}
+	if !m.approvalBar.active {
+		t.Fatal("expected approval bar to open")
+	}
+}
+
 func TestModelMouseDragSelectionCopiesText(t *testing.T) {
 	m := NewModel(app.NewRuntime())
 	m.width = 80
