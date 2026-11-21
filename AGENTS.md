@@ -6,7 +6,7 @@ This file provides context and instructions for AI agents working on the Motoko 
 Motoko is a high-performance terminal AI assistant built in Go. It utilizes the **Tachikoma System** to provide deep codebase context through concurrent background workers, minimizing token consumption and maximizing precision.
 
 ## Setup & Build
-- **Language:** Go 1.24+
+- **Language:** Go 1.26+
 - **Build Command:** `go build -o motoko ./cmd/motoko`
 - **Dependencies:** Uses `charmbracelets/bubbletea` for TUI and `smacker/go-tree-sitter` for code analysis.
 

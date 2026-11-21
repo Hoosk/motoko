@@ -106,7 +106,7 @@ fi
 # 3. Fallback: Build from source
 if [[ "$FALLBACK_BUILD" == true ]]; then
     if ! command -v go &> /dev/null; then
-        echo -e "${RED}Error: Go is not installed. Source build requires Go 1.24+.${NC}"
+        echo -e "${RED}Error: Go is not installed. Source build requires Go 1.26+.${NC}"
         exit 1
     fi
 
