@@ -291,3 +291,22 @@ func TestBuildSnapshotExtractsRustSymbolsAndImports(t *testing.T) {
 		t.Fatalf("expected one rust import, got %#v", file.Imports)
 	}
 }
+
+func TestBuildSnapshotSkipsGoLocalVariables(t *testing.T) {
+	src := "package app\n\nvar Global = 1\n\nconst (\n\tLimit = 2\n)\n\nfunc Run() {\n\tvar local = 1\n\tconst inner = 2\n\t_ = local + inner\n}\n"
+	file := indexSingleFile(t, "app.go", src)
+	if got := symbolNames(file); got != "Global,Limit,Run" {
+		t.Fatalf("unexpected go symbols: %q", got)
+	}
+}
+
+func TestBuildSnapshotSkipsTypeScriptLocalVariables(t *testing.T) {
+	src := "const top = 1\nexport const exported = 2\nexport function outer() {\n  const a = 1\n  const b = 2\n  const c = 3\n}\nclass K {\n  m() {\n    const z = 1\n  }\n}\n"
+	file := indexSingleFile(t, "app.ts", src)
+	if got := symbolNames(file); got != "top,exported,outer,K,m" {
+		t.Fatalf("unexpected ts symbols: %q", got)
+	}
+	if got := strings.Join(file.Exports, ","); got != "exported,outer" {
+		t.Fatalf("unexpected ts exports: %q", got)
+	}
+}

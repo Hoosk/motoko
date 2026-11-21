@@ -64,10 +64,27 @@ func (e *WebExtractor) ClassifySymbol(node *sitter.Node, content []byte) (symtyp
 	case "type_alias_declaration":
 		return SymbolFromField(node, content, "name", "type")
 	case "variable_declarator":
+		if !e.isModuleLevelDeclarator(node) {
+			return symtypes.Symbol{}, false
+		}
 		return SymbolFromField(node, content, "name", "var")
 	default:
 		return symtypes.Symbol{}, false
 	}
+}
+
+// isModuleLevelDeclarator reports whether a declarator belongs to a
+// declaration at program level or directly under an export statement.
+func (e *WebExtractor) isModuleLevelDeclarator(node *sitter.Node) bool {
+	decl := node.Parent()
+	if decl == nil {
+		return false
+	}
+	parent := decl.Parent()
+	if parent == nil {
+		return false
+	}
+	return parent.Type() == "program" || e.IsExportNode(parent)
 }
 
 func (e *WebExtractor) IsExportNode(node *sitter.Node) bool {

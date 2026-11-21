@@ -51,12 +51,32 @@ func (e *GoExtractor) ClassifySymbol(node *sitter.Node, content []byte) (symtype
 	case "type_spec":
 		return SymbolFromField(node, content, "name", "type")
 	case "var_spec":
+		if !isGoPackageLevelSpec(node) {
+			return symtypes.Symbol{}, false
+		}
 		return SymbolFromFirstNamedChild(node, content, "var")
 	case "const_spec":
+		if !isGoPackageLevelSpec(node) {
+			return symtypes.Symbol{}, false
+		}
 		return SymbolFromFirstNamedChild(node, content, "const")
 	default:
 		return symtypes.Symbol{}, false
 	}
+}
+
+// isGoPackageLevelSpec reports whether a var/const spec belongs to a
+// declaration placed directly at source-file level (not inside a function).
+func isGoPackageLevelSpec(node *sitter.Node) bool {
+	decl := node.Parent()
+	if decl != nil && decl.Type() == "var_spec_list" {
+		decl = decl.Parent()
+	}
+	if decl == nil {
+		return false
+	}
+	parent := decl.Parent()
+	return parent != nil && parent.Type() == "source_file"
 }
 
 func (e *GoExtractor) IsExportNode(node *sitter.Node) bool {
